@@ -8,7 +8,7 @@ import { BASE_URL } from "../api/client";
 
 interface ApiDef {
   key: string;
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PUT";
   path: string;
   title: string;
   description: string;
@@ -46,17 +46,35 @@ const apiList: ApiDef[] = [
   },
   {
     key: "3",
+    method: "PUT",
+    path: "/api/v1/app/task/status",
+    title: "更新任务状态",
+    description: "更新任务状态及附加信息 (queued/running/error/completed)",
+    headers: "x-timestamp (13位毫秒时间戳), x-sign (MD5签名)",
+    params: [
+      { name: "task_id", type: "string", desc: "任务ID", location: "body" },
+      { name: "status", type: "string", desc: "状态: queued/running/error/completed", location: "body" },
+      { name: "status_info", type: "object", desc: "状态附加信息", location: "body" },
+    ],
+    bodyExample: JSON.stringify(
+      { task_id: "T1709001234", status: "running", status_info: { current_step: "2/5 处理数据", progress: 40 } },
+      null,
+      2
+    ),
+  },
+  {
+    key: "4",
     method: "GET",
     path: "/api/v1/app/task/status",
     title: "任务状态查询",
-    description: "根据 task_id 查询任务当前状态",
+    description: "根据 task_id 查询任务当前状态及详情",
     headers: "x-timestamp (13位毫秒时间戳), x-sign (MD5签名)",
     params: [{ name: "task_id", type: "string", desc: "任务ID (如 T1709001234)", location: "query" }],
   },
 ];
 
 function MethodBadge({ method }: { method: string }) {
-  const color = method === "GET" ? "#52c41a" : "#1890ff";
+  const color = method === "GET" ? "#52c41a" : method === "PUT" ? "#fa8c16" : "#1890ff";
   return (
     <span
       style={{
@@ -114,7 +132,11 @@ function ApiPanel({ api }: { api: ApiDef }) {
           }
         }
         headers["Content-Type"] = "application/json";
-        res = await axios.post(url, body, { headers });
+        if (api.method === "PUT") {
+          res = await axios.put(url, body, { headers });
+        } else {
+          res = await axios.post(url, body, { headers });
+        }
       }
 
       setStatusCode(res.status);
