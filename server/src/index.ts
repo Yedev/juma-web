@@ -1,3 +1,4 @@
+import path from "path";
 import express from "express";
 import cors from "cors";
 import authRoutes from "./routes/auth";
@@ -17,6 +18,12 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/v1/app", appRoutes);
+
+const staticDir = path.resolve(__dirname, "../public");
+app.use(express.static(staticDir));
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(staticDir, "index.html"));
+});
 
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
