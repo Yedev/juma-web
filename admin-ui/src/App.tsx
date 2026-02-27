@@ -17,7 +17,40 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
-    <ConfigProvider locale={zhCN}>
+    <ConfigProvider
+      locale={zhCN}
+      theme={{
+        token: {
+          colorPrimary: "#333",
+          borderRadius: 4,
+          colorBgContainer: "#fff",
+          colorBorder: "#e8e8e8",
+          colorText: "#333",
+          colorTextSecondary: "#999",
+          fontSize: 14,
+        },
+        components: {
+          Menu: {
+            itemBg: "transparent",
+            itemSelectedBg: "#f0f0f0",
+            itemSelectedColor: "#333",
+            itemColor: "#666",
+            itemHoverColor: "#333",
+            itemHoverBg: "#f5f5f5",
+          },
+          Table: {
+            headerBg: "#fafafa",
+            headerColor: "#666",
+            rowHoverBg: "#f9f9f9",
+            borderColor: "#f0f0f0",
+          },
+          Button: {
+            defaultBorderColor: "#e0e0e0",
+            primaryColor: "#fff",
+          },
+        },
+      }}
+    >
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />

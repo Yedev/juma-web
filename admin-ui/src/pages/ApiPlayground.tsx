@@ -1,27 +1,16 @@
 import { useState } from "react";
-import {
-  Typography,
-  Collapse,
-  Tag,
-  Button,
-  Input,
-  Form,
-  Space,
-  Card,
-  message,
-} from "antd";
-import { SendOutlined } from "@ant-design/icons";
+import { Input, Form, message } from "antd";
+import { SendOutlined, RightOutlined, DownOutlined } from "@ant-design/icons";
 import Editor from "@monaco-editor/react";
 import axios from "axios";
 import { generateSign } from "../utils/sign";
 import { BASE_URL } from "../api/client";
 
-const { Title, Text, Paragraph } = Typography;
-
 interface ApiDef {
   key: string;
   method: "GET" | "POST";
   path: string;
+  title: string;
   description: string;
   headers: string;
   params: { name: string; type: string; desc: string; location: "query" | "body" }[];
@@ -33,7 +22,8 @@ const apiList: ApiDef[] = [
     key: "1",
     method: "GET",
     path: "/api/v1/app/config",
-    description: "获取应用配置 — 返回数据库中存储的全局 JSON 配置",
+    title: "获取应用配置",
+    description: "返回数据库中存储的全局 JSON 配置",
     headers: "x-timestamp (13位毫秒时间戳), x-sign (MD5签名)",
     params: [],
   },
@@ -41,7 +31,8 @@ const apiList: ApiDef[] = [
     key: "2",
     method: "POST",
     path: "/api/v1/app/task/execute",
-    description: "任务执行(触发器) — 提交任务到后端，返回新任务ID",
+    title: "任务执行(触发器)",
+    description: "提交任务到后端，返回新任务ID",
     headers: "x-timestamp (13位毫秒时间戳), x-sign (MD5签名)",
     params: [
       { name: "task_name", type: "string", desc: "任务名称", location: "body" },
@@ -57,11 +48,30 @@ const apiList: ApiDef[] = [
     key: "3",
     method: "GET",
     path: "/api/v1/app/task/status",
-    description: "任务状态查询 — 根据 task_id 查询任务当前状态",
+    title: "任务状态查询",
+    description: "根据 task_id 查询任务当前状态",
     headers: "x-timestamp (13位毫秒时间戳), x-sign (MD5签名)",
     params: [{ name: "task_id", type: "string", desc: "任务ID (如 T1709001234)", location: "query" }],
   },
 ];
+
+function MethodBadge({ method }: { method: string }) {
+  const color = method === "GET" ? "#52c41a" : "#1890ff";
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        fontSize: 11,
+        fontWeight: 600,
+        fontFamily: "monospace",
+        color,
+        minWidth: 36,
+      }}
+    >
+      {method}
+    </span>
+  );
+}
 
 function ApiPanel({ api }: { api: ApiDef }) {
   const [response, setResponse] = useState<string>("");
@@ -120,111 +130,184 @@ function ApiPanel({ api }: { api: ApiDef }) {
     }
   };
 
-  const methodColor = api.method === "GET" ? "green" : "blue";
-
   return (
-    <div>
-      <Paragraph>
-        <Text strong>请求方式：</Text>
-        <Tag color={methodColor}>{api.method}</Tag>
-        <Text code>{api.path}</Text>
-      </Paragraph>
-      <Paragraph>
-        <Text strong>Header 要求：</Text> {api.headers}
-      </Paragraph>
-      <Paragraph type="secondary">
-        签名将在发送请求时自动计算并注入 (x-timestamp + x-sign)
-      </Paragraph>
+    <div style={{ padding: "16px 0 8px" }}>
+      {/* Meta */}
+      <div style={{ display: "flex", gap: 16, fontSize: 13, color: "#999", marginBottom: 12 }}>
+        <span>{api.description}</span>
+      </div>
+      <div style={{ fontSize: 12, color: "#bbb", marginBottom: 16 }}>
+        Header: {api.headers}
+        <span style={{ marginLeft: 8, color: "#ccc" }}>(签名自动注入)</span>
+      </div>
 
-      {api.params.length > 0 && (
-        <Card size="small" title="请求参数" style={{ marginBottom: 12 }}>
-          {api.params.some((p) => p.location === "query") && (
-            <Form form={form} layout="inline" style={{ marginBottom: 8 }}>
-              {api.params
-                .filter((p) => p.location === "query")
-                .map((p) => (
-                  <Form.Item key={p.name} label={p.name} name={p.name}>
-                    <Input placeholder={p.desc} style={{ width: 240 }} />
-                  </Form.Item>
-                ))}
-            </Form>
-          )}
-          {api.params.some((p) => p.location === "body") && (
-            <div style={{ border: "1px solid #d9d9d9", borderRadius: 6, overflow: "hidden" }}>
-              <Editor
-                height="120px"
-                defaultLanguage="json"
-                value={bodyValue}
-                onChange={(v) => setBodyValue(v || "")}
-                options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false, lineNumbers: "off" }}
-              />
-            </div>
-          )}
-        </Card>
+      {/* Query params */}
+      {api.params.some((p) => p.location === "query") && (
+        <Form form={form} layout="inline" style={{ marginBottom: 12 }}>
+          {api.params
+            .filter((p) => p.location === "query")
+            .map((p) => (
+              <Form.Item key={p.name} label={<span style={{ fontSize: 12, color: "#666" }}>{p.name}</span>} name={p.name}>
+                <Input
+                  placeholder={p.desc}
+                  style={{ width: 220, height: 32, fontSize: 13, borderColor: "#e0e0e0", borderRadius: 4 }}
+                />
+              </Form.Item>
+            ))}
+        </Form>
       )}
 
-      <Space style={{ marginBottom: 12 }}>
-        <Button type="primary" icon={<SendOutlined />} onClick={handleSend} loading={loading}>
-          发送请求
-        </Button>
-      </Space>
-
-      {(response || statusCode !== null) && (
-        <Card
-          size="small"
-          title={
-            <Space>
-              <Text strong>响应结果</Text>
-              {statusCode !== null && (
-                <Tag color={statusCode >= 200 && statusCode < 300 ? "success" : "error"}>
-                  HTTP {statusCode}
-                </Tag>
-              )}
-            </Space>
-          }
+      {/* Body editor */}
+      {api.params.some((p) => p.location === "body") && (
+        <div
+          style={{
+            border: "1px solid #e8e8e8",
+            borderRadius: 4,
+            overflow: "hidden",
+            marginBottom: 12,
+          }}
         >
+          <Editor
+            height="100px"
+            defaultLanguage="json"
+            value={bodyValue}
+            onChange={(v) => setBodyValue(v || "")}
+            options={{
+              minimap: { enabled: false },
+              fontSize: 12,
+              fontFamily: "'SF Mono', monospace",
+              scrollBeyondLastLine: false,
+              lineNumbers: "off",
+              renderLineHighlight: "none",
+              overviewRulerBorder: false,
+              scrollbar: { verticalScrollbarSize: 4, horizontalScrollbarSize: 4 },
+              padding: { top: 8, bottom: 8 },
+            }}
+          />
+        </div>
+      )}
+
+      {/* Send button */}
+      <div style={{ marginBottom: 12 }}>
+        <span
+          onClick={loading ? undefined : handleSend}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13,
+            color: loading ? "#ccc" : "#333",
+            cursor: loading ? "default" : "pointer",
+            fontWeight: 500,
+            padding: "6px 14px",
+            border: "1px solid #e0e0e0",
+            borderRadius: 4,
+            background: "#fafafa",
+            transition: "all 0.15s",
+          }}
+          onMouseEnter={(e) => { if (!loading) { e.currentTarget.style.borderColor = "#bbb"; e.currentTarget.style.background = "#f0f0f0"; } }}
+          onMouseLeave={(e) => { if (!loading) { e.currentTarget.style.borderColor = "#e0e0e0"; e.currentTarget.style.background = "#fafafa"; } }}
+        >
+          <SendOutlined style={{ fontSize: 11 }} />
+          {loading ? "发送中..." : "发送请求"}
+        </span>
+      </div>
+
+      {/* Response */}
+      {(response || statusCode !== null) && (
+        <div>
+          <div style={{ fontSize: 12, color: "#999", marginBottom: 6, display: "flex", alignItems: "center", gap: 8 }}>
+            响应结果
+            {statusCode !== null && (
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: statusCode >= 200 && statusCode < 300 ? "#52c41a" : "#ff4d4f",
+                }}
+              >
+                HTTP {statusCode}
+              </span>
+            )}
+          </div>
           <pre
             style={{
-              background: "#1e1e1e",
-              color: "#d4d4d4",
-              padding: 12,
+              background: "#fafafa",
+              border: "1px solid #e8e8e8",
               borderRadius: 4,
-              maxHeight: 300,
+              color: "#333",
+              padding: 14,
+              maxHeight: 280,
               overflow: "auto",
-              fontSize: 13,
+              fontSize: 12,
+              fontFamily: "'SF Mono', 'Fira Code', monospace",
               margin: 0,
+              lineHeight: 1.6,
             }}
           >
             {response}
           </pre>
-        </Card>
+        </div>
       )}
     </div>
   );
 }
 
 export default function ApiPlayground() {
-  const items = apiList.map((api) => ({
-    key: api.key,
-    label: (
-      <Space>
-        <Tag color={api.method === "GET" ? "green" : "blue"}>{api.method}</Tag>
-        <Text strong>{api.path}</Text>
-        <Text type="secondary"> — {api.description.split("—")[0]}</Text>
-      </Space>
-    ),
-    children: <ApiPanel api={api} />,
-  }));
+  const [openKey, setOpenKey] = useState<string | null>(null);
 
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 16 }}>
-        API 接口说明与调试
-      </Title>
-      <Paragraph type="secondary">
-        以下为提供给移动端的 3 个接口。点击展开可查看文档并在线测试，签名 (x-sign) 会自动计算注入。
-      </Paragraph>
-      <Collapse accordion items={items} />
+      <div style={{ fontSize: 13, color: "#999", marginBottom: 20 }}>
+        以下为提供给移动端的 3 个接口，点击展开可查看文档并在线测试。
+      </div>
+
+      <div>
+        {apiList.map((api) => {
+          const isOpen = openKey === api.key;
+          return (
+            <div
+              key={api.key}
+              style={{
+                borderBottom: "1px solid #f0f0f0",
+              }}
+            >
+              {/* Header */}
+              <div
+                onClick={() => setOpenKey(isOpen ? null : api.key)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  padding: "14px 0",
+                  cursor: "pointer",
+                  userSelect: "none",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#fafafa")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <span style={{ fontSize: 10, color: "#ccc", transition: "transform 0.2s" }}>
+                  {isOpen ? <DownOutlined /> : <RightOutlined />}
+                </span>
+                <MethodBadge method={api.method} />
+                <span style={{ fontSize: 13, color: "#333", fontFamily: "monospace" }}>
+                  {api.path}
+                </span>
+                <span style={{ fontSize: 12, color: "#bbb", marginLeft: 4 }}>
+                  — {api.title}
+                </span>
+              </div>
+
+              {/* Content */}
+              {isOpen && (
+                <div style={{ paddingLeft: 32, paddingBottom: 16 }}>
+                  <ApiPanel api={api} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

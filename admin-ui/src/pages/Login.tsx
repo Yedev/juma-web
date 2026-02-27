@@ -1,10 +1,7 @@
 import { useState } from "react";
-import { Form, Input, Button, Card, message, Typography } from "antd";
-import { UserOutlined, LockOutlined } from "@ant-design/icons";
+import { Form, Input, Button, message } from "antd";
 import { useNavigate } from "react-router-dom";
 import { adminClient } from "../api/client";
-
-const { Title } = Typography;
 
 export default function Login() {
   const [loading, setLoading] = useState(false);
@@ -35,30 +32,68 @@ export default function Login() {
         justifyContent: "center",
         alignItems: "center",
         minHeight: "100vh",
-        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+        background: "#f5f5f5",
       }}
     >
-      <Card style={{ width: 400, borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.15)" }}>
-        <div style={{ textAlign: "center", marginBottom: 24 }}>
-          <Title level={3} style={{ marginBottom: 4 }}>
-            JUMA 后台管理
-          </Title>
-          <Typography.Text type="secondary">应用后台管理系统 V1.0</Typography.Text>
+      <div
+        style={{
+          width: 360,
+          background: "#fff",
+          border: "1px solid #e8e8e8",
+          borderRadius: 4,
+          padding: "40px 32px 32px",
+        }}
+      >
+        <div style={{ marginBottom: 32 }}>
+          <div style={{ fontSize: 20, fontWeight: 600, color: "#333", marginBottom: 6 }}>
+            JUMA
+          </div>
+          <div style={{ fontSize: 13, color: "#999" }}>
+            应用后台管理系统
+          </div>
         </div>
-        <Form name="login" onFinish={onFinish} size="large">
+
+        <Form name="login" onFinish={onFinish}>
           <Form.Item name="username" rules={[{ required: true, message: "请输入账号" }]}>
-            <Input prefix={<UserOutlined />} placeholder="账号" />
+            <Input
+              placeholder="账号"
+              style={{
+                height: 40,
+                borderRadius: 4,
+                border: "1px solid #e0e0e0",
+              }}
+            />
           </Form.Item>
           <Form.Item name="password" rules={[{ required: true, message: "请输入密码" }]}>
-            <Input.Password prefix={<LockOutlined />} placeholder="密码" />
+            <Input.Password
+              placeholder="密码"
+              style={{
+                height: 40,
+                borderRadius: 4,
+                border: "1px solid #e0e0e0",
+              }}
+            />
           </Form.Item>
-          <Form.Item>
-            <Button type="primary" htmlType="submit" block loading={loading}>
-              登 录
+          <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
+            <Button
+              type="primary"
+              htmlType="submit"
+              block
+              loading={loading}
+              style={{
+                height: 40,
+                borderRadius: 4,
+                fontSize: 14,
+                fontWeight: 500,
+                background: "#333",
+                borderColor: "#333",
+              }}
+            >
+              登录
             </Button>
           </Form.Item>
         </Form>
-      </Card>
+      </div>
     </div>
   );
 }

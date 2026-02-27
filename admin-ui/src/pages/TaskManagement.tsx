@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { Table, Button, Tag, Typography, Space } from "antd";
+import { Table, Tag } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { adminClient } from "../api/client";
-
-const { Title } = Typography;
 
 interface TaskRecord {
   id: number;
@@ -15,18 +13,11 @@ interface TaskRecord {
   updatedAt: string;
 }
 
-const statusColorMap: Record<string, string> = {
-  pending: "default",
-  running: "processing",
-  success: "success",
-  failed: "error",
-};
-
-const statusTextMap: Record<string, string> = {
-  pending: "等待中",
-  running: "执行中",
-  success: "成功",
-  failed: "失败",
+const statusStyle: Record<string, { bg: string; color: string; text: string }> = {
+  pending: { bg: "#f5f5f5", color: "#999", text: "等待中" },
+  running: { bg: "#e6f7ff", color: "#1890ff", text: "执行中" },
+  success: { bg: "#f0fff0", color: "#52c41a", text: "成功" },
+  failed: { bg: "#fff1f0", color: "#ff4d4f", text: "失败" },
 };
 
 export default function TaskManagement() {
@@ -57,7 +48,15 @@ export default function TaskManagement() {
   }, [page, fetchTasks]);
 
   const columns = [
-    { title: "任务ID", dataIndex: "taskId", key: "taskId", width: 180 },
+    {
+      title: "任务ID",
+      dataIndex: "taskId",
+      key: "taskId",
+      width: 190,
+      render: (text: string) => (
+        <span style={{ fontFamily: "monospace", fontSize: 12, color: "#666" }}>{text}</span>
+      ),
+    },
     { title: "任务名称", dataIndex: "taskName", key: "taskName" },
     {
       title: "任务参数",
@@ -66,9 +65,13 @@ export default function TaskManagement() {
       ellipsis: true,
       render: (text: string) => {
         try {
-          return JSON.stringify(JSON.parse(text));
+          return (
+            <span style={{ color: "#999", fontSize: 12 }}>
+              {JSON.stringify(JSON.parse(text))}
+            </span>
+          );
         } catch {
-          return text;
+          return <span style={{ color: "#999", fontSize: 12 }}>{text}</span>;
         }
       },
     },
@@ -76,50 +79,92 @@ export default function TaskManagement() {
       title: "执行状态",
       dataIndex: "status",
       key: "status",
-      width: 100,
-      render: (status: string) => (
-        <Tag color={statusColorMap[status] || "default"}>
-          {statusTextMap[status] || status}
-        </Tag>
-      ),
+      width: 90,
+      render: (status: string) => {
+        const s = statusStyle[status] || statusStyle.pending;
+        return (
+          <Tag
+            style={{
+              background: s.bg,
+              color: s.color,
+              border: "none",
+              fontSize: 12,
+              borderRadius: 3,
+              padding: "1px 8px",
+            }}
+          >
+            {s.text}
+          </Tag>
+        );
+      },
     },
     {
       title: "创建时间",
       dataIndex: "createdAt",
       key: "createdAt",
-      width: 180,
-      render: (t: string) => new Date(t).toLocaleString("zh-CN"),
+      width: 170,
+      render: (t: string) => (
+        <span style={{ color: "#999", fontSize: 12 }}>
+          {new Date(t).toLocaleString("zh-CN")}
+        </span>
+      ),
     },
     {
       title: "更新时间",
       dataIndex: "updatedAt",
       key: "updatedAt",
-      width: 180,
-      render: (t: string) => new Date(t).toLocaleString("zh-CN"),
+      width: 170,
+      render: (t: string) => (
+        <span style={{ color: "#999", fontSize: 12 }}>
+          {new Date(t).toLocaleString("zh-CN")}
+        </span>
+      ),
     },
   ];
 
   return (
     <div>
-      <Space style={{ marginBottom: 16, display: "flex", justifyContent: "space-between" }}>
-        <Title level={4} style={{ margin: 0 }}>
-          任务管理
-        </Title>
-        <Button icon={<ReloadOutlined />} onClick={() => fetchTasks(page)}>
+      {/* Toolbar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          marginBottom: 16,
+        }}
+      >
+        <span
+          onClick={() => fetchTasks(page)}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13,
+            color: "#999",
+            cursor: "pointer",
+            padding: "4px 0",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = "#333")}
+          onMouseLeave={(e) => (e.currentTarget.style.color = "#999")}
+        >
+          <ReloadOutlined style={{ fontSize: 12 }} />
           刷新列表
-        </Button>
-      </Space>
+        </span>
+      </div>
+
       <Table
         columns={columns}
         dataSource={tasks}
         rowKey="id"
         loading={loading}
+        size="middle"
         pagination={{
           current: page,
           total,
           pageSize: 20,
           onChange: (p) => setPage(p),
-          showTotal: (t) => `共 ${t} 条`,
+          showTotal: (t) => <span style={{ fontSize: 12, color: "#999" }}>共 {t} 条</span>,
+          size: "small",
         }}
       />
     </div>

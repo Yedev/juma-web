@@ -1,10 +1,8 @@
 import { useState, useEffect } from "react";
-import { Button, Space, Typography, message, Spin } from "antd";
+import { message, Spin } from "antd";
 import { SaveOutlined, FormatPainterOutlined } from "@ant-design/icons";
 import Editor from "@monaco-editor/react";
 import { adminClient } from "../api/client";
-
-const { Title } = Typography;
 
 export default function ConfigManagement() {
   const [configValue, setConfigValue] = useState<string>("{}");
@@ -62,34 +60,84 @@ export default function ConfigManagement() {
 
   return (
     <div>
-      <Space style={{ marginBottom: 16, display: "flex", justifyContent: "space-between" }}>
-        <Title level={4} style={{ margin: 0 }}>
-          配置管理
-        </Title>
-        <Space>
-          <Button icon={<FormatPainterOutlined />} onClick={handleFormat}>
-            格式化
-          </Button>
-          <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving}>
-            保存并发布
-          </Button>
-        </Space>
-      </Space>
+      {/* Toolbar */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-end",
+          gap: 16,
+          marginBottom: 16,
+        }}
+      >
+        <span
+          onClick={handleFormat}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13,
+            color: "#999",
+            cursor: "pointer",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = "#333")}
+          onMouseLeave={(e) => (e.currentTarget.style.color = "#999")}
+        >
+          <FormatPainterOutlined style={{ fontSize: 12 }} />
+          格式化
+        </span>
+        <span
+          onClick={saving ? undefined : handleSave}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13,
+            color: saving ? "#ccc" : "#333",
+            cursor: saving ? "default" : "pointer",
+            fontWeight: 500,
+          }}
+          onMouseEnter={(e) => { if (!saving) e.currentTarget.style.color = "#000"; }}
+          onMouseLeave={(e) => { if (!saving) e.currentTarget.style.color = "#333"; }}
+        >
+          <SaveOutlined style={{ fontSize: 12 }} />
+          {saving ? "保存中..." : "保存并发布"}
+        </span>
+      </div>
+
       {loading ? (
-        <Spin size="large" />
+        <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
+          <Spin />
+        </div>
       ) : (
-        <div style={{ border: "1px solid #d9d9d9", borderRadius: 6 }}>
+        <div
+          style={{
+            border: "1px solid #e8e8e8",
+            borderRadius: 4,
+            overflow: "hidden",
+          }}
+        >
           <Editor
-            height="65vh"
+            height="calc(100vh - 220px)"
             defaultLanguage="json"
             value={configValue}
             onChange={(v) => setConfigValue(v || "")}
             options={{
               minimap: { enabled: false },
-              fontSize: 14,
+              fontSize: 13,
+              fontFamily: "'SF Mono', 'Fira Code', 'Menlo', monospace",
               formatOnPaste: true,
               tabSize: 2,
               scrollBeyondLastLine: false,
+              lineNumbers: "on",
+              renderLineHighlight: "none",
+              overviewRulerBorder: false,
+              hideCursorInOverviewRuler: true,
+              scrollbar: {
+                verticalScrollbarSize: 6,
+                horizontalScrollbarSize: 6,
+              },
+              padding: { top: 12, bottom: 12 },
             }}
           />
         </div>
