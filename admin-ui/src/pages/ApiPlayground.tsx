@@ -23,9 +23,9 @@ const apiList: ApiDef[] = [
     method: "GET",
     path: "/api/v1/app/config",
     title: "获取应用配置",
-    description: "返回数据库中存储的全局 JSON 配置",
+    description: "按 key 返回对应的 JSON 配置，不传 key 默认返回 global_json",
     headers: "x-timestamp (13位毫秒时间戳), x-sign (MD5签名)",
-    params: [],
+    params: [{ name: "key", type: "string", desc: "配置键名 (如 global_json)", location: "query" }],
   },
   {
     key: "2",

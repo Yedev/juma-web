@@ -7,13 +7,20 @@ const prisma = new PrismaClient();
 
 router.use(signMiddleware);
 
-router.get("/config", async (_req: Request, res: Response): Promise<void> => {
+router.get("/config", async (req: Request, res: Response): Promise<void> => {
   try {
+    const key = (req.query.key as string) || "global_json";
+
     const config = await prisma.appConfig.findUnique({
-      where: { configKey: "global_json" },
+      where: { configKey: key },
     });
 
-    const data = config ? JSON.parse(config.configValue) : {};
+    if (!config) {
+      res.status(404).json({ code: 404, message: `配置 '${key}' 不存在` });
+      return;
+    }
+
+    const data = JSON.parse(config.configValue);
 
     res.json({
       code: 200,

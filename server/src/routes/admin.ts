@@ -7,6 +7,8 @@ const prisma = new PrismaClient();
 
 router.use(authMiddleware);
 
+// ── Tasks ───────────────────────────────────────────────
+
 router.get("/tasks", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const page = parseInt(req.query.page as string) || 1;
@@ -25,12 +27,7 @@ router.get("/tasks", async (req: AuthRequest, res: Response): Promise<void> => {
     res.json({
       code: 200,
       message: "success",
-      data: {
-        list: tasks,
-        total,
-        page,
-        pageSize,
-      },
+      data: { list: tasks, total, page, pageSize },
     });
   } catch (error) {
     console.error("Get tasks error:", error);
@@ -38,18 +35,48 @@ router.get("/tasks", async (req: AuthRequest, res: Response): Promise<void> => {
   }
 });
 
-router.get("/config", async (_req: AuthRequest, res: Response): Promise<void> => {
+// ── Configs (multi-key) ─────────────────────────────────
+
+router.get("/configs", async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const config = await prisma.appConfig.findUnique({
-      where: { configKey: "global_json" },
+    const configs = await prisma.appConfig.findMany({
+      orderBy: { updatedAt: "desc" },
     });
 
     res.json({
       code: 200,
       message: "success",
+      data: configs.map((c) => ({
+        id: c.id,
+        configKey: c.configKey,
+        updatedAt: c.updatedAt,
+      })),
+    });
+  } catch (error) {
+    console.error("List configs error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.get("/config/:key", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const key = req.params.key as string;
+    const config = await prisma.appConfig.findUnique({
+      where: { configKey: key },
+    });
+
+    if (!config) {
+      res.status(404).json({ code: 404, message: "配置不存在" });
+      return;
+    }
+
+    res.json({
+      code: 200,
+      message: "success",
       data: {
-        configValue: config?.configValue || "{}",
-        updatedAt: config?.updatedAt,
+        configKey: config.configKey,
+        configValue: config.configValue,
+        updatedAt: config.updatedAt,
       },
     });
   } catch (error) {
@@ -58,8 +85,9 @@ router.get("/config", async (_req: AuthRequest, res: Response): Promise<void> =>
   }
 });
 
-router.put("/config", async (req: AuthRequest, res: Response): Promise<void> => {
+router.put("/config/:key", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const key = req.params.key as string;
     const { configValue } = req.body;
 
     if (typeof configValue !== "string") {
@@ -75,21 +103,44 @@ router.put("/config", async (req: AuthRequest, res: Response): Promise<void> => 
     }
 
     const updated = await prisma.appConfig.upsert({
-      where: { configKey: "global_json" },
+      where: { configKey: key },
       update: { configValue },
-      create: { configKey: "global_json", configValue },
+      create: { configKey: key, configValue },
     });
 
     res.json({
       code: 200,
       message: "配置已保存并发布",
       data: {
+        configKey: updated.configKey,
         configValue: updated.configValue,
         updatedAt: updated.updatedAt,
       },
     });
   } catch (error) {
     console.error("Update config error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/config/:key", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const key = req.params.key as string;
+
+    const existing = await prisma.appConfig.findUnique({
+      where: { configKey: key },
+    });
+
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "配置不存在" });
+      return;
+    }
+
+    await prisma.appConfig.delete({ where: { configKey: key } });
+
+    res.json({ code: 200, message: "配置已删除" });
+  } catch (error) {
+    console.error("Delete config error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
