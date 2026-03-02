@@ -3,7 +3,7 @@
 /**
  * Mac Mini 执行客户端
  * - 适用于无公网 IP 机器：客户端主动向服务器注册、心跳、拉取任务
- * - 执行 remote_mac 类型任务并回传运行状态/日志/结果
+ * - 上报可提供的 services，执行 remote_mac 任务并回传运行状态/日志/结果
  */
 
 const os = require("os");
@@ -25,10 +25,24 @@ const DEFAULT_POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || "4000"
 const DEFAULT_HEARTBEAT_INTERVAL_MS = parseInt(process.env.HEARTBEAT_INTERVAL_MS || "10000", 10);
 const LOG_FLUSH_INTERVAL_MS = parseInt(process.env.LOG_FLUSH_INTERVAL_MS || "2000", 10);
 const LOG_FLUSH_SIZE = parseInt(process.env.LOG_FLUSH_SIZE || "2048", 10);
+const DEMO_SERVICE_DELAY_MS = parseInt(process.env.DEMO_SERVICE_DELAY_MS || "3000", 10);
 
 let runningTask = null;
 let pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
 let heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
+
+const SERVICE_REGISTRY = {
+  "demo.mock3s": async (payload) => {
+    await sleep(DEMO_SERVICE_DELAY_MS);
+    return {
+      ok: true,
+      service: "demo.mock3s",
+      handled_at: nowIso(),
+      delay_ms: DEMO_SERVICE_DELAY_MS,
+      received: payload || {},
+    };
+  },
+};
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -49,6 +63,14 @@ function buildCapabilities() {
     uptime_sec: Math.floor(os.uptime()),
     work_dir: WORK_DIR,
   };
+}
+
+function getServiceDefinitions() {
+  return Object.keys(SERVICE_REGISTRY).map((name) => ({
+    name,
+    version: "1.0.0",
+    description: name === "demo.mock3s" ? "示例服务：模拟处理3秒并返回JSON" : "",
+  }));
 }
 
 async function apiPost(path, payload, timeoutMs = REQUEST_TIMEOUT_MS) {
@@ -97,6 +119,7 @@ async function register() {
     app_version: APP_VERSION,
     tags: CLIENT_TAGS,
     capabilities: buildCapabilities(),
+    services: getServiceDefinitions(),
   });
   const remotePoll = Number(data?.data?.poll_interval_ms);
   const remoteHeartbeat = Number(data?.data?.heartbeat_interval_ms);
@@ -108,6 +131,7 @@ async function sendHeartbeat() {
   await postWithRetry("/api/executor/heartbeat", {
     client_id: CLIENT_ID,
     capabilities: buildCapabilities(),
+    services: getServiceDefinitions(),
   });
 }
 
@@ -129,35 +153,9 @@ async function updateTask(taskId, status, statusInfo = {}, appendLog = "", resul
   });
 }
 
-async function executeTask(task) {
+async function executeScriptTask(task) {
   const { task_id: taskId, script, timeout_sec: timeoutSec, env = {}, cwd } = task;
   if (!taskId || !script) return;
-
-  runningTask = taskId;
-  const startTime = Date.now();
-  let logBuffer = "";
-  let lastFlushTs = Date.now();
-  let timedOut = false;
-
-  const flushLogs = async (force = false) => {
-    if (!logBuffer) return;
-    const enoughBySize = Buffer.byteLength(logBuffer, "utf8") >= LOG_FLUSH_SIZE;
-    const enoughByTime = Date.now() - lastFlushTs >= LOG_FLUSH_INTERVAL_MS;
-    if (!force && !enoughBySize && !enoughByTime) return;
-    const payload = logBuffer;
-    logBuffer = "";
-    lastFlushTs = Date.now();
-    try {
-      await updateTask(taskId, "running", {
-        current_step: "执行脚本中",
-        progress: 50,
-      }, payload, null);
-    } catch (error) {
-      // 日志回传失败不影响主流程，但继续缓冲后续日志
-      console.warn(`[${nowIso()}] flush log failed:`, error.message);
-    }
-  };
-
   try {
     await updateTask(taskId, "running", {
       current_step: "开始执行",
@@ -165,7 +163,33 @@ async function executeTask(task) {
       started_at: nowIso(),
       executor: "remote_mac",
       client_id: CLIENT_ID,
+      mode: "script",
     });
+
+    const startTime = Date.now();
+    let logBuffer = "";
+    let lastFlushTs = Date.now();
+    let timedOut = false;
+
+    const flushLogs = async (force = false) => {
+      if (!logBuffer) return;
+      const enoughBySize = Buffer.byteLength(logBuffer, "utf8") >= LOG_FLUSH_SIZE;
+      const enoughByTime = Date.now() - lastFlushTs >= LOG_FLUSH_INTERVAL_MS;
+      if (!force && !enoughBySize && !enoughByTime) return;
+      const payload = logBuffer;
+      logBuffer = "";
+      lastFlushTs = Date.now();
+      try {
+        await updateTask(taskId, "running", {
+          current_step: "执行脚本中",
+          progress: 50,
+          mode: "script",
+        }, payload, null);
+      } catch (error) {
+        // 日志回传失败不影响主流程，但继续缓冲后续日志
+        console.warn(`[${nowIso()}] flush log failed:`, error.message);
+      }
+    };
 
     const child = spawn("bash", ["-lc", script], {
       cwd: cwd || WORK_DIR,
@@ -206,6 +230,7 @@ async function executeTask(task) {
         finished_at: nowIso(),
         executor: "remote_mac",
         client_id: CLIENT_ID,
+        mode: "script",
       }, "", result.code);
     } else {
       await updateTask(taskId, "error", {
@@ -215,22 +240,98 @@ async function executeTask(task) {
         finished_at: nowIso(),
         executor: "remote_mac",
         client_id: CLIENT_ID,
+        mode: "script",
       }, "", typeof result.code === "number" ? result.code : -1);
     }
   } catch (error) {
+    const fallbackLog = error?.stack || String(error);
+    await updateTask(taskId, "error", {
+      error: error?.message || "脚本执行异常",
+      finished_at: nowIso(),
+      executor: "remote_mac",
+      client_id: CLIENT_ID,
+      mode: "script",
+    }, fallbackLog, -1);
+  }
+}
+
+async function executeServiceTask(task) {
+  const { task_id: taskId, service_name: serviceName, service_payload: servicePayload } = task;
+  if (!taskId || !serviceName) return;
+  const handler = SERVICE_REGISTRY[serviceName];
+  if (!handler) {
+    await updateTask(taskId, "error", {
+      error: `客户端不支持服务: ${serviceName}`,
+      finished_at: nowIso(),
+      executor: "remote_mac",
+      client_id: CLIENT_ID,
+      mode: "service",
+      service_name: serviceName,
+    }, "", -1);
+    return;
+  }
+
+  const startTime = Date.now();
+  try {
+    await updateTask(taskId, "running", {
+      current_step: `执行服务 ${serviceName}`,
+      progress: 20,
+      started_at: nowIso(),
+      executor: "remote_mac",
+      client_id: CLIENT_ID,
+      mode: "service",
+      service_name: serviceName,
+    }, "", null);
+
+    const output = await handler(servicePayload);
+    const durationMs = Date.now() - startTime;
+    const outputStr = JSON.stringify(output);
+    await updateTask(taskId, "completed", {
+      current_step: "服务处理完成",
+      progress: 100,
+      duration_ms: durationMs,
+      finished_at: nowIso(),
+      executor: "remote_mac",
+      client_id: CLIENT_ID,
+      mode: "service",
+      service_name: serviceName,
+      output_json: output,
+    }, outputStr, 0);
+  } catch (error) {
     const durationMs = Date.now() - startTime;
     const fallbackLog = error?.stack || String(error);
-    try {
-      await updateTask(taskId, "error", {
-        error: error?.message || "执行异常",
-        duration_ms: durationMs,
-        finished_at: nowIso(),
-        executor: "remote_mac",
-        client_id: CLIENT_ID,
-      }, fallbackLog, -1);
-    } catch (innerError) {
-      console.error(`[${nowIso()}] update task error failed:`, innerError.message);
+    await updateTask(taskId, "error", {
+      error: error?.message || "服务执行异常",
+      duration_ms: durationMs,
+      finished_at: nowIso(),
+      executor: "remote_mac",
+      client_id: CLIENT_ID,
+      mode: "service",
+      service_name: serviceName,
+    }, fallbackLog, -1);
+  }
+}
+
+async function executeTask(task) {
+  const { task_id: taskId, script, service_name: serviceName } = task;
+  if (!taskId) return;
+
+  runningTask = taskId;
+  try {
+    if (serviceName) {
+      await executeServiceTask(task);
+      return;
     }
+    if (script) {
+      await executeScriptTask(task);
+      return;
+    }
+    await updateTask(taskId, "error", {
+      error: "任务缺少 script 或 service_name",
+      finished_at: nowIso(),
+      executor: "remote_mac",
+      client_id: CLIENT_ID,
+    }, "", -1);
   } finally {
     runningTask = null;
   }

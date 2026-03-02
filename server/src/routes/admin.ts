@@ -55,6 +55,30 @@ function isTaskType(value: unknown): value is TaskType {
   return typeof value === "string" && validTaskTypes.includes(value as TaskType);
 }
 
+function normalizeServiceList(value: unknown): Array<{ name: string; version?: string; description?: string }> {
+  if (!Array.isArray(value)) return [];
+  const dedupe = new Map<string, { name: string; version?: string; description?: string }>();
+  value.forEach((item) => {
+    if (typeof item === "string") {
+      const name = item.trim();
+      if (!name) return;
+      dedupe.set(name, { name });
+      return;
+    }
+    if (!item || typeof item !== "object" || Array.isArray(item)) return;
+    const obj = item as Record<string, unknown>;
+    const name = typeof obj.name === "string" ? obj.name.trim() : "";
+    if (!name) return;
+    dedupe.set(name, {
+      name,
+      version: typeof obj.version === "string" && obj.version.trim() ? obj.version.trim() : undefined,
+      description:
+        typeof obj.description === "string" && obj.description.trim() ? obj.description.trim() : undefined,
+    });
+  });
+  return Array.from(dedupe.values());
+}
+
 router.use(authMiddleware);
 
 // ── Tasks ───────────────────────────────────────────────
@@ -92,6 +116,8 @@ router.post("/tasks", async (req: AuthRequest, res: Response): Promise<void> => 
       taskType,
       taskParams,
       script,
+      serviceName,
+      servicePayload,
       timeoutSec,
       env,
       cwd,
@@ -103,6 +129,8 @@ router.post("/tasks", async (req: AuthRequest, res: Response): Promise<void> => 
       taskType?: unknown;
       taskParams?: unknown;
       script?: unknown;
+      serviceName?: unknown;
+      servicePayload?: unknown;
       timeoutSec?: unknown;
       env?: unknown;
       cwd?: unknown;
@@ -145,8 +173,27 @@ router.post("/tasks", async (req: AuthRequest, res: Response): Promise<void> => 
         : typeof manualParams.data.script === "string"
           ? (manualParams.data.script as string)
           : "";
-    if (!normalizedScript.trim()) {
-      res.status(400).json({ code: 400, message: "script 不能为空" });
+
+    const normalizedServiceName =
+      typeof serviceName === "string" && serviceName.trim()
+        ? serviceName.trim()
+        : typeof manualParams.data.service_name === "string" && (manualParams.data.service_name as string).trim()
+          ? (manualParams.data.service_name as string).trim()
+          : typeof manualParams.data.serviceName === "string" && (manualParams.data.serviceName as string).trim()
+            ? (manualParams.data.serviceName as string).trim()
+            : undefined;
+
+    const normalizedServicePayload =
+      servicePayload != null
+        ? servicePayload
+        : manualParams.data.service_payload ?? manualParams.data.servicePayload;
+
+    if (normalizedTaskType === "server_script" && !normalizedScript.trim()) {
+      res.status(400).json({ code: 400, message: "server_script 任务必须提供 script" });
+      return;
+    }
+    if (normalizedTaskType === "remote_mac" && !normalizedScript.trim() && !normalizedServiceName) {
+      res.status(400).json({ code: 400, message: "remote_mac 任务至少需要 script 或 serviceName" });
       return;
     }
 
@@ -174,6 +221,8 @@ router.post("/tasks", async (req: AuthRequest, res: Response): Promise<void> => 
     };
     if (normalizedCwd) normalizedTaskParams.cwd = normalizedCwd;
     if (normalizedRequiredTags.length > 0) normalizedTaskParams.required_tags = normalizedRequiredTags;
+    if (normalizedServiceName) normalizedTaskParams.service_name = normalizedServiceName;
+    if (normalizedServicePayload !== undefined) normalizedTaskParams.service_payload = normalizedServicePayload;
 
     const queueCount = await prisma.task.count({
       where: { status: "queued" },
@@ -185,6 +234,9 @@ router.post("/tasks", async (req: AuthRequest, res: Response): Promise<void> => 
     };
     if (normalizedTaskType === "remote_mac" && normalizedTargetClientId) {
       queueInfo.target_client_id = normalizedTargetClientId;
+    }
+    if (normalizedTaskType === "remote_mac" && normalizedServiceName) {
+      queueInfo.service_name = normalizedServiceName;
     }
 
     const created = await prisma.task.create({
@@ -303,6 +355,14 @@ router.get("/executor/clients", async (_req: AuthRequest, res: Response): Promis
             return JSON.parse(client.capabilities);
           } catch {
             return {};
+          }
+        })(),
+        services: (() => {
+          try {
+            const capabilities = JSON.parse(client.capabilities) as { services?: unknown };
+            return normalizeServiceList(capabilities.services);
+          } catch {
+            return [];
           }
         })(),
         status: client.status,

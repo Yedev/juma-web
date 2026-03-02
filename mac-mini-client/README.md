@@ -27,11 +27,42 @@ npm start
 | `WORK_DIR` | 脚本执行目录 | 当前目录 |
 | `POLL_INTERVAL_MS` | 拉任务间隔 | `4000` |
 | `HEARTBEAT_INTERVAL_MS` | 心跳间隔 | `10000` |
+| `DEMO_SERVICE_DELAY_MS` | 示例服务 `demo.mock3s` 的模拟处理时长 | `3000` |
 
 ## 任务执行流程
 
 1. 客户端注册 `/api/executor/register`
 2. 定时心跳 `/api/executor/heartbeat`
 3. 主动拉取任务 `/api/executor/next-task`
-4. 执行脚本后回传 `/api/executor/task-update`（状态/日志/结果）
+4. 执行脚本或服务后回传 `/api/executor/task-update`（状态/日志/结果）
+
+## 能力协商协议（Services Protocol）
+
+客户端在 `register/heartbeat` 时会上报：
+
+- `capabilities`: 机器能力（CPU、内存、loadavg 等）
+- `services`: 可提供的服务列表，例如：
+
+```json
+[
+  {
+    "name": "demo.mock3s",
+    "version": "1.0.0",
+    "description": "示例服务：模拟处理3秒并返回JSON"
+  }
+]
+```
+
+服务端会据此分发 `remote_mac` 任务：
+
+- 脚本任务：下发 `script`
+- 服务任务：下发 `service_name + service_payload`
+
+## 示例服务
+
+客户端内置 `demo.mock3s`：
+
+- 接收 `service_payload`
+- 模拟处理 3 秒
+- 返回 JSON（写入任务 `status_info.output_json`）
 

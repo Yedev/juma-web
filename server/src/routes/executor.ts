@@ -18,6 +18,7 @@ interface RegisterBody {
   app_version?: unknown;
   tags?: unknown;
   capabilities?: unknown;
+  services?: unknown;
 }
 
 interface ClientTaskParams {
@@ -28,6 +29,16 @@ interface ClientTaskParams {
   cwd?: unknown;
   required_tags?: unknown;
   requiredTags?: unknown;
+  service_name?: unknown;
+  serviceName?: unknown;
+  service_payload?: unknown;
+  servicePayload?: unknown;
+}
+
+interface ServiceDef {
+  name: string;
+  version?: string;
+  description?: string;
 }
 
 function parseJson<T>(raw: string, fallback: T): T {
@@ -68,12 +79,45 @@ function normalizeObject(value: unknown): JsonObj {
   return value as JsonObj;
 }
 
+function normalizeServices(value: unknown): ServiceDef[] {
+  if (!Array.isArray(value)) return [];
+  const dedupe = new Map<string, ServiceDef>();
+  value.forEach((item) => {
+    if (typeof item === "string") {
+      const name = item.trim();
+      if (!name) return;
+      dedupe.set(name, { name });
+      return;
+    }
+    if (!item || typeof item !== "object" || Array.isArray(item)) return;
+    const obj = item as Record<string, unknown>;
+    const name = typeof obj.name === "string" ? obj.name.trim() : "";
+    if (!name) return;
+    const def: ServiceDef = { name };
+    if (typeof obj.version === "string" && obj.version.trim()) def.version = obj.version.trim();
+    if (typeof obj.description === "string" && obj.description.trim()) def.description = obj.description.trim();
+    dedupe.set(name, def);
+  });
+  return Array.from(dedupe.values());
+}
+
+function mergeCapabilities(base: JsonObj, latest: JsonObj, services: ServiceDef[]): JsonObj {
+  return {
+    ...base,
+    ...latest,
+    services,
+    service_protocol_version: "1.0",
+  };
+}
+
 function parseTaskParams(task: Task): {
   script: string;
   timeoutSec: number;
   env: Record<string, string>;
   cwd?: string;
   requiredTags: string[];
+  serviceName?: string;
+  servicePayload?: unknown;
 } {
   const params = parseJson<ClientTaskParams>(task.taskParams, {});
   const script = typeof params.script === "string" ? params.script : "";
@@ -92,8 +136,11 @@ function parseTaskParams(task: Task): {
 
   const requiredTags = toStringArray(params.required_tags ?? params.requiredTags);
   const cwd = typeof params.cwd === "string" && params.cwd.trim() ? params.cwd.trim() : undefined;
+  const serviceNameRaw = typeof params.service_name === "string" ? params.service_name : params.serviceName;
+  const serviceName = typeof serviceNameRaw === "string" && serviceNameRaw.trim() ? serviceNameRaw.trim() : undefined;
+  const servicePayload = params.service_payload ?? params.servicePayload;
 
-  return { script, timeoutSec, env, cwd, requiredTags };
+  return { script, timeoutSec, env, cwd, requiredTags, serviceName, servicePayload };
 }
 
 function getClientIp(req: Request): string {
@@ -124,6 +171,7 @@ router.post("/register", async (req: Request, res: Response): Promise<void> => {
       typeof body.app_version === "string" && body.app_version.trim() ? body.app_version.trim() : "unknown";
     const tags = toStringArray(body.tags);
     const capabilities = normalizeObject(body.capabilities);
+    const services = normalizeServices(body.services ?? capabilities.services);
 
     if (!clientId) {
       res.status(400).json({ code: 400, message: "client_id is required" });
@@ -142,7 +190,7 @@ router.post("/register", async (req: Request, res: Response): Promise<void> => {
         platform,
         appVersion,
         tags: JSON.stringify(tags),
-        capabilities: JSON.stringify(capabilities),
+        capabilities: JSON.stringify(mergeCapabilities({}, capabilities, services)),
         status: "online",
         ip: getClientIp(req),
         lastHeartbeat: now,
@@ -153,7 +201,7 @@ router.post("/register", async (req: Request, res: Response): Promise<void> => {
         platform,
         appVersion,
         tags: JSON.stringify(tags),
-        capabilities: JSON.stringify(capabilities),
+        capabilities: JSON.stringify(mergeCapabilities({}, capabilities, services)),
         status: "online",
         ip: getClientIp(req),
         lastHeartbeat: now,
@@ -165,6 +213,7 @@ router.post("/register", async (req: Request, res: Response): Promise<void> => {
       message: "registered",
       data: {
         client_id: client.clientId,
+        accepted_services: services,
         poll_interval_ms: DEFAULT_POLL_MS,
         heartbeat_interval_ms: DEFAULT_HEARTBEAT_MS,
         server_time: now.toISOString(),
@@ -180,6 +229,7 @@ router.post("/heartbeat", async (req: Request, res: Response): Promise<void> => 
   try {
     const clientId = typeof req.body?.client_id === "string" ? req.body.client_id.trim() : "";
     const capabilities = normalizeObject(req.body?.capabilities);
+    const services = normalizeServices(req.body?.services ?? capabilities.services);
     if (!clientId) {
       res.status(400).json({ code: 400, message: "client_id is required" });
       return;
@@ -197,7 +247,10 @@ router.post("/heartbeat", async (req: Request, res: Response): Promise<void> => 
         status: "online",
         ip: getClientIp(req),
         lastHeartbeat: new Date(),
-        capabilities: Object.keys(capabilities).length ? JSON.stringify(capabilities) : existing.capabilities,
+        capabilities:
+          Object.keys(capabilities).length || services.length
+            ? JSON.stringify(mergeCapabilities(parseJson<JsonObj>(existing.capabilities, {}), capabilities, services))
+            : existing.capabilities,
       },
     });
 
@@ -223,6 +276,9 @@ router.post("/next-task", async (req: Request, res: Response): Promise<void> => 
     }
 
     const clientTags = toStringArray(parseJson<unknown[]>(client.tags, []));
+    const parsedCapabilities = parseJson<JsonObj>(client.capabilities, {});
+    const clientServices = normalizeServices(parsedCapabilities.services);
+    const clientServiceNames = new Set(clientServices.map((s) => s.name));
 
     await prisma.executorClient.update({
       where: { clientId },
@@ -248,14 +304,14 @@ router.post("/next-task", async (req: Request, res: Response): Promise<void> => 
       }
 
       const taskParams = parseTaskParams(task);
-      if (!taskParams.script.trim()) {
+      if (!taskParams.serviceName && !taskParams.script.trim()) {
         await prisma.task.update({
           where: { id: task.id },
           data: {
             status: "error",
             statusInfo: JSON.stringify({
               executor: "remote_mac",
-              error: "taskParams.script 不能为空",
+              error: "taskParams.script 和 service_name 不能同时为空",
             }),
             finishedAt: new Date(),
           },
@@ -266,6 +322,10 @@ router.post("/next-task", async (req: Request, res: Response): Promise<void> => 
       if (taskParams.requiredTags.length > 0) {
         const matched = taskParams.requiredTags.every((tag) => clientTags.includes(tag));
         if (!matched) continue;
+      }
+
+      if (taskParams.serviceName && !clientServiceNames.has(taskParams.serviceName)) {
+        continue;
       }
 
       const now = new Date();
@@ -299,10 +359,13 @@ router.post("/next-task", async (req: Request, res: Response): Promise<void> => 
         data: {
           task_id: task.taskId,
           task_name: task.taskName,
+          task_mode: taskParams.serviceName ? "service" : "script",
           script: taskParams.script,
           timeout_sec: taskParams.timeoutSec,
           env: taskParams.env,
           cwd: taskParams.cwd,
+          service_name: taskParams.serviceName,
+          service_payload: taskParams.servicePayload,
         },
       });
       return;

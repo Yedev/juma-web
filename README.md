@@ -38,6 +38,7 @@ npm run dev
   - 领取后执行 shell 脚本，写入日志、结果码、状态
 - **远程执行器网关**：`server/src/routes/executor.ts`
   - 客户端注册、心跳、拉任务、回传结果
+  - 客户端连接时会声明 `services`（支持的服务能力）
   - 通过共享密钥 `EXECUTOR_KEY` 做鉴权
 - **客户端状态可视化**：任务管理页下方可查看执行客户端在线/离线、心跳、统计信息
 
@@ -57,6 +58,20 @@ EXECUTOR_OFFLINE_TIMEOUT_MS=60000
 REMOTE_TASK_STALE_TIMEOUT_MS=300000
 LOCAL_EXECUTOR_CONCURRENCY=1
 ```
+
+### 服务协商协议（client -> server）
+
+客户端在 `POST /api/executor/register` 与 `POST /api/executor/heartbeat` 时可上报：
+
+- `services`: 支持的服务列表
+  - `name`（必填）
+  - `version`（可选）
+  - `description`（可选）
+
+任务下发时：
+
+- 如果任务包含 `service_name`，只有声明支持该服务的客户端可领取
+- 客户端执行后将结果 JSON 回传到 `status_info.output_json`
 
 ---
 
@@ -204,8 +219,9 @@ curl --request GET "${BASE_URL}/api/v1/app/task/status?task_id=T1709001234" \
 
 - 新建任务（任务名称、任务类型、脚本、超时、env、重试策略）
 - `remote_mac` 任务支持指定目标客户端/required_tags
+- `remote_mac` 支持服务任务（`serviceName + servicePayload`）
 - 查看任务状态、详情、执行日志
 - 更新任务状态与 `status_info`
 - 删除任务
 - 分页刷新、客户端状态刷新
-- 客户端状态表（在线/离线、最近心跳、任务统计）
+- 客户端状态表（在线/离线、最近心跳、任务统计、支持服务）
