@@ -1,6 +1,8 @@
 import { Router, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware, AuthRequest } from "../middleware/auth";
+import { listRegisteredTasks } from "../services/taskRegistry";
+import { enqueueTaskByRegisteredName } from "../services/taskEnqueue";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -82,6 +84,57 @@ function normalizeServiceList(value: unknown): Array<{ name: string; version?: s
 router.use(authMiddleware);
 
 // ── Tasks ───────────────────────────────────────────────
+
+router.get("/task-definitions", async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const list = listRegisteredTasks();
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        list,
+        total: list.length,
+      },
+    });
+  } catch (error) {
+    console.error("List task definitions error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.post("/tasks/execute-by-name", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { taskName, taskParams } = req.body as { taskName?: unknown; taskParams?: unknown };
+    if (typeof taskName !== "string" || !taskName.trim()) {
+      res.status(400).json({ code: 400, message: "taskName 不能为空" });
+      return;
+    }
+
+    const parsedTaskParams = parseObjectField(taskParams, "taskParams");
+    if (!parsedTaskParams.ok) {
+      res.status(400).json({ code: 400, message: parsedTaskParams.message });
+      return;
+    }
+
+    const enqueueResult = await enqueueTaskByRegisteredName(prisma, {
+      taskName: taskName.trim(),
+      taskParams: parsedTaskParams.data,
+    });
+    if (!enqueueResult.ok) {
+      res.status(enqueueResult.code).json({ code: enqueueResult.code, message: enqueueResult.message });
+      return;
+    }
+
+    res.json({
+      code: 200,
+      message: "任务已创建",
+      data: enqueueResult.data,
+    });
+  } catch (error) {
+    console.error("Execute task by name error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
 
 router.get("/tasks", async (req: AuthRequest, res: Response): Promise<void> => {
   try {

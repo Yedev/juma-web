@@ -66,3 +66,13 @@ npm start
 - 模拟处理 3 秒
 - 返回 JSON（写入任务 `status_info.output_json`）
 
+## 已注册任务名（服务端）
+
+`/api/v1/app/task/execute` 仅支持服务端已注册的 task 名称，当前示例包括：
+
+- `demo.server.echo`（服务端执行）
+- `demo.client.scriptEcho`（客户端脚本执行）
+- `demo.client.mock3s`（客户端服务执行，调用 `demo.mock3s`）
+
+如果调用未注册 task（例如 `demo.not-exists`），服务端会返回 `404` 和“任务不存在”。
+
