@@ -68,7 +68,7 @@ router.post("/task/execute", async (req: Request, res: Response): Promise<void> 
   try {
     const taskNameRaw = typeof req.body?.task_name === "string" ? req.body.task_name : "";
     const taskName = taskNameRaw.trim();
-    const taskPayloadResult = parseObjectInput(req.body?.task_payload ?? req.body?.task_params);
+    const taskPayloadResult = parseObjectInput(req.body?.task_payload);
     const executionName =
       typeof req.body?.execution_name === "string" && req.body.execution_name.trim()
         ? req.body.execution_name.trim().slice(0, 120)
@@ -165,19 +165,18 @@ router.get("/task/status", async (req: Request, res: Response): Promise<void> =>
       data: {
         task_payload: (() => {
           const parsed = parseJson<Record<string, unknown>>(task.taskParams, {});
-          const payload = parsed.task_payload ?? parsed.taskPayload ?? parsed.payload;
+          const payload = parsed.task_payload;
           if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
           return payload as Record<string, unknown>;
         })(),
         execution_name: (() => {
           const parsed = parseJson<Record<string, unknown>>(task.taskParams, {});
-          const executionName = parsed.execution_name ?? parsed.executionName;
+          const executionName = parsed.execution_name;
           return typeof executionName === "string" ? executionName : null;
         })(),
         task_id: task.taskId,
         task_name: task.taskName,
         task_type: task.taskType,
-        task_params: parseJson<Record<string, unknown>>(task.taskParams, {}),
         status: task.status,
         status_info: parseJson<Record<string, unknown>>(task.statusInfo, {}),
         execution_log: task.executionLog,

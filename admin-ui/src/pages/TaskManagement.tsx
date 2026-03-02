@@ -64,9 +64,6 @@ interface TaskParams {
   task_payload?: Record<string, unknown>;
   execution_name?: string;
   required_tags?: string[];
-  taskPayload?: Record<string, unknown>;
-  executionName?: string;
-  payload?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -82,7 +79,7 @@ interface ExecutorClient {
   platform: string;
   appVersion: string;
   tags: string[];
-  services: ServiceDef[];
+  tasks: ServiceDef[];
   status: string;
   ip?: string;
   lastHeartbeat: string;
@@ -104,10 +101,9 @@ interface RegisteredTaskDef {
   title: string;
   description: string;
   taskType: TaskType;
-  executeMode: "script" | "service";
-  serviceName?: string;
+  executeMode: "task";
   params: RegisteredTaskParamDef[];
-  exampleTaskParams: Record<string, unknown>;
+  exampleTaskPayload: Record<string, unknown>;
 }
 
 interface StatusDef {
@@ -386,7 +382,7 @@ export default function TaskManagement() {
       try {
         const res = await adminClient.post("/api/admin/tasks/execute-by-name", {
           taskName: definition.taskName,
-          taskParams: definition.exampleTaskParams,
+          taskPayload: definition.exampleTaskPayload,
         });
         if (res.data.code === 200) {
           message.success(`已触发示例任务：${definition.taskName}`);
@@ -610,17 +606,8 @@ export default function TaskManagement() {
         const taskPayload =
           params.task_payload && typeof params.task_payload === "object" && !Array.isArray(params.task_payload)
             ? params.task_payload
-            : params.taskPayload && typeof params.taskPayload === "object" && !Array.isArray(params.taskPayload)
-              ? params.taskPayload
-              : params.payload && typeof params.payload === "object" && !Array.isArray(params.payload)
-                ? params.payload
-                : {};
-        const executionName =
-          typeof params.execution_name === "string"
-            ? params.execution_name
-            : typeof params.executionName === "string"
-              ? params.executionName
-              : "";
+            : {};
+        const executionName = typeof params.execution_name === "string" ? params.execution_name : "";
         if (Object.keys(taskPayload).length > 0) {
           return (
             <Tooltip
@@ -860,25 +847,25 @@ export default function TaskManagement() {
         ),
     },
     {
-      title: "支持服务",
-      dataIndex: "services",
-      key: "services",
+      title: "支持任务",
+      dataIndex: "tasks",
+      key: "tasks",
       width: 220,
-      render: (services: ServiceDef[]) => {
-        if (!services || services.length === 0) {
+      render: (tasks: ServiceDef[]) => {
+        if (!tasks || tasks.length === 0) {
           return <span style={{ color: "#bbb", fontSize: 12 }}>-</span>;
         }
-        const names = services.map((service) => service.name).join(", ");
+        const names = tasks.map((task) => task.name).join(", ");
         return (
           <Tooltip
             title={
               <div style={{ maxWidth: 380 }}>
-                {services.map((service) => (
-                  <div key={service.name} style={{ marginBottom: 6 }}>
-                    <div style={{ fontWeight: 500 }}>{service.name}</div>
+                {tasks.map((task) => (
+                  <div key={task.name} style={{ marginBottom: 6 }}>
+                    <div style={{ fontWeight: 500 }}>{task.name}</div>
                     <div style={{ fontSize: 12, opacity: 0.85 }}>
-                      {service.version ? `v${service.version}` : ""}
-                      {service.description ? ` · ${service.description}` : ""}
+                      {task.version ? `v${task.version}` : ""}
+                      {task.description ? ` · ${task.description}` : ""}
                     </div>
                   </div>
                 ))}
@@ -1071,12 +1058,9 @@ export default function TaskManagement() {
                 </div>
 
                 <div style={{ marginTop: 8, fontSize: 12, color: "#666", lineHeight: 1.7 }}>{definition.description}</div>
-                <div style={{ marginTop: 8, fontSize: 12, color: "#999" }}>
-                  模式：{definition.executeMode}
-                  {definition.serviceName ? ` · service=${definition.serviceName}` : ""}
-                </div>
+                <div style={{ marginTop: 8, fontSize: 12, color: "#999" }}>模式：{definition.executeMode}</div>
 
-                <div style={{ marginTop: 8, fontSize: 11, color: "#999", marginBottom: 6 }}>示例入参 task_params</div>
+                <div style={{ marginTop: 8, fontSize: 11, color: "#999", marginBottom: 6 }}>示例入参 task_payload</div>
                 <pre
                   style={{
                     margin: 0,
@@ -1091,7 +1075,7 @@ export default function TaskManagement() {
                     whiteSpace: "pre-wrap",
                   }}
                 >
-                  {prettyJson(definition.exampleTaskParams)}
+                  {prettyJson(definition.exampleTaskPayload)}
                 </pre>
 
                 <div style={{ marginTop: 8, fontSize: 11, color: "#999", marginBottom: 6 }}>参数说明</div>
@@ -1318,7 +1302,7 @@ export default function TaskManagement() {
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
               <div>
-                <div style={{ fontSize: 12, color: "#999", marginBottom: 6 }}>任务参数 task_params</div>
+                <div style={{ fontSize: 12, color: "#999", marginBottom: 6 }}>任务参数（task envelope）</div>
                 <pre
                   style={{
                     margin: 0,

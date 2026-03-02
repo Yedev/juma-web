@@ -27,7 +27,7 @@ npm start
 | `WORK_DIR` | 脚本执行目录 | 当前目录 |
 | `POLL_INTERVAL_MS` | 拉任务间隔 | `4000` |
 | `HEARTBEAT_INTERVAL_MS` | 心跳间隔 | `10000` |
-| `DEMO_SERVICE_DELAY_MS` | 示例服务 `demo.mock3s` 的模拟处理时长 | `3000` |
+| `DEMO_TASK_DELAY_MS` | 示例任务 `client.mock3s` 的模拟处理时长 | `3000` |
 
 ## 任务执行流程
 

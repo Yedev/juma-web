@@ -20,7 +20,6 @@ interface RegisterBody {
   tags?: unknown;
   capabilities?: unknown;
   tasks?: unknown;
-  services?: unknown;
 }
 
 interface TaskDef {
@@ -102,17 +101,15 @@ function mergeCapabilities(base: JsonObj, latest: JsonObj, tasks: TaskDef[]): Js
     ...base,
     ...latest,
     tasks,
-    // 兼容旧页面/旧客户端结构
-    services: tasks,
     task_protocol_version: "1.0",
   };
 }
 
 function parseTaskEnvelope(task: Task): ParsedTaskEnvelope {
   const params = parseJson<JsonObj>(task.taskParams, {});
-  const taskPayload = normalizeObject(params.task_payload ?? params.taskPayload ?? params.payload);
-  const requiredTags = toStringArray(params.required_tags ?? params.requiredTags);
-  const executionNameRaw = params.execution_name ?? params.executionName;
+  const taskPayload = normalizeObject(params.task_payload);
+  const requiredTags = toStringArray(params.required_tags);
+  const executionNameRaw = params.execution_name;
   const executionName =
     typeof executionNameRaw === "string" && executionNameRaw.trim() ? executionNameRaw.trim().slice(0, 120) : undefined;
   return { taskPayload, requiredTags, executionName };
@@ -146,7 +143,7 @@ router.post("/register", async (req: Request, res: Response): Promise<void> => {
       typeof body.app_version === "string" && body.app_version.trim() ? body.app_version.trim() : "unknown";
     const tags = toStringArray(body.tags);
     const capabilities = normalizeObject(body.capabilities);
-    const tasks = normalizeTasks(body.tasks ?? body.services ?? capabilities.tasks ?? capabilities.services);
+    const tasks = normalizeTasks(body.tasks ?? capabilities.tasks);
 
     if (!clientId) {
       res.status(400).json({ code: 400, message: "client_id is required" });
@@ -204,7 +201,7 @@ router.post("/heartbeat", async (req: Request, res: Response): Promise<void> => 
   try {
     const clientId = typeof req.body?.client_id === "string" ? req.body.client_id.trim() : "";
     const capabilities = normalizeObject(req.body?.capabilities);
-    const tasks = normalizeTasks(req.body?.tasks ?? req.body?.services ?? capabilities.tasks ?? capabilities.services);
+    const tasks = normalizeTasks(req.body?.tasks ?? capabilities.tasks);
     if (!clientId) {
       res.status(400).json({ code: 400, message: "client_id is required" });
       return;
@@ -252,7 +249,7 @@ router.post("/next-task", async (req: Request, res: Response): Promise<void> => 
 
     const clientTags = toStringArray(parseJson<unknown[]>(client.tags, []));
     const parsedCapabilities = parseJson<JsonObj>(client.capabilities, {});
-    const clientTasks = normalizeTasks(parsedCapabilities.tasks ?? parsedCapabilities.services);
+    const clientTasks = normalizeTasks(parsedCapabilities.tasks);
     const clientTaskNames = new Set(clientTasks.map((item) => item.name));
 
     await prisma.executorClient.update({

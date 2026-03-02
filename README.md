@@ -273,7 +273,7 @@ curl --request PUT "${BASE_URL}/api/v1/app/task/status" \
 - **Method**: `GET`
 - **URL**: `/api/v1/app/task/status`
 - **Query**: `task_id`（必填）
-- **返回增强**：包含 `task_name`、`task_type`、`task_params`、`status_info`、`execution_log`、`result_code`、执行时间等详细字段
+- **返回增强**：包含 `task_name`、`task_type`、`task_payload`、`execution_name`、`status_info`、`execution_log`、`result_code`、执行时间等详细字段
 
 ```bash
 APP_SECRET="juma2026_secret"
@@ -296,7 +296,7 @@ curl --request GET "${BASE_URL}/api/v1/app/task/status?task_id=T1709001234" \
 - 新建任务（任务名称、任务类型、task_payload、execution_name、重试策略）
 - 已注册任务面板（展示所有支持 task、参数说明、示例参数、一键触发示例任务）
 - `client_task` 支持指定目标客户端/required_tags
-- 查看任务状态、详情、执行日志（日志详情弹窗含 task_params/status_info/execution_log）
+- 查看任务状态、详情、执行日志（日志详情弹窗含 task_payload/status_info/execution_log）
 - 更新任务状态与 `status_info`
 - 删除任务
 - 分页刷新、客户端状态刷新

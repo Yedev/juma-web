@@ -6,7 +6,7 @@ const registry = new ClientTaskRegistry();
 
 function registerBuiltinTasks() {
   registry.register(new ClientEchoTask());
-  registry.register(new ClientMock3sTask(process.env.DEMO_TASK_DELAY_MS || process.env.DEMO_SERVICE_DELAY_MS || "3000"));
+  registry.register(new ClientMock3sTask(process.env.DEMO_TASK_DELAY_MS || "3000"));
 }
 
 registerBuiltinTasks();

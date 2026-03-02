@@ -100,19 +100,17 @@ router.get("/task-definitions", async (_req: AuthRequest, res: Response): Promis
 
 router.post("/tasks/execute-by-name", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { taskName, taskPayload, taskParams, executionName, execution_name } = req.body as {
+    const { taskName, taskPayload, executionName } = req.body as {
       taskName?: unknown;
       taskPayload?: unknown;
-      taskParams?: unknown;
       executionName?: unknown;
-      execution_name?: unknown;
     };
     if (typeof taskName !== "string" || !taskName.trim()) {
       res.status(400).json({ code: 400, message: "taskName 不能为空" });
       return;
     }
 
-    const parsedTaskPayload = parseObjectField(taskPayload ?? taskParams, "taskPayload");
+    const parsedTaskPayload = parseObjectField(taskPayload, "taskPayload");
     if (!parsedTaskPayload.ok) {
       res.status(400).json({ code: 400, message: parsedTaskPayload.message });
       return;
@@ -121,7 +119,7 @@ router.post("/tasks/execute-by-name", async (req: AuthRequest, res: Response): P
     const enqueueResult = await enqueueTaskByRegisteredName(prisma, {
       taskName: taskName.trim(),
       taskPayload: parsedTaskPayload.data,
-      executionName: executionName ?? execution_name,
+      executionName,
     });
     if (!enqueueResult.ok) {
       res.status(enqueueResult.code).json({ code: enqueueResult.code, message: enqueueResult.message });
@@ -170,18 +168,14 @@ router.post("/tasks", async (req: AuthRequest, res: Response): Promise<void> => 
     const {
       taskName,
       taskPayload,
-      taskParams,
       executionName,
-      execution_name,
       targetClientId,
       requiredTags,
       maxRetries,
     } = req.body as {
       taskName?: unknown;
       taskPayload?: unknown;
-      taskParams?: unknown;
       executionName?: unknown;
-      execution_name?: unknown;
       targetClientId?: unknown;
       requiredTags?: unknown;
       maxRetries?: unknown;
@@ -208,24 +202,19 @@ router.post("/tasks", async (req: AuthRequest, res: Response): Promise<void> => 
         ? Math.max(0, Math.min(10, Math.floor(maxRetries)))
         : 0;
 
-    const parsedTaskPayload = parseObjectField(taskPayload ?? taskParams, "taskPayload");
+    const parsedTaskPayload = parseObjectField(taskPayload, "taskPayload");
     if (!parsedTaskPayload.ok) {
       res.status(400).json({ code: 400, message: parsedTaskPayload.message });
       return;
     }
 
-    const rawExecutionName = executionName ?? execution_name;
     const normalizedExecutionName =
-      typeof rawExecutionName === "string" && rawExecutionName.trim() ? rawExecutionName.trim().slice(0, 120) : undefined;
+      typeof executionName === "string" && executionName.trim() ? executionName.trim().slice(0, 120) : undefined;
     const normalizedTargetClientId =
       typeof targetClientId === "string" && targetClientId.trim()
         ? targetClientId.trim()
-        : typeof parsedTaskPayload.data.target_client_id === "string"
-          ? (parsedTaskPayload.data.target_client_id as string)
-          : undefined;
-    const normalizedRequiredTags = parseArrayField(
-      requiredTags ?? parsedTaskPayload.data.required_tags ?? parsedTaskPayload.data.requiredTags
-    );
+        : undefined;
+    const normalizedRequiredTags = parseArrayField(requiredTags);
 
     const normalizedTaskParams: Record<string, unknown> = {
       task_payload: parsedTaskPayload.data,
@@ -367,17 +356,8 @@ router.get("/executor/clients", async (_req: AuthRequest, res: Response): Promis
         })(),
         tasks: (() => {
           try {
-            const capabilities = JSON.parse(client.capabilities) as { services?: unknown };
-            return normalizeTaskList((capabilities as { tasks?: unknown }).tasks ?? capabilities.services);
-          } catch {
-            return [];
-          }
-        })(),
-        // 兼容旧前端字段名
-        services: (() => {
-          try {
-            const capabilities = JSON.parse(client.capabilities) as { services?: unknown };
-            return normalizeTaskList((capabilities as { tasks?: unknown }).tasks ?? capabilities.services);
+            const capabilities = JSON.parse(client.capabilities) as { tasks?: unknown };
+            return normalizeTaskList(capabilities.tasks);
           } catch {
             return [];
           }

@@ -17,8 +17,6 @@ export interface RegisteredTaskDefinition {
   executeMode: "task";
   params: RegisteredTaskParamDef[];
   exampleTaskPayload: Record<string, unknown>;
-  // 兼容旧前端字段名
-  exampleTaskParams: Record<string, unknown>;
 }
 
 interface PreparedTaskPayload {
@@ -110,7 +108,6 @@ function cloneDefinition(definition: RegisteredTaskInternal): RegisteredTaskDefi
     executeMode: "task",
     params: definition.params.map((item) => ({ ...item })),
     exampleTaskPayload: JSON.parse(JSON.stringify(definition.exampleTaskPayload)) as Record<string, unknown>,
-    exampleTaskParams: JSON.parse(JSON.stringify(definition.exampleTaskParams)) as Record<string, unknown>,
   };
 }
 
@@ -144,7 +141,7 @@ function buildClientEchoTask(input: Record<string, unknown>, executionName?: str
 }
 
 function buildClientMock3sTask(input: Record<string, unknown>, executionName?: string): PreparedTaskPayload {
-  const payload = normalizeObject(input.payload ?? input.task_payload ?? {});
+  const payload = normalizeObject(input.payload);
   const targetClientId = pickOptionalString(input, "target_client_id", 120);
   const requiredTags = pickStringArray(input, "required_tags");
   const maxRetries = pickNumber(input, "max_retries", 1, 0, 10);
@@ -168,7 +165,6 @@ function buildRegisteredTasks(): RegisteredTaskInternal[] {
     executeMode: "task",
     params: task.params.map((item) => ({ ...item })),
     exampleTaskPayload: JSON.parse(JSON.stringify(task.exampleTaskPayload)) as Record<string, unknown>,
-    exampleTaskParams: JSON.parse(JSON.stringify(task.exampleTaskPayload)) as Record<string, unknown>,
     buildTaskPayload: (input, executionName) => ({
       taskType: "server_task",
       taskPayload: normalizeServerTaskPayloadByName(task.taskName, input) ?? {},
@@ -225,12 +221,6 @@ function buildRegisteredTasks(): RegisteredTaskInternal[] {
         sleep_ms: 500,
         required_tags: ["xcode"],
       },
-      exampleTaskParams: {
-        message: "执行客户端回显任务",
-        repeat: 2,
-        sleep_ms: 500,
-        required_tags: ["xcode"],
-      },
       buildTaskPayload: buildClientEchoTask,
     },
     {
@@ -261,14 +251,6 @@ function buildRegisteredTasks(): RegisteredTaskInternal[] {
         },
       ],
       exampleTaskPayload: {
-        payload: {
-          build_id: "build-20260302-001",
-          branch: "main",
-          notify: true,
-        },
-        required_tags: ["xcode"],
-      },
-      exampleTaskParams: {
         payload: {
           build_id: "build-20260302-001",
           branch: "main",
@@ -315,8 +297,7 @@ export function prepareRegisteredTask(
   }
 
   const payloadObj = normalizeObject(taskPayload);
-  const normalizedExecutionName =
-    normalizeExecutionName(executionName) ?? normalizeExecutionName(payloadObj.execution_name);
+  const normalizedExecutionName = normalizeExecutionName(executionName);
   const payload = matched.buildTaskPayload(payloadObj, normalizedExecutionName);
   if (payload.taskType !== inferredType) {
     return {

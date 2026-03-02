@@ -49,8 +49,8 @@ function trimLog(input: string): string {
 
 function parseTaskEnvelope(task: Task): ParsedTaskEnvelope {
   const parsed = parseJson<Record<string, unknown>>(task.taskParams, {});
-  const payload = normalizeObject(parsed.task_payload ?? parsed.taskPayload ?? parsed.payload);
-  const executionNameRaw = parsed.execution_name ?? parsed.executionName;
+  const payload = normalizeObject(parsed.task_payload);
+  const executionNameRaw = parsed.execution_name;
   const executionName =
     typeof executionNameRaw === "string" && executionNameRaw.trim() ? executionNameRaw.trim().slice(0, 120) : undefined;
   return {
