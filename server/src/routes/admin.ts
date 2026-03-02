@@ -4,6 +4,40 @@ import { authMiddleware, AuthRequest } from "../middleware/auth";
 
 const router = Router();
 const prisma = new PrismaClient();
+const validTaskStatuses = ["queued", "running", "error", "completed"] as const;
+
+function parseObjectField(
+  value: unknown,
+  fieldName: string
+): { ok: true; data: Record<string, unknown> } | { ok: false; message: string } {
+  if (value == null) {
+    return { ok: true, data: {} };
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return { ok: true, data: parsed as Record<string, unknown> };
+      }
+      return { ok: false, message: `${fieldName} 必须是 JSON 对象` };
+    } catch {
+      return { ok: false, message: `${fieldName} 不是合法 JSON` };
+    }
+  }
+
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return { ok: true, data: value as Record<string, unknown> };
+  }
+
+  return { ok: false, message: `${fieldName} 必须是对象或 JSON 字符串` };
+}
+
+function generateTaskId(): string {
+  return `T${Date.now()}${Math.floor(Math.random() * 1000)
+    .toString()
+    .padStart(3, "0")}`;
+}
 
 router.use(authMiddleware);
 
@@ -31,6 +65,109 @@ router.get("/tasks", async (req: AuthRequest, res: Response): Promise<void> => {
     });
   } catch (error) {
     console.error("Get tasks error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.post("/tasks", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { taskName, taskParams } = req.body as { taskName?: unknown; taskParams?: unknown };
+
+    if (typeof taskName !== "string" || !taskName.trim()) {
+      res.status(400).json({ code: 400, message: "taskName 不能为空" });
+      return;
+    }
+
+    const parsedParams = parseObjectField(taskParams, "taskParams");
+    if (!parsedParams.ok) {
+      res.status(400).json({ code: 400, message: parsedParams.message });
+      return;
+    }
+
+    const queueCount = await prisma.task.count({
+      where: { status: "queued" },
+    });
+
+    const created = await prisma.task.create({
+      data: {
+        taskId: generateTaskId(),
+        taskName: taskName.trim(),
+        taskParams: JSON.stringify(parsedParams.data),
+        status: "queued",
+        statusInfo: JSON.stringify({ queue_position: queueCount + 1 }),
+      },
+    });
+
+    res.json({
+      code: 200,
+      message: "任务已创建",
+      data: created,
+    });
+  } catch (error) {
+    console.error("Create task error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.put("/tasks/:taskId/status", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const taskId = req.params.taskId as string;
+    const { status, statusInfo } = req.body as { status?: unknown; statusInfo?: unknown };
+
+    if (typeof status !== "string" || !validTaskStatuses.includes(status as (typeof validTaskStatuses)[number])) {
+      res.status(400).json({
+        code: 400,
+        message: `status 必须是以下之一: ${validTaskStatuses.join(", ")}`,
+      });
+      return;
+    }
+
+    const parsedStatusInfo = parseObjectField(statusInfo, "statusInfo");
+    if (!parsedStatusInfo.ok) {
+      res.status(400).json({ code: 400, message: parsedStatusInfo.message });
+      return;
+    }
+
+    const existing = await prisma.task.findUnique({ where: { taskId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "任务不存在" });
+      return;
+    }
+
+    const updated = await prisma.task.update({
+      where: { taskId },
+      data: {
+        status,
+        statusInfo: JSON.stringify(parsedStatusInfo.data),
+      },
+    });
+
+    res.json({
+      code: 200,
+      message: "任务状态已更新",
+      data: updated,
+    });
+  } catch (error) {
+    console.error("Update task status error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/tasks/:taskId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const taskId = req.params.taskId as string;
+
+    const existing = await prisma.task.findUnique({ where: { taskId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "任务不存在" });
+      return;
+    }
+
+    await prisma.task.delete({ where: { taskId } });
+
+    res.json({ code: 200, message: "任务已删除" });
+  } catch (error) {
+    console.error("Delete task error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
