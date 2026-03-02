@@ -23,22 +23,22 @@ npm run dev
 
 ---
 
-## 任务执行系统（双执行模式）
+## 任务执行系统（Task 模式）
 
-已支持两种任务类型：
+已支持两种 Task 类型：
 
-1. `server_script`：在服务端本机执行脚本
-2. `remote_mac`：分发给 Mac Mini 客户端执行（适合无公网 IP 机器）
+1. `server_task`：在服务端执行已注册 `server.name` 任务
+2. `client_task`：分发给客户端执行已注册 `client.name` 任务
 
 ### 架构说明
 
 - **任务创建与管理**：在后台「任务管理」页面创建任务、查看状态、手工更新、删除任务
 - **服务端本地执行引擎**：`server/src/services/executionEngine.ts`
-  - 定时扫描 `queued + server_script` 任务
-  - 领取后执行 shell 脚本，写入日志、结果码、状态
+  - 定时扫描 `queued + server_task` 任务
+  - 通过 `ServerTask` 基类注册器执行任务逻辑
 - **远程执行器网关**：`server/src/routes/executor.ts`
   - 客户端注册、心跳、拉任务、回传结果
-  - 客户端连接时会声明 `services`（支持的服务能力）
+  - 客户端连接时会声明 `tasks`（支持的任务能力）
   - 通过共享密钥 `EXECUTOR_KEY` 做鉴权
 - **客户端状态可视化**：任务管理页下方可查看执行客户端在线/离线、心跳、统计信息
 
@@ -59,18 +59,19 @@ REMOTE_TASK_STALE_TIMEOUT_MS=300000
 LOCAL_EXECUTOR_CONCURRENCY=1
 ```
 
-### 服务协商协议（client -> server）
+### 任务协商协议（client -> server）
 
 客户端在 `POST /api/executor/register` 与 `POST /api/executor/heartbeat` 时可上报：
 
-- `services`: 支持的服务列表
+- `tasks`: 支持的任务列表
   - `name`（必填）
   - `version`（可选）
   - `description`（可选）
 
 任务下发时：
 
-- 如果任务包含 `service_name`，只有声明支持该服务的客户端可领取
+- 仅下发 `task_name + task_payload + execution_name`
+- 只有声明支持该 `task_name` 的客户端可领取
 - 客户端执行后将结果 JSON 回传到 `status_info.output_json`
 
 ---
@@ -174,14 +175,15 @@ curl --request GET "${BASE_URL}/api/v1/app/task/catalog" \
 - **URL**: `/api/v1/app/task/execute`
 - **Body**:
   - `task_name`: string（必填，必须为已注册 task）
-  - `task_params`: object（可选，不同 task 的参数结构不同）
+  - `task_payload`: object（可选，不同 task 的 payload 结构不同）
+  - `execution_name`: string（可选，用于标识任务实例）
 - **未注册 task**：返回 `404`，`message` 为“任务不存在”
 - **当前内置示例 task**：
-  - `demo.server.echo`（服务端执行）
-  - `demo.client.scriptEcho`（客户端脚本执行）
-  - `demo.client.mock3s`（客户端服务执行，调用 `demo.mock3s`）
+  - `server.echo`（服务端执行）
+  - `client.echo`（客户端执行）
+  - `client.mock3s`（客户端执行）
 
-#### 3.1 服务端执行示例（demo.server.echo）
+#### 3.1 服务端执行示例（server.echo）
 
 ```bash
 APP_SECRET="juma2026_secret"
@@ -194,17 +196,17 @@ curl --request POST "${BASE_URL}/api/v1/app/task/execute" \
   --header "x-timestamp: ${TS}" \
   --header "x-sign: ${SIGN}" \
   --data '{
-    "task_name":"demo.server.echo",
-    "task_params":{
+    "task_name":"server.echo",
+    "task_payload":{
       "message":"同步商品索引",
       "repeat":3,
-      "sleep_sec":1,
-      "env_name":"prod"
-    }
+      "sleep_ms":400
+    },
+    "execution_name":"sync-product-index-001"
   }'
 ```
 
-#### 3.2 客户端执行示例（demo.client.mock3s）
+#### 3.2 客户端执行示例（client.mock3s）
 
 ```bash
 APP_SECRET="juma2026_secret"
@@ -217,8 +219,8 @@ curl --request POST "${BASE_URL}/api/v1/app/task/execute" \
   --header "x-timestamp: ${TS}" \
   --header "x-sign: ${SIGN}" \
   --data '{
-    "task_name":"demo.client.mock3s",
-    "task_params":{
+    "task_name":"client.mock3s",
+    "task_payload":{
       "payload":{
         "build_id":"build-20260302-001",
         "branch":"main",
@@ -241,7 +243,7 @@ curl --request POST "${BASE_URL}/api/v1/app/task/execute" \
   --header "Content-Type: application/json" \
   --header "x-timestamp: ${TS}" \
   --header "x-sign: ${SIGN}" \
-  --data '{"task_name":"demo.not-exists","task_params":{}}'
+  --data '{"task_name":"client.not-exists","task_payload":{}}'
 ```
 
 ### 4) 更新任务状态
@@ -271,7 +273,7 @@ curl --request PUT "${BASE_URL}/api/v1/app/task/status" \
 - **Method**: `GET`
 - **URL**: `/api/v1/app/task/status`
 - **Query**: `task_id`（必填）
-- **返回增强**：包含 `task_name`、`task_type`、`task_params`、`status_info`、`execution_log`、`result_code`、执行时间等详细字段
+- **返回增强**：包含 `task_name`、`task_type`、`task_payload`、`execution_name`、`status_info`、`execution_log`、`result_code`、执行时间等详细字段
 
 ```bash
 APP_SECRET="juma2026_secret"
@@ -291,10 +293,10 @@ curl --request GET "${BASE_URL}/api/v1/app/task/status?task_id=T1709001234" \
 “任务管理”页面支持直接管理任务：
 
 - 新建任务（任务名称、任务类型、脚本、超时、env、重试策略）
+- 新建任务（任务名称、任务类型、task_payload、execution_name、重试策略）
 - 已注册任务面板（展示所有支持 task、参数说明、示例参数、一键触发示例任务）
-- `remote_mac` 任务支持指定目标客户端/required_tags
-- `remote_mac` 支持服务任务（`serviceName + servicePayload`）
-- 查看任务状态、详情、执行日志（日志详情弹窗含 task_params/status_info/execution_log）
+- `client_task` 支持指定目标客户端/required_tags
+- 查看任务状态、详情、执行日志（日志详情弹窗含 task_payload/status_info/execution_log）
 - 更新任务状态与 `status_info`
 - 删除任务
 - 分页刷新、客户端状态刷新

@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 
 /**
- * Mac Mini 执行客户端
- * - 适用于无公网 IP 机器：客户端主动向服务器注册、心跳、拉取任务
- * - 上报可提供的 services，执行 remote_mac 任务并回传运行状态/日志/结果
+ * Mac Mini 执行客户端（Task 模式）
+ * - 客户端主动向服务器注册/心跳/拉任务
+ * - 仅支持 task_name + task_payload 执行，不支持脚本
  */
 
 const os = require("os");
-const { spawn } = require("child_process");
 const { randomUUID } = require("crypto");
+const { getRegisteredTaskDefinitions, getRegisteredTask } = require("./tasks");
 
 const SERVER_URL = (process.env.SERVER_URL || "http://localhost:3001").replace(/\/+$/, "");
 const EXECUTOR_KEY = process.env.EXECUTOR_KEY || "juma_executor_2026";
@@ -25,24 +25,10 @@ const DEFAULT_POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || "4000"
 const DEFAULT_HEARTBEAT_INTERVAL_MS = parseInt(process.env.HEARTBEAT_INTERVAL_MS || "10000", 10);
 const LOG_FLUSH_INTERVAL_MS = parseInt(process.env.LOG_FLUSH_INTERVAL_MS || "2000", 10);
 const LOG_FLUSH_SIZE = parseInt(process.env.LOG_FLUSH_SIZE || "2048", 10);
-const DEMO_SERVICE_DELAY_MS = parseInt(process.env.DEMO_SERVICE_DELAY_MS || "3000", 10);
 
 let runningTask = null;
 let pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
 let heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
-
-const SERVICE_REGISTRY = {
-  "demo.mock3s": async (payload) => {
-    await sleep(DEMO_SERVICE_DELAY_MS);
-    return {
-      ok: true,
-      service: "demo.mock3s",
-      handled_at: nowIso(),
-      delay_ms: DEMO_SERVICE_DELAY_MS,
-      received: payload || {},
-    };
-  },
-};
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -53,6 +39,7 @@ function nowIso() {
 }
 
 function buildCapabilities() {
+  const tasks = getRegisteredTaskDefinitions();
   return {
     cpus: os.cpus().length,
     platform: process.platform,
@@ -62,15 +49,12 @@ function buildCapabilities() {
     loadavg: os.loadavg(),
     uptime_sec: Math.floor(os.uptime()),
     work_dir: WORK_DIR,
+    task_count: tasks.length,
   };
 }
 
-function getServiceDefinitions() {
-  return Object.keys(SERVICE_REGISTRY).map((name) => ({
-    name,
-    version: "1.0.0",
-    description: name === "demo.mock3s" ? "示例服务：模拟处理3秒并返回JSON" : "",
-  }));
+function getTaskDefinitions() {
+  return getRegisteredTaskDefinitions();
 }
 
 async function apiPost(path, payload, timeoutMs = REQUEST_TIMEOUT_MS) {
@@ -119,7 +103,7 @@ async function register() {
     app_version: APP_VERSION,
     tags: CLIENT_TAGS,
     capabilities: buildCapabilities(),
-    services: getServiceDefinitions(),
+    tasks: getTaskDefinitions(),
   });
   const remotePoll = Number(data?.data?.poll_interval_ms);
   const remoteHeartbeat = Number(data?.data?.heartbeat_interval_ms);
@@ -131,7 +115,7 @@ async function sendHeartbeat() {
   await postWithRetry("/api/executor/heartbeat", {
     client_id: CLIENT_ID,
     capabilities: buildCapabilities(),
-    services: getServiceDefinitions(),
+    tasks: getTaskDefinitions(),
   });
 }
 
@@ -153,23 +137,49 @@ async function updateTask(taskId, status, statusInfo = {}, appendLog = "", resul
   });
 }
 
-async function executeScriptTask(task) {
-  const { task_id: taskId, script, timeout_sec: timeoutSec, env = {}, cwd } = task;
-  if (!taskId || !script) return;
+function toPayloadObject(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+  return payload;
+}
+
+async function executeTask(task) {
+  const { task_id: taskId, task_name: taskName, task_payload: rawPayload, execution_name: executionName } = task || {};
+  if (!taskId || !taskName) return;
+
+  const taskInstance = getRegisteredTask(taskName);
+  if (!taskInstance) {
+    await updateTask(
+      taskId,
+      "error",
+      {
+        error: `任务未注册: ${taskName}`,
+        finished_at: nowIso(),
+        executor: "client_task_runtime",
+        client_id: CLIENT_ID,
+        task_name: taskName,
+        execution_name: executionName,
+      },
+      "",
+      -1
+    );
+    return;
+  }
+
+  runningTask = taskId;
   try {
     await updateTask(taskId, "running", {
-      current_step: "开始执行",
+      current_step: `开始执行 ${taskName}`,
       progress: 5,
       started_at: nowIso(),
-      executor: "remote_mac",
+      executor: "client_task_runtime",
       client_id: CLIENT_ID,
-      mode: "script",
+      task_name: taskName,
+      execution_name: executionName,
     });
 
     const startTime = Date.now();
     let logBuffer = "";
     let lastFlushTs = Date.now();
-    let timedOut = false;
 
     const flushLogs = async (force = false) => {
       if (!logBuffer) return;
@@ -180,158 +190,69 @@ async function executeScriptTask(task) {
       logBuffer = "";
       lastFlushTs = Date.now();
       try {
-        await updateTask(taskId, "running", {
-          current_step: "执行脚本中",
-          progress: 50,
-          mode: "script",
-        }, payload, null);
+        await updateTask(
+          taskId,
+          "running",
+          {
+            current_step: `执行 ${taskName} 中`,
+            progress: 60,
+            executor: "client_task_runtime",
+            client_id: CLIENT_ID,
+            task_name: taskName,
+            execution_name: executionName,
+          },
+          payload,
+          null
+        );
       } catch (error) {
-        // 日志回传失败不影响主流程，但继续缓冲后续日志
         console.warn(`[${nowIso()}] flush log failed:`, error.message);
       }
     };
 
-    const child = spawn("bash", ["-lc", script], {
-      cwd: cwd || WORK_DIR,
-      env: { ...process.env, ...env },
-    });
+    const context = {
+      taskId,
+      taskName,
+      executionName,
+      clientId: CLIENT_ID,
+      log: (line) => {
+        if (typeof line !== "string") return;
+        logBuffer += `${line}\n`;
+        void flushLogs(false);
+      },
+    };
 
-    const timeoutMs = Math.max(1, Number(timeoutSec || 300)) * 1000;
-    const timeoutTimer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, timeoutMs);
-
-    child.stdout.on("data", (chunk) => {
-      logBuffer += chunk.toString();
-      void flushLogs(false);
-    });
-    child.stderr.on("data", (chunk) => {
-      logBuffer += chunk.toString();
-      void flushLogs(false);
-    });
-
-    const result = await new Promise((resolve) => {
-      child.on("close", (code, signal) => {
-        clearTimeout(timeoutTimer);
-        resolve({ code, signal });
-      });
-    });
-
+    const payload = toPayloadObject(rawPayload);
+    const output = await taskInstance.run(payload, context);
     await flushLogs(true);
 
     const durationMs = Date.now() - startTime;
-    const success = !timedOut && result.code === 0;
-    if (success) {
-      await updateTask(taskId, "completed", {
-        current_step: "执行完成",
-        progress: 100,
-        duration_ms: durationMs,
-        finished_at: nowIso(),
-        executor: "remote_mac",
-        client_id: CLIENT_ID,
-        mode: "script",
-      }, "", result.code);
-    } else {
-      await updateTask(taskId, "error", {
-        error: timedOut ? "执行超时" : `进程异常退出: code=${result.code}, signal=${result.signal}`,
-        timeout: timedOut,
-        duration_ms: durationMs,
-        finished_at: nowIso(),
-        executor: "remote_mac",
-        client_id: CLIENT_ID,
-        mode: "script",
-      }, "", typeof result.code === "number" ? result.code : -1);
-    }
-  } catch (error) {
-    const fallbackLog = error?.stack || String(error);
-    await updateTask(taskId, "error", {
-      error: error?.message || "脚本执行异常",
-      finished_at: nowIso(),
-      executor: "remote_mac",
-      client_id: CLIENT_ID,
-      mode: "script",
-    }, fallbackLog, -1);
-  }
-}
-
-async function executeServiceTask(task) {
-  const { task_id: taskId, service_name: serviceName, service_payload: servicePayload } = task;
-  if (!taskId || !serviceName) return;
-  const handler = SERVICE_REGISTRY[serviceName];
-  if (!handler) {
-    await updateTask(taskId, "error", {
-      error: `任务不存在: ${serviceName}（客户端未注册该服务）`,
-      finished_at: nowIso(),
-      executor: "remote_mac",
-      client_id: CLIENT_ID,
-      mode: "service",
-      service_name: serviceName,
-    }, "", -1);
-    return;
-  }
-
-  const startTime = Date.now();
-  try {
-    await updateTask(taskId, "running", {
-      current_step: `执行服务 ${serviceName}`,
-      progress: 20,
-      started_at: nowIso(),
-      executor: "remote_mac",
-      client_id: CLIENT_ID,
-      mode: "service",
-      service_name: serviceName,
-    }, "", null);
-
-    const output = await handler(servicePayload);
-    const durationMs = Date.now() - startTime;
-    const outputStr = JSON.stringify(output);
     await updateTask(taskId, "completed", {
-      current_step: "服务处理完成",
+      current_step: "执行完成",
       progress: 100,
       duration_ms: durationMs,
       finished_at: nowIso(),
-      executor: "remote_mac",
+      executor: "client_task_runtime",
       client_id: CLIENT_ID,
-      mode: "service",
-      service_name: serviceName,
+      task_name: taskName,
+      execution_name: executionName,
       output_json: output,
-    }, outputStr, 0);
+    });
   } catch (error) {
-    const durationMs = Date.now() - startTime;
     const fallbackLog = error?.stack || String(error);
-    await updateTask(taskId, "error", {
-      error: error?.message || "服务执行异常",
-      duration_ms: durationMs,
-      finished_at: nowIso(),
-      executor: "remote_mac",
-      client_id: CLIENT_ID,
-      mode: "service",
-      service_name: serviceName,
-    }, fallbackLog, -1);
-  }
-}
-
-async function executeTask(task) {
-  const { task_id: taskId, script, service_name: serviceName } = task;
-  if (!taskId) return;
-
-  runningTask = taskId;
-  try {
-    if (serviceName) {
-      await executeServiceTask(task);
-      return;
-    }
-    if (script) {
-      await executeScriptTask(task);
-      return;
-    }
-    await updateTask(taskId, "error", {
-      error: "任务缺少 script 或 service_name",
-      finished_at: nowIso(),
-      executor: "remote_mac",
-      client_id: CLIENT_ID,
-    }, "", -1);
+    await updateTask(
+      taskId,
+      "error",
+      {
+        error: error?.message || "任务执行异常",
+        finished_at: nowIso(),
+        executor: "client_task_runtime",
+        client_id: CLIENT_ID,
+        task_name: taskName,
+        execution_name: executionName,
+      },
+      fallbackLog,
+      -1
+    );
   } finally {
     runningTask = null;
   }
@@ -354,7 +275,7 @@ async function pollLoop() {
       if (!runningTask) {
         const task = await fetchNextTask();
         if (task?.task_id) {
-          console.log(`[${nowIso()}] claimed task ${task.task_id}`);
+          console.log(`[${nowIso()}] claimed task ${task.task_id}, task_name=${task.task_name}`);
           await executeTask(task);
         }
       }
@@ -366,9 +287,10 @@ async function pollLoop() {
 }
 
 async function main() {
+  const taskDefs = getTaskDefinitions().map((item) => item.name).join(", ") || "(none)";
   console.log(`[${nowIso()}] mac-mini client starting`);
   console.log(
-    `[${nowIso()}] server=${SERVER_URL} client_id=${CLIENT_ID} tags=${CLIENT_TAGS.join(",") || "(none)"}`
+    `[${nowIso()}] server=${SERVER_URL} client_id=${CLIENT_ID} tags=${CLIENT_TAGS.join(",") || "(none)"} tasks=${taskDefs}`
   );
 
   while (true) {

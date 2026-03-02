@@ -64,17 +64,17 @@ const apiList: ApiDef[] = [
     path: "/api/v1/app/task/execute",
     title: "任务执行(触发器)",
     description:
-      "提交任务到后端，返回新任务ID。仅支持已注册 task_name：demo.server.echo / demo.client.scriptEcho / demo.client.mock3s。未注册 task 会返回 404（任务不存在）。",
+      "提交任务到后端，返回新任务ID。仅支持已注册 task_name：server.echo / client.echo / client.mock3s。未注册 task 会返回 404（任务不存在）。",
     headers: "x-timestamp (13位毫秒时间戳), x-sign (MD5签名)",
     params: [
       {
         name: "task_name",
         type: "string",
-        desc: "任务名称（demo.server.echo / demo.client.scriptEcho / demo.client.mock3s）",
+        desc: "任务名称（server.echo / client.echo / client.mock3s）",
         location: "body",
       },
       {
-        name: "task_params",
+        name: "task_payload",
         type: "object",
         desc: "任务参数（不同 task_name 的参数结构不同）",
         location: "body",
@@ -82,13 +82,13 @@ const apiList: ApiDef[] = [
     ],
     bodyExample: JSON.stringify(
       {
-        task_name: "demo.server.echo",
-        task_params: {
+        task_name: "server.echo",
+        task_payload: {
           message: "同步商品索引",
           repeat: 3,
-          sleep_sec: 1,
-          env_name: "prod",
+          sleep_ms: 400,
         },
+        execution_name: "sync-product-index-001",
       },
       null,
       2
@@ -96,26 +96,26 @@ const apiList: ApiDef[] = [
     curlExample: [
       signInitScript,
       "",
-      "# 1) 服务器执行示例（server_script）",
+      "# 1) 服务器执行示例（server_task）",
       "curl --request POST \"${BASE_URL}/api/v1/app/task/execute\" \\",
       "  --header \"Content-Type: application/json\" \\",
       "  --header \"x-timestamp: ${TS}\" \\",
       "  --header \"x-sign: ${SIGN}\" \\",
-      "  --data '{\"task_name\":\"demo.server.echo\",\"task_params\":{\"message\":\"同步商品索引\",\"repeat\":3,\"sleep_sec\":1,\"env_name\":\"prod\"}}'",
+      "  --data '{\"task_name\":\"server.echo\",\"task_payload\":{\"message\":\"同步商品索引\",\"repeat\":3,\"sleep_ms\":400},\"execution_name\":\"sync-product-index-001\"}'",
       "",
-      "# 2) 客户端服务执行示例（remote_mac service）",
+      "# 2) 客户端执行示例（client_task）",
       "curl --request POST \"${BASE_URL}/api/v1/app/task/execute\" \\",
       "  --header \"Content-Type: application/json\" \\",
       "  --header \"x-timestamp: ${TS}\" \\",
       "  --header \"x-sign: ${SIGN}\" \\",
-      "  --data '{\"task_name\":\"demo.client.mock3s\",\"task_params\":{\"payload\":{\"build_id\":\"build-20260302-001\",\"branch\":\"main\",\"notify\":true},\"required_tags\":[\"xcode\"]}}'",
+      "  --data '{\"task_name\":\"client.mock3s\",\"task_payload\":{\"payload\":{\"build_id\":\"build-20260302-001\",\"branch\":\"main\",\"notify\":true},\"required_tags\":[\"xcode\"]}}'",
       "",
       "# 3) 未注册任务示例（将返回 404 任务不存在）",
       "curl --request POST \"${BASE_URL}/api/v1/app/task/execute\" \\",
       "  --header \"Content-Type: application/json\" \\",
       "  --header \"x-timestamp: ${TS}\" \\",
       "  --header \"x-sign: ${SIGN}\" \\",
-      "  --data '{\"task_name\":\"demo.not-exists\",\"task_params\":{}}'",
+      "  --data '{\"task_name\":\"client.not-exists\",\"task_payload\":{}}'",
     ].join("\n"),
   },
   {

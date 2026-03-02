@@ -27,52 +27,50 @@ npm start
 | `WORK_DIR` | 脚本执行目录 | 当前目录 |
 | `POLL_INTERVAL_MS` | 拉任务间隔 | `4000` |
 | `HEARTBEAT_INTERVAL_MS` | 心跳间隔 | `10000` |
-| `DEMO_SERVICE_DELAY_MS` | 示例服务 `demo.mock3s` 的模拟处理时长 | `3000` |
+| `DEMO_TASK_DELAY_MS` | 示例任务 `client.mock3s` 的模拟处理时长 | `3000` |
 
 ## 任务执行流程
 
 1. 客户端注册 `/api/executor/register`
 2. 定时心跳 `/api/executor/heartbeat`
 3. 主动拉取任务 `/api/executor/next-task`
-4. 执行脚本或服务后回传 `/api/executor/task-update`（状态/日志/结果）
+4. 执行 task 后回传 `/api/executor/task-update`（状态/日志/结果）
 
-## 能力协商协议（Services Protocol）
+## 能力协商协议（Tasks Protocol）
 
 客户端在 `register/heartbeat` 时会上报：
 
 - `capabilities`: 机器能力（CPU、内存、loadavg 等）
-- `services`: 可提供的服务列表，例如：
+- `tasks`: 可提供的任务列表，例如：
 
 ```json
 [
   {
-    "name": "demo.mock3s",
+    "name": "client.mock3s",
     "version": "1.0.0",
-    "description": "示例服务：模拟处理3秒并返回JSON"
+    "description": "示例任务：模拟处理3秒并返回JSON"
   }
 ]
 ```
 
-服务端会据此分发 `remote_mac` 任务：
+服务端会据此分发 `client_task` 任务：
 
-- 脚本任务：下发 `script`
-- 服务任务：下发 `service_name + service_payload`
+- 下发字段：`task_name + task_payload + execution_name`
 
-## 示例服务
+## 示例任务
 
-客户端内置 `demo.mock3s`：
+客户端内置：
 
-- 接收 `service_payload`
-- 模拟处理 3 秒
-- 返回 JSON（写入任务 `status_info.output_json`）
+- `client.echo`
+- `client.mock3s`
 
 ## 已注册任务名（服务端）
 
 `/api/v1/app/task/execute` 仅支持服务端已注册的 task 名称，当前示例包括：
 
-- `demo.server.echo`（服务端执行）
-- `demo.client.scriptEcho`（客户端脚本执行）
-- `demo.client.mock3s`（客户端服务执行，调用 `demo.mock3s`）
+- `server.echo`（服务端执行）
+- `client.echo`（客户端执行）
+- `client.mock3s`（客户端执行）
 
 如果调用未注册 task（例如 `demo.not-exists`），服务端会返回 `404` 和“任务不存在”。
 

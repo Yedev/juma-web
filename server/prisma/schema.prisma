@@ -29,7 +29,7 @@ model Task {
   id         Int      @id @default(autoincrement())
   taskId     String   @unique @map("task_id")
   taskName   String   @map("task_name")
-  taskType   String   @default("server_script") @map("task_type")
+  taskType   String   @default("server_task") @map("task_type")
   targetClientId String? @map("target_client_id")
   claimedByClientId String? @map("claimed_by_client_id")
   taskParams String   @map("task_params")
