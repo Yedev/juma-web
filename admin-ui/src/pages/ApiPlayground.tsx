@@ -15,7 +15,15 @@ interface ApiDef {
   headers: string;
   params: { name: string; type: string; desc: string; location: "query" | "body" }[];
   bodyExample?: string;
+  curlExample: string;
 }
+
+const signInitScript = [
+  "APP_SECRET=\"juma2026_secret\"",
+  "BASE_URL=\"http://localhost:3001\"",
+  "TS=$(date +%s%3N)",
+  "SIGN=$(printf \"%s\" \"${APP_SECRET}${TS}\" | md5sum | awk '{print $1}')",
+].join("\n");
 
 const apiList: ApiDef[] = [
   {
@@ -26,6 +34,13 @@ const apiList: ApiDef[] = [
     description: "按 key 返回对应的 JSON 配置，不传 key 默认返回 global_json",
     headers: "x-timestamp (13位毫秒时间戳), x-sign (MD5签名)",
     params: [{ name: "key", type: "string", desc: "配置键名 (如 global_json)", location: "query" }],
+    curlExample: [
+      signInitScript,
+      "",
+      "curl --request GET \"${BASE_URL}/api/v1/app/config?key=global_json\" \\",
+      "  --header \"x-timestamp: ${TS}\" \\",
+      "  --header \"x-sign: ${SIGN}\"",
+    ].join("\n"),
   },
   {
     key: "2",
@@ -43,6 +58,15 @@ const apiList: ApiDef[] = [
       null,
       2
     ),
+    curlExample: [
+      signInitScript,
+      "",
+      "curl --request POST \"${BASE_URL}/api/v1/app/task/execute\" \\",
+      "  --header \"Content-Type: application/json\" \\",
+      "  --header \"x-timestamp: ${TS}\" \\",
+      "  --header \"x-sign: ${SIGN}\" \\",
+      "  --data '{\"task_name\":\"数据分析任务\",\"task_params\":{\"target\":\"user_data\"}}'",
+    ].join("\n"),
   },
   {
     key: "3",
@@ -61,6 +85,15 @@ const apiList: ApiDef[] = [
       null,
       2
     ),
+    curlExample: [
+      signInitScript,
+      "",
+      "curl --request PUT \"${BASE_URL}/api/v1/app/task/status\" \\",
+      "  --header \"Content-Type: application/json\" \\",
+      "  --header \"x-timestamp: ${TS}\" \\",
+      "  --header \"x-sign: ${SIGN}\" \\",
+      "  --data '{\"task_id\":\"T1709001234\",\"status\":\"running\",\"status_info\":{\"current_step\":\"2/5 处理数据\",\"progress\":40}}'",
+    ].join("\n"),
   },
   {
     key: "4",
@@ -70,6 +103,13 @@ const apiList: ApiDef[] = [
     description: "根据 task_id 查询任务当前状态及详情",
     headers: "x-timestamp (13位毫秒时间戳), x-sign (MD5签名)",
     params: [{ name: "task_id", type: "string", desc: "任务ID (如 T1709001234)", location: "query" }],
+    curlExample: [
+      signInitScript,
+      "",
+      "curl --request GET \"${BASE_URL}/api/v1/app/task/status?task_id=T1709001234\" \\",
+      "  --header \"x-timestamp: ${TS}\" \\",
+      "  --header \"x-sign: ${SIGN}\"",
+    ].join("\n"),
   },
 ];
 
@@ -160,7 +200,37 @@ function ApiPanel({ api }: { api: ApiDef }) {
       </div>
       <div style={{ fontSize: 12, color: "#bbb", marginBottom: 16 }}>
         Header: {api.headers}
-        <span style={{ marginLeft: 8, color: "#ccc" }}>(签名自动注入)</span>
+        <span style={{ marginLeft: 8, color: "#ccc" }}>(在线调试发送时自动注入签名)</span>
+      </div>
+
+      <div
+        style={{
+          background: "#fafafa",
+          border: "1px solid #f0f0f0",
+          borderRadius: 4,
+          padding: "10px 12px",
+          marginBottom: 12,
+        }}
+      >
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>参数说明</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {api.params.map((p) => (
+            <div
+              key={p.name}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "120px 120px 1fr",
+                gap: 12,
+                fontSize: 12,
+                color: "#666",
+              }}
+            >
+              <span style={{ fontFamily: "monospace", color: "#333" }}>{p.name}</span>
+              <span>{p.location === "query" ? "Query" : "Body"} · {p.type}</span>
+              <span style={{ color: "#999" }}>{p.desc}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Query params */}
@@ -235,6 +305,28 @@ function ApiPanel({ api }: { api: ApiDef }) {
         </span>
       </div>
 
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: "#999", marginBottom: 6 }}>curl 示例 (含 x-sign 计算)</div>
+        <pre
+          style={{
+            background: "#fafafa",
+            border: "1px solid #e8e8e8",
+            borderRadius: 4,
+            color: "#333",
+            padding: 12,
+            maxHeight: 220,
+            overflow: "auto",
+            fontSize: 12,
+            fontFamily: "'SF Mono', 'Fira Code', monospace",
+            margin: 0,
+            lineHeight: 1.6,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {api.curlExample}
+        </pre>
+      </div>
+
       {/* Response */}
       {(response || statusCode !== null) && (
         <div>
@@ -280,8 +372,46 @@ export default function ApiPlayground() {
 
   return (
     <div>
+      <div
+        style={{
+          background: "#fafafa",
+          border: "1px solid #e8e8e8",
+          borderRadius: 4,
+          padding: 14,
+          marginBottom: 16,
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 500, color: "#333", marginBottom: 10 }}>
+          鉴权说明（重点：x-sign）
+        </div>
+        <div style={{ fontSize: 12, color: "#666", lineHeight: 1.8 }}>
+          <div>1) App 端接口都在 <code>/api/v1/app/*</code> 下，请求必须带签名头。</div>
+          <div>2) x-timestamp 为 13 位毫秒时间戳，服务端允许误差 ±5 分钟，超时返回 403。</div>
+          <div>3) x-sign 计算公式：<code>MD5(APP_SECRET + x-timestamp)</code>，不通过返回 401。</div>
+          <div>4) 当前默认 APP_SECRET: <code>juma2026_secret</code>（生产环境请使用环境变量覆盖）。</div>
+        </div>
+        <div style={{ fontSize: 12, color: "#999", marginTop: 10, marginBottom: 6 }}>
+          Linux/macOS (md5sum) 生成签名示例：
+        </div>
+        <pre
+          style={{
+            background: "#fff",
+            border: "1px solid #f0f0f0",
+            borderRadius: 4,
+            padding: 10,
+            margin: 0,
+            fontSize: 12,
+            fontFamily: "'SF Mono', 'Fira Code', monospace",
+            lineHeight: 1.6,
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {signInitScript}
+        </pre>
+      </div>
+
       <div style={{ fontSize: 13, color: "#999", marginBottom: 20 }}>
-        以下为提供给移动端的 3 个接口，点击展开可查看文档并在线测试。
+        以下为提供给移动端的 4 个接口，点击展开可查看详细文档、curl 示例并在线测试。
       </div>
 
       <div>
