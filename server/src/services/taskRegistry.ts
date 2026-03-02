@@ -219,7 +219,6 @@ function buildRegisteredTasks(): RegisteredTaskInternal[] {
         message: "执行客户端回显任务",
         repeat: 2,
         sleep_ms: 500,
-        required_tags: ["xcode"],
       },
       buildTaskPayload: buildClientEchoTask,
     },
@@ -256,7 +255,6 @@ function buildRegisteredTasks(): RegisteredTaskInternal[] {
           branch: "main",
           notify: true,
         },
-        required_tags: ["xcode"],
       },
       buildTaskPayload: buildClientMock3sTask,
     },
@@ -313,4 +311,3 @@ export function prepareRegisteredTask(
     payload,
   };
 }
-
