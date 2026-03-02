@@ -261,7 +261,7 @@ async function executeServiceTask(task) {
   const handler = SERVICE_REGISTRY[serviceName];
   if (!handler) {
     await updateTask(taskId, "error", {
-      error: `客户端不支持服务: ${serviceName}`,
+      error: `任务不存在: ${serviceName}（客户端未注册该服务）`,
       finished_at: nowIso(),
       executor: "remote_mac",
       client_id: CLIENT_ID,

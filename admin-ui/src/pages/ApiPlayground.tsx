@@ -44,32 +44,82 @@ const apiList: ApiDef[] = [
   },
   {
     key: "2",
+    method: "GET",
+    path: "/api/v1/app/task/catalog",
+    title: "查询支持任务列表",
+    description: "返回服务端已注册的全部 task 定义（包含执行类型、参数说明、示例入参）",
+    headers: "x-timestamp (13位毫秒时间戳), x-sign (MD5签名)",
+    params: [],
+    curlExample: [
+      signInitScript,
+      "",
+      "curl --request GET \"${BASE_URL}/api/v1/app/task/catalog\" \\",
+      "  --header \"x-timestamp: ${TS}\" \\",
+      "  --header \"x-sign: ${SIGN}\"",
+    ].join("\n"),
+  },
+  {
+    key: "3",
     method: "POST",
     path: "/api/v1/app/task/execute",
     title: "任务执行(触发器)",
-    description: "提交任务到后端，返回新任务ID",
+    description:
+      "提交任务到后端，返回新任务ID。仅支持已注册 task_name：demo.server.echo / demo.client.scriptEcho / demo.client.mock3s。未注册 task 会返回 404（任务不存在）。",
     headers: "x-timestamp (13位毫秒时间戳), x-sign (MD5签名)",
     params: [
-      { name: "task_name", type: "string", desc: "任务名称", location: "body" },
-      { name: "task_params", type: "object", desc: "任务参数 (JSON对象)", location: "body" },
+      {
+        name: "task_name",
+        type: "string",
+        desc: "任务名称（demo.server.echo / demo.client.scriptEcho / demo.client.mock3s）",
+        location: "body",
+      },
+      {
+        name: "task_params",
+        type: "object",
+        desc: "任务参数（不同 task_name 的参数结构不同）",
+        location: "body",
+      },
     ],
     bodyExample: JSON.stringify(
-      { task_name: "数据分析任务", task_params: { target: "user_data" } },
+      {
+        task_name: "demo.server.echo",
+        task_params: {
+          message: "同步商品索引",
+          repeat: 3,
+          sleep_sec: 1,
+          env_name: "prod",
+        },
+      },
       null,
       2
     ),
     curlExample: [
       signInitScript,
       "",
+      "# 1) 服务器执行示例（server_script）",
       "curl --request POST \"${BASE_URL}/api/v1/app/task/execute\" \\",
       "  --header \"Content-Type: application/json\" \\",
       "  --header \"x-timestamp: ${TS}\" \\",
       "  --header \"x-sign: ${SIGN}\" \\",
-      "  --data '{\"task_name\":\"数据分析任务\",\"task_params\":{\"target\":\"user_data\"}}'",
+      "  --data '{\"task_name\":\"demo.server.echo\",\"task_params\":{\"message\":\"同步商品索引\",\"repeat\":3,\"sleep_sec\":1,\"env_name\":\"prod\"}}'",
+      "",
+      "# 2) 客户端服务执行示例（remote_mac service）",
+      "curl --request POST \"${BASE_URL}/api/v1/app/task/execute\" \\",
+      "  --header \"Content-Type: application/json\" \\",
+      "  --header \"x-timestamp: ${TS}\" \\",
+      "  --header \"x-sign: ${SIGN}\" \\",
+      "  --data '{\"task_name\":\"demo.client.mock3s\",\"task_params\":{\"payload\":{\"build_id\":\"build-20260302-001\",\"branch\":\"main\",\"notify\":true},\"required_tags\":[\"xcode\"]}}'",
+      "",
+      "# 3) 未注册任务示例（将返回 404 任务不存在）",
+      "curl --request POST \"${BASE_URL}/api/v1/app/task/execute\" \\",
+      "  --header \"Content-Type: application/json\" \\",
+      "  --header \"x-timestamp: ${TS}\" \\",
+      "  --header \"x-sign: ${SIGN}\" \\",
+      "  --data '{\"task_name\":\"demo.not-exists\",\"task_params\":{}}'",
     ].join("\n"),
   },
   {
-    key: "3",
+    key: "4",
     method: "PUT",
     path: "/api/v1/app/task/status",
     title: "更新任务状态",
@@ -96,11 +146,11 @@ const apiList: ApiDef[] = [
     ].join("\n"),
   },
   {
-    key: "4",
+    key: "5",
     method: "GET",
     path: "/api/v1/app/task/status",
     title: "任务状态查询",
-    description: "根据 task_id 查询任务当前状态及详情",
+    description: "根据 task_id 查询任务当前状态及详情（含任务参数、日志、执行节点、时间信息）",
     headers: "x-timestamp (13位毫秒时间戳), x-sign (MD5签名)",
     params: [{ name: "task_id", type: "string", desc: "任务ID (如 T1709001234)", location: "query" }],
     curlExample: [
@@ -213,24 +263,30 @@ function ApiPanel({ api }: { api: ApiDef }) {
         }}
       >
         <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>参数说明</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {api.params.map((p) => (
-            <div
-              key={p.name}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "120px 120px 1fr",
-                gap: 12,
-                fontSize: 12,
-                color: "#666",
-              }}
-            >
-              <span style={{ fontFamily: "monospace", color: "#333" }}>{p.name}</span>
-              <span>{p.location === "query" ? "Query" : "Body"} · {p.type}</span>
-              <span style={{ color: "#999" }}>{p.desc}</span>
-            </div>
-          ))}
-        </div>
+        {api.params.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#999" }}>无参数</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {api.params.map((p) => (
+              <div
+                key={p.name}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "120px 120px 1fr",
+                  gap: 12,
+                  fontSize: 12,
+                  color: "#666",
+                }}
+              >
+                <span style={{ fontFamily: "monospace", color: "#333" }}>{p.name}</span>
+                <span>
+                  {p.location === "query" ? "Query" : "Body"} · {p.type}
+                </span>
+                <span style={{ color: "#999" }}>{p.desc}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Query params */}
@@ -411,7 +467,7 @@ export default function ApiPlayground() {
       </div>
 
       <div style={{ fontSize: 13, color: "#999", marginBottom: 20 }}>
-        以下为提供给移动端的 4 个接口，点击展开可查看详细文档、curl 示例并在线测试。
+        以下为提供给移动端的 {apiList.length} 个接口，点击展开可查看详细文档、curl 示例并在线测试。
       </div>
 
       <div>

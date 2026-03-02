@@ -1,11 +1,29 @@
 import { Router, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { signMiddleware } from "../middleware/sign";
+import { listRegisteredTasks } from "../services/taskRegistry";
+import { enqueueTaskByRegisteredName } from "../services/taskEnqueue";
 
 const router = Router();
 const prisma = new PrismaClient();
 
 router.use(signMiddleware);
+
+function parseJson<T>(raw: string, fallback: T): T {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function parseObjectInput(value: unknown): { ok: true; data: Record<string, unknown> } | { ok: false; message: string } {
+  if (value == null) return { ok: true, data: {} };
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return { ok: true, data: value as Record<string, unknown> };
+  }
+  return { ok: false, message: "task_params must be object" };
+}
 
 router.get("/config", async (req: Request, res: Response): Promise<void> => {
   try {
@@ -29,37 +47,51 @@ router.get("/config", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+router.get("/task/catalog", async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const list = listRegisteredTasks();
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        list,
+        total: list.length,
+      },
+    });
+  } catch (error) {
+    console.error("Task catalog error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
 router.post("/task/execute", async (req: Request, res: Response): Promise<void> => {
   try {
-    const { task_name, task_params } = req.body;
+    const taskNameRaw = typeof req.body?.task_name === "string" ? req.body.task_name : "";
+    const taskName = taskNameRaw.trim();
+    const taskParamsResult = parseObjectInput(req.body?.task_params);
 
-    if (!task_name) {
+    if (!taskName) {
       res.status(400).json({ code: 400, message: "task_name is required" });
       return;
     }
+    if (!taskParamsResult.ok) {
+      res.status(400).json({ code: 400, message: taskParamsResult.message });
+      return;
+    }
 
-    const taskId = `T${Date.now()}${Math.floor(Math.random() * 1000)
-      .toString()
-      .padStart(3, "0")}`;
-
-    const queueCount = await prisma.task.count({
-      where: { status: "queued" },
+    const enqueueResult = await enqueueTaskByRegisteredName(prisma, {
+      taskName,
+      taskParams: taskParamsResult.data,
     });
-
-    await prisma.task.create({
-      data: {
-        taskId,
-        taskName: task_name,
-        taskParams: JSON.stringify(task_params || {}),
-        status: "queued",
-        statusInfo: JSON.stringify({ queue_position: queueCount + 1 }),
-      },
-    });
+    if (!enqueueResult.ok) {
+      res.status(enqueueResult.code).json({ code: enqueueResult.code, message: enqueueResult.message });
+      return;
+    }
 
     res.json({
       code: 200,
       message: "任务已受理",
-      data: { task_id: taskId, queue_position: queueCount + 1 },
+      data: enqueueResult.data,
     });
   } catch (error) {
     console.error("Task execute error:", error);
@@ -127,8 +159,20 @@ router.get("/task/status", async (req: Request, res: Response): Promise<void> =>
       message: "success",
       data: {
         task_id: task.taskId,
+        task_name: task.taskName,
+        task_type: task.taskType,
+        task_params: parseJson<Record<string, unknown>>(task.taskParams, {}),
         status: task.status,
-        status_info: JSON.parse(task.statusInfo),
+        status_info: parseJson<Record<string, unknown>>(task.statusInfo, {}),
+        execution_log: task.executionLog,
+        result_code: task.resultCode,
+        target_client_id: task.targetClientId,
+        claimed_by_client_id: task.claimedByClientId,
+        claimed_at: task.claimedAt,
+        started_at: task.startedAt,
+        finished_at: task.finishedAt,
+        created_at: task.createdAt,
+        updated_at: task.updatedAt,
       },
     });
   } catch (error) {

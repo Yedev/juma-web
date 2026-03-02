@@ -151,13 +151,37 @@ curl --request GET "${BASE_URL}/api/v1/app/config?key=global_json" \
   --header "x-sign: ${SIGN}"
 ```
 
-### 2) 触发任务执行
+### 2) 查询支持任务列表
+
+- **Method**: `GET`
+- **URL**: `/api/v1/app/task/catalog`
+- **说明**：返回服务端已注册的所有 task 定义（含执行类型、参数说明、示例参数）
+
+```bash
+APP_SECRET="juma2026_secret"
+BASE_URL="http://localhost:3001"
+TS=$(date +%s%3N)
+SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
+
+curl --request GET "${BASE_URL}/api/v1/app/task/catalog" \
+  --header "x-timestamp: ${TS}" \
+  --header "x-sign: ${SIGN}"
+```
+
+### 3) 触发任务执行
 
 - **Method**: `POST`
 - **URL**: `/api/v1/app/task/execute`
 - **Body**:
-  - `task_name`: string（必填）
-  - `task_params`: object（可选）
+  - `task_name`: string（必填，必须为已注册 task）
+  - `task_params`: object（可选，不同 task 的参数结构不同）
+- **未注册 task**：返回 `404`，`message` 为“任务不存在”
+- **当前内置示例 task**：
+  - `demo.server.echo`（服务端执行）
+  - `demo.client.scriptEcho`（客户端脚本执行）
+  - `demo.client.mock3s`（客户端服务执行，调用 `demo.mock3s`）
+
+#### 3.1 服务端执行示例（demo.server.echo）
 
 ```bash
 APP_SECRET="juma2026_secret"
@@ -169,10 +193,58 @@ curl --request POST "${BASE_URL}/api/v1/app/task/execute" \
   --header "Content-Type: application/json" \
   --header "x-timestamp: ${TS}" \
   --header "x-sign: ${SIGN}" \
-  --data '{"task_name":"数据分析任务","task_params":{"target":"user_data"}}'
+  --data '{
+    "task_name":"demo.server.echo",
+    "task_params":{
+      "message":"同步商品索引",
+      "repeat":3,
+      "sleep_sec":1,
+      "env_name":"prod"
+    }
+  }'
 ```
 
-### 3) 更新任务状态
+#### 3.2 客户端执行示例（demo.client.mock3s）
+
+```bash
+APP_SECRET="juma2026_secret"
+BASE_URL="http://localhost:3001"
+TS=$(date +%s%3N)
+SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
+
+curl --request POST "${BASE_URL}/api/v1/app/task/execute" \
+  --header "Content-Type: application/json" \
+  --header "x-timestamp: ${TS}" \
+  --header "x-sign: ${SIGN}" \
+  --data '{
+    "task_name":"demo.client.mock3s",
+    "task_params":{
+      "payload":{
+        "build_id":"build-20260302-001",
+        "branch":"main",
+        "notify":true
+      },
+      "required_tags":["xcode"]
+    }
+  }'
+```
+
+#### 3.3 未注册任务示例（返回任务不存在）
+
+```bash
+APP_SECRET="juma2026_secret"
+BASE_URL="http://localhost:3001"
+TS=$(date +%s%3N)
+SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
+
+curl --request POST "${BASE_URL}/api/v1/app/task/execute" \
+  --header "Content-Type: application/json" \
+  --header "x-timestamp: ${TS}" \
+  --header "x-sign: ${SIGN}" \
+  --data '{"task_name":"demo.not-exists","task_params":{}}'
+```
+
+### 4) 更新任务状态
 
 - **Method**: `PUT`
 - **URL**: `/api/v1/app/task/status`
@@ -194,11 +266,12 @@ curl --request PUT "${BASE_URL}/api/v1/app/task/status" \
   --data '{"task_id":"T1709001234","status":"running","status_info":{"current_step":"2/5 处理数据","progress":40}}'
 ```
 
-### 4) 查询任务状态
+### 5) 查询任务状态
 
 - **Method**: `GET`
 - **URL**: `/api/v1/app/task/status`
 - **Query**: `task_id`（必填）
+- **返回增强**：包含 `task_name`、`task_type`、`task_params`、`status_info`、`execution_log`、`result_code`、执行时间等详细字段
 
 ```bash
 APP_SECRET="juma2026_secret"
@@ -218,9 +291,10 @@ curl --request GET "${BASE_URL}/api/v1/app/task/status?task_id=T1709001234" \
 “任务管理”页面支持直接管理任务：
 
 - 新建任务（任务名称、任务类型、脚本、超时、env、重试策略）
+- 已注册任务面板（展示所有支持 task、参数说明、示例参数、一键触发示例任务）
 - `remote_mac` 任务支持指定目标客户端/required_tags
 - `remote_mac` 支持服务任务（`serviceName + servicePayload`）
-- 查看任务状态、详情、执行日志
+- 查看任务状态、详情、执行日志（日志详情弹窗含 task_params/status_info/execution_log）
 - 更新任务状态与 `status_info`
 - 删除任务
 - 分页刷新、客户端状态刷新

@@ -10,6 +10,8 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
+  PlayCircleOutlined,
+  FileTextOutlined,
 } from "@ant-design/icons";
 import { adminClient } from "../api/client";
 
@@ -88,6 +90,25 @@ interface ExecutorClient {
   tasksClaimed: number;
   tasksSuccess: number;
   tasksFailed: number;
+}
+
+interface RegisteredTaskParamDef {
+  name: string;
+  type: string;
+  required: boolean;
+  description: string;
+  defaultValue?: unknown;
+}
+
+interface RegisteredTaskDef {
+  taskName: string;
+  title: string;
+  description: string;
+  taskType: TaskType;
+  executeMode: "script" | "service";
+  serviceName?: string;
+  params: RegisteredTaskParamDef[];
+  exampleTaskParams: Record<string, unknown>;
 }
 
 interface StatusDef {
@@ -174,6 +195,14 @@ function parseJsonObject(
 function getErrorMessage(error: unknown, fallback: string): string {
   const maybeError = error as { response?: { data?: { message?: string } } };
   return maybeError.response?.data?.message || fallback;
+}
+
+function prettyJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value ?? "");
+  }
 }
 
 function taskTypeText(taskType: TaskType): string {
@@ -293,10 +322,13 @@ export default function TaskManagement() {
 
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [clients, setClients] = useState<ExecutorClient[]>([]);
+  const [taskDefinitions, setTaskDefinitions] = useState<RegisteredTaskDef[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [clientsLoading, setClientsLoading] = useState(false);
+  const [definitionsLoading, setDefinitionsLoading] = useState(false);
+  const [triggeringTaskName, setTriggeringTaskName] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createTaskName, setCreateTaskName] = useState("");
@@ -316,6 +348,8 @@ export default function TaskManagement() {
   const [editingTask, setEditingTask] = useState<TaskRecord | null>(null);
   const [editingStatus, setEditingStatus] = useState<TaskStatus>("queued");
   const [editingStatusInfo, setEditingStatusInfo] = useState("{\n  \n}");
+  const [logOpen, setLogOpen] = useState(false);
+  const [logTask, setLogTask] = useState<TaskRecord | null>(null);
 
   const fetchTasks = useCallback(async (p: number) => {
     setLoading(true);
@@ -348,6 +382,49 @@ export default function TaskManagement() {
     }
   }, []);
 
+  const fetchTaskDefinitions = useCallback(async () => {
+    setDefinitionsLoading(true);
+    try {
+      const res = await adminClient.get("/api/admin/task-definitions");
+      if (res.data.code === 200) {
+        setTaskDefinitions(res.data.data.list || []);
+      }
+    } catch {
+      // handled by interceptor
+    } finally {
+      setDefinitionsLoading(false);
+    }
+  }, []);
+
+  const handleExecuteRegisteredTask = useCallback(
+    async (definition: RegisteredTaskDef) => {
+      setTriggeringTaskName(definition.taskName);
+      try {
+        const res = await adminClient.post("/api/admin/tasks/execute-by-name", {
+          taskName: definition.taskName,
+          taskParams: definition.exampleTaskParams,
+        });
+        if (res.data.code === 200) {
+          message.success(`已触发示例任务：${definition.taskName}`);
+          if (page !== 1) {
+            setPage(1);
+          }
+          fetchTasks(1);
+        }
+      } catch (error: unknown) {
+        message.error(getErrorMessage(error, "触发示例任务失败"));
+      } finally {
+        setTriggeringTaskName(null);
+      }
+    },
+    [fetchTasks, page]
+  );
+
+  const openLogModal = useCallback((record: TaskRecord) => {
+    setLogTask(record);
+    setLogOpen(true);
+  }, []);
+
   const refreshPage = useCallback(
     (targetPage: number = page) => {
       fetchTasks(targetPage);
@@ -362,6 +439,10 @@ export default function TaskManagement() {
   useEffect(() => {
     fetchClients();
   }, [fetchClients]);
+
+  useEffect(() => {
+    fetchTaskDefinitions();
+  }, [fetchTaskDefinitions]);
 
   const openCreateModal = () => {
     setCreateTaskName("");
@@ -553,6 +634,9 @@ export default function TaskManagement() {
     }));
   }, [clients]);
 
+  const logTaskParams = useMemo(() => (logTask ? parseTaskParams(logTask.taskParams) : {}), [logTask]);
+  const logTaskStatusInfo = useMemo(() => (logTask ? parseInfo(logTask.statusInfo) : {}), [logTask]);
+
   const columns = [
     {
       title: "任务ID",
@@ -688,16 +772,20 @@ export default function TaskManagement() {
       width: 120,
       render: (_: unknown, record: TaskRecord) =>
         record.executionLog ? (
-          <Tooltip
-            title={
-              <pre style={{ margin: 0, whiteSpace: "pre-wrap", maxWidth: 500 }}>
-                {record.executionLog}
-              </pre>
-            }
-            placement="topLeft"
+          <span
+            onClick={() => openLogModal(record)}
+            style={{
+              fontSize: 12,
+              color: "#1677ff",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+            }}
           >
-            <span style={{ fontSize: 12, color: "#1677ff", cursor: "pointer" }}>查看日志</span>
-          </Tooltip>
+            <FileTextOutlined style={{ fontSize: 12 }} />
+            查看日志
+          </span>
         ) : (
           <span style={{ fontSize: 12, color: "#bbb" }}>-</span>
         ),
@@ -729,7 +817,23 @@ export default function TaskManagement() {
       key: "actions",
       width: 170,
       render: (_: unknown, record: TaskRecord) => (
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span
+            onClick={() => openLogModal(record)}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              fontSize: 12,
+              color: "#666",
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "#333")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "#666")}
+          >
+            <FileTextOutlined style={{ fontSize: 11 }} />
+            日志详情
+          </span>
           <span
             onClick={() => openStatusModal(record)}
             style={{
@@ -960,7 +1064,140 @@ export default function TaskManagement() {
             <ReloadOutlined style={{ fontSize: 12 }} />
             刷新客户端
           </span>
+          <span
+            onClick={fetchTaskDefinitions}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13,
+              color: "#999",
+              cursor: "pointer",
+              padding: "4px 0",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "#333")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "#999")}
+          >
+            <ReloadOutlined style={{ fontSize: 12 }} />
+            刷新支持任务
+          </span>
         </div>
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #f0f0f0",
+          borderRadius: 6,
+          background: "#fafafa",
+          padding: 14,
+          marginBottom: 16,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 10,
+            gap: 10,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 500, color: "#333" }}>支持的所有 Task（已注册）</div>
+          <div style={{ fontSize: 12, color: "#999" }}>执行未知 task 会返回“任务不存在”</div>
+        </div>
+
+        {definitionsLoading ? (
+          <div style={{ fontSize: 12, color: "#999" }}>加载中...</div>
+        ) : taskDefinitions.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#999" }}>暂无已注册 task</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 10 }}>
+            {taskDefinitions.map((definition) => (
+              <div
+                key={definition.taskName}
+                style={{
+                  border: "1px solid #ededed",
+                  borderRadius: 6,
+                  background: "#fff",
+                  padding: 12,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 13, color: "#333", fontWeight: 500 }}>{definition.title}</div>
+                    <div style={{ fontSize: 11, color: "#999", fontFamily: "monospace" }}>{definition.taskName}</div>
+                  </div>
+                  <Tag
+                    style={{
+                      margin: 0,
+                      border: "none",
+                      background: "#f5f5f5",
+                      color: taskTypeColor(definition.taskType),
+                    }}
+                  >
+                    {taskTypeText(definition.taskType)}
+                  </Tag>
+                </div>
+
+                <div style={{ marginTop: 8, fontSize: 12, color: "#666", lineHeight: 1.7 }}>{definition.description}</div>
+                <div style={{ marginTop: 8, fontSize: 12, color: "#999" }}>
+                  模式：{definition.executeMode}
+                  {definition.serviceName ? ` · service=${definition.serviceName}` : ""}
+                </div>
+
+                <div style={{ marginTop: 8, fontSize: 11, color: "#999", marginBottom: 6 }}>示例入参 task_params</div>
+                <pre
+                  style={{
+                    margin: 0,
+                    maxHeight: 138,
+                    overflow: "auto",
+                    fontSize: 11,
+                    padding: 8,
+                    borderRadius: 4,
+                    border: "1px solid #f0f0f0",
+                    background: "#fafafa",
+                    fontFamily: "'SF Mono', monospace",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {prettyJson(definition.exampleTaskParams)}
+                </pre>
+
+                <div style={{ marginTop: 8, fontSize: 11, color: "#999", marginBottom: 6 }}>参数说明</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {definition.params.map((param) => (
+                    <div key={param.name} style={{ fontSize: 11, color: "#666", lineHeight: 1.6 }}>
+                      <span style={{ fontFamily: "monospace", color: "#333" }}>{param.name}</span>
+                      <span style={{ color: "#999" }}> ({param.type})</span>
+                      {param.required ? <span style={{ color: "#ff4d4f" }}> *必填</span> : null}
+                      <span style={{ color: "#999" }}> - {param.description}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ marginTop: 10 }}>
+                  <span
+                    onClick={() => {
+                      if (triggeringTaskName) return;
+                      void handleExecuteRegisteredTask(definition);
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 5,
+                      fontSize: 12,
+                      color: triggeringTaskName ? "#bbb" : "#333",
+                      cursor: triggeringTaskName ? "default" : "pointer",
+                    }}
+                  >
+                    <PlayCircleOutlined style={{ fontSize: 12 }} />
+                    {triggeringTaskName === definition.taskName ? "触发中..." : "触发示例任务"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <Table
@@ -1181,6 +1418,104 @@ export default function TaskManagement() {
             />
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        title={logTask ? `日志详情 · ${logTask.taskId}` : "日志详情"}
+        open={logOpen}
+        onCancel={() => setLogOpen(false)}
+        footer={null}
+        width={980}
+      >
+        {!logTask ? null : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+              <div style={{ fontSize: 12, color: "#666" }}>
+                <div style={{ color: "#999", marginBottom: 4 }}>任务ID</div>
+                <div style={{ fontFamily: "monospace", color: "#333" }}>{logTask.taskId}</div>
+              </div>
+              <div style={{ fontSize: 12, color: "#666" }}>
+                <div style={{ color: "#999", marginBottom: 4 }}>任务名称</div>
+                <div style={{ color: "#333" }}>{logTask.taskName}</div>
+              </div>
+              <div style={{ fontSize: 12, color: "#666" }}>
+                <div style={{ color: "#999", marginBottom: 4 }}>执行类型</div>
+                <div style={{ color: "#333" }}>{isTaskType(logTask.taskType) ? taskTypeText(logTask.taskType) : logTask.taskType}</div>
+              </div>
+              <div style={{ fontSize: 12, color: "#666" }}>
+                <div style={{ color: "#999", marginBottom: 4 }}>状态 / 结果码</div>
+                <div style={{ color: "#333" }}>
+                  {logTask.status}
+                  {typeof logTask.resultCode === "number" ? ` / ${logTask.resultCode}` : ""}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 12, color: "#999", marginBottom: 6 }}>任务参数 task_params</div>
+                <pre
+                  style={{
+                    margin: 0,
+                    maxHeight: 220,
+                    overflow: "auto",
+                    fontSize: 12,
+                    padding: 10,
+                    border: "1px solid #f0f0f0",
+                    borderRadius: 4,
+                    background: "#fafafa",
+                    fontFamily: "'SF Mono', monospace",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {prettyJson(logTaskParams)}
+                </pre>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 12, color: "#999", marginBottom: 6 }}>状态详情 status_info</div>
+                <pre
+                  style={{
+                    margin: 0,
+                    maxHeight: 220,
+                    overflow: "auto",
+                    fontSize: 12,
+                    padding: 10,
+                    border: "1px solid #f0f0f0",
+                    borderRadius: 4,
+                    background: "#fafafa",
+                    fontFamily: "'SF Mono', monospace",
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {prettyJson(logTaskStatusInfo)}
+                </pre>
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: 12, color: "#999", marginBottom: 6 }}>执行日志 execution_log</div>
+              <pre
+                style={{
+                  margin: 0,
+                  maxHeight: 320,
+                  overflow: "auto",
+                  fontSize: 12,
+                  padding: 10,
+                  border: "1px solid #f0f0f0",
+                  borderRadius: 4,
+                  background: "#111",
+                  color: "#f5f5f5",
+                  fontFamily: "'SF Mono', monospace",
+                  whiteSpace: "pre-wrap",
+                  lineHeight: 1.6,
+                }}
+              >
+                {logTask.executionLog || "(暂无日志)"}
+              </pre>
+            </div>
+          </div>
+        )}
       </Modal>
     </div>
   );
