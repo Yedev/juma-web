@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response, Router } from "express";
 import { PrismaClient, Prisma, Task } from "@prisma/client";
+import { inferTaskTypeFromName } from "../services/taskNaming";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -18,27 +19,20 @@ interface RegisterBody {
   app_version?: unknown;
   tags?: unknown;
   capabilities?: unknown;
+  tasks?: unknown;
   services?: unknown;
 }
 
-interface ClientTaskParams {
-  script?: unknown;
-  timeout_sec?: unknown;
-  timeoutSec?: unknown;
-  env?: unknown;
-  cwd?: unknown;
-  required_tags?: unknown;
-  requiredTags?: unknown;
-  service_name?: unknown;
-  serviceName?: unknown;
-  service_payload?: unknown;
-  servicePayload?: unknown;
-}
-
-interface ServiceDef {
+interface TaskDef {
   name: string;
   version?: string;
   description?: string;
+}
+
+interface ParsedTaskEnvelope {
+  taskPayload: JsonObj;
+  requiredTags: string[];
+  executionName?: string;
 }
 
 function parseJson<T>(raw: string, fallback: T): T {
@@ -79,13 +73,14 @@ function normalizeObject(value: unknown): JsonObj {
   return value as JsonObj;
 }
 
-function normalizeServices(value: unknown): ServiceDef[] {
+function normalizeTasks(value: unknown): TaskDef[] {
   if (!Array.isArray(value)) return [];
-  const dedupe = new Map<string, ServiceDef>();
+  const dedupe = new Map<string, TaskDef>();
   value.forEach((item) => {
     if (typeof item === "string") {
       const name = item.trim();
       if (!name) return;
+      if (inferTaskTypeFromName(name) !== "client_task") return;
       dedupe.set(name, { name });
       return;
     }
@@ -93,7 +88,8 @@ function normalizeServices(value: unknown): ServiceDef[] {
     const obj = item as Record<string, unknown>;
     const name = typeof obj.name === "string" ? obj.name.trim() : "";
     if (!name) return;
-    const def: ServiceDef = { name };
+    if (inferTaskTypeFromName(name) !== "client_task") return;
+    const def: TaskDef = { name };
     if (typeof obj.version === "string" && obj.version.trim()) def.version = obj.version.trim();
     if (typeof obj.description === "string" && obj.description.trim()) def.description = obj.description.trim();
     dedupe.set(name, def);
@@ -101,46 +97,25 @@ function normalizeServices(value: unknown): ServiceDef[] {
   return Array.from(dedupe.values());
 }
 
-function mergeCapabilities(base: JsonObj, latest: JsonObj, services: ServiceDef[]): JsonObj {
+function mergeCapabilities(base: JsonObj, latest: JsonObj, tasks: TaskDef[]): JsonObj {
   return {
     ...base,
     ...latest,
-    services,
-    service_protocol_version: "1.0",
+    tasks,
+    // 兼容旧页面/旧客户端结构
+    services: tasks,
+    task_protocol_version: "1.0",
   };
 }
 
-function parseTaskParams(task: Task): {
-  script: string;
-  timeoutSec: number;
-  env: Record<string, string>;
-  cwd?: string;
-  requiredTags: string[];
-  serviceName?: string;
-  servicePayload?: unknown;
-} {
-  const params = parseJson<ClientTaskParams>(task.taskParams, {});
-  const script = typeof params.script === "string" ? params.script : "";
-  const timeoutSec =
-    typeof params.timeout_sec === "number" && Number.isFinite(params.timeout_sec)
-      ? Math.max(1, Math.min(3600, Math.floor(params.timeout_sec)))
-      : typeof params.timeoutSec === "number" && Number.isFinite(params.timeoutSec)
-        ? Math.max(1, Math.min(3600, Math.floor(params.timeoutSec)))
-        : 300;
-  const envObj = normalizeObject(params.env);
-  const env: Record<string, string> = {};
-  Object.entries(envObj).forEach(([k, v]) => {
-    if (typeof v === "string") env[k] = v;
-    else if (typeof v === "number" || typeof v === "boolean") env[k] = String(v);
-  });
-
+function parseTaskEnvelope(task: Task): ParsedTaskEnvelope {
+  const params = parseJson<JsonObj>(task.taskParams, {});
+  const taskPayload = normalizeObject(params.task_payload ?? params.taskPayload ?? params.payload);
   const requiredTags = toStringArray(params.required_tags ?? params.requiredTags);
-  const cwd = typeof params.cwd === "string" && params.cwd.trim() ? params.cwd.trim() : undefined;
-  const serviceNameRaw = typeof params.service_name === "string" ? params.service_name : params.serviceName;
-  const serviceName = typeof serviceNameRaw === "string" && serviceNameRaw.trim() ? serviceNameRaw.trim() : undefined;
-  const servicePayload = params.service_payload ?? params.servicePayload;
-
-  return { script, timeoutSec, env, cwd, requiredTags, serviceName, servicePayload };
+  const executionNameRaw = params.execution_name ?? params.executionName;
+  const executionName =
+    typeof executionNameRaw === "string" && executionNameRaw.trim() ? executionNameRaw.trim().slice(0, 120) : undefined;
+  return { taskPayload, requiredTags, executionName };
 }
 
 function getClientIp(req: Request): string {
@@ -171,7 +146,7 @@ router.post("/register", async (req: Request, res: Response): Promise<void> => {
       typeof body.app_version === "string" && body.app_version.trim() ? body.app_version.trim() : "unknown";
     const tags = toStringArray(body.tags);
     const capabilities = normalizeObject(body.capabilities);
-    const services = normalizeServices(body.services ?? capabilities.services);
+    const tasks = normalizeTasks(body.tasks ?? body.services ?? capabilities.tasks ?? capabilities.services);
 
     if (!clientId) {
       res.status(400).json({ code: 400, message: "client_id is required" });
@@ -190,7 +165,7 @@ router.post("/register", async (req: Request, res: Response): Promise<void> => {
         platform,
         appVersion,
         tags: JSON.stringify(tags),
-        capabilities: JSON.stringify(mergeCapabilities({}, capabilities, services)),
+        capabilities: JSON.stringify(mergeCapabilities({}, capabilities, tasks)),
         status: "online",
         ip: getClientIp(req),
         lastHeartbeat: now,
@@ -201,7 +176,7 @@ router.post("/register", async (req: Request, res: Response): Promise<void> => {
         platform,
         appVersion,
         tags: JSON.stringify(tags),
-        capabilities: JSON.stringify(mergeCapabilities({}, capabilities, services)),
+        capabilities: JSON.stringify(mergeCapabilities({}, capabilities, tasks)),
         status: "online",
         ip: getClientIp(req),
         lastHeartbeat: now,
@@ -213,7 +188,7 @@ router.post("/register", async (req: Request, res: Response): Promise<void> => {
       message: "registered",
       data: {
         client_id: client.clientId,
-        accepted_services: services,
+        accepted_tasks: tasks,
         poll_interval_ms: DEFAULT_POLL_MS,
         heartbeat_interval_ms: DEFAULT_HEARTBEAT_MS,
         server_time: now.toISOString(),
@@ -229,7 +204,7 @@ router.post("/heartbeat", async (req: Request, res: Response): Promise<void> => 
   try {
     const clientId = typeof req.body?.client_id === "string" ? req.body.client_id.trim() : "";
     const capabilities = normalizeObject(req.body?.capabilities);
-    const services = normalizeServices(req.body?.services ?? capabilities.services);
+    const tasks = normalizeTasks(req.body?.tasks ?? req.body?.services ?? capabilities.tasks ?? capabilities.services);
     if (!clientId) {
       res.status(400).json({ code: 400, message: "client_id is required" });
       return;
@@ -248,8 +223,8 @@ router.post("/heartbeat", async (req: Request, res: Response): Promise<void> => 
         ip: getClientIp(req),
         lastHeartbeat: new Date(),
         capabilities:
-          Object.keys(capabilities).length || services.length
-            ? JSON.stringify(mergeCapabilities(parseJson<JsonObj>(existing.capabilities, {}), capabilities, services))
+          Object.keys(capabilities).length || tasks.length
+            ? JSON.stringify(mergeCapabilities(parseJson<JsonObj>(existing.capabilities, {}), capabilities, tasks))
             : existing.capabilities,
       },
     });
@@ -277,8 +252,8 @@ router.post("/next-task", async (req: Request, res: Response): Promise<void> => 
 
     const clientTags = toStringArray(parseJson<unknown[]>(client.tags, []));
     const parsedCapabilities = parseJson<JsonObj>(client.capabilities, {});
-    const clientServices = normalizeServices(parsedCapabilities.services);
-    const clientServiceNames = new Set(clientServices.map((s) => s.name));
+    const clientTasks = normalizeTasks(parsedCapabilities.tasks ?? parsedCapabilities.services);
+    const clientTaskNames = new Set(clientTasks.map((item) => item.name));
 
     await prisma.executorClient.update({
       where: { clientId },
@@ -292,26 +267,21 @@ router.post("/next-task", async (req: Request, res: Response): Promise<void> => 
     const candidates = await prisma.task.findMany({
       where: {
         status: "queued",
-        taskType: "remote_mac",
+        taskType: "client_task",
       },
       orderBy: { createdAt: "asc" },
       take: 50,
     });
 
     for (const task of candidates) {
-      if (task.targetClientId && task.targetClientId !== clientId) {
-        continue;
-      }
-
-      const taskParams = parseTaskParams(task);
-      if (!taskParams.serviceName && !taskParams.script.trim()) {
+      if (inferTaskTypeFromName(task.taskName) !== "client_task") {
         await prisma.task.update({
           where: { id: task.id },
           data: {
             status: "error",
             statusInfo: JSON.stringify({
-              executor: "remote_mac",
-              error: "taskParams.script 和 service_name 不能同时为空",
+              executor: "client_task_runtime",
+              error: "task_name 命名非法，客户端任务必须是 client.name",
             }),
             finishedAt: new Date(),
           },
@@ -319,12 +289,16 @@ router.post("/next-task", async (req: Request, res: Response): Promise<void> => 
         continue;
       }
 
-      if (taskParams.requiredTags.length > 0) {
-        const matched = taskParams.requiredTags.every((tag) => clientTags.includes(tag));
-        if (!matched) continue;
+      if (task.targetClientId && task.targetClientId !== clientId) {
+        continue;
       }
 
-      if (taskParams.serviceName && !clientServiceNames.has(taskParams.serviceName)) {
+      const envelope = parseTaskEnvelope(task);
+      if (envelope.requiredTags.length > 0) {
+        const matched = envelope.requiredTags.every((tag) => clientTags.includes(tag));
+        if (!matched) continue;
+      }
+      if (!clientTaskNames.has(task.taskName)) {
         continue;
       }
 
@@ -340,7 +314,7 @@ router.post("/next-task", async (req: Request, res: Response): Promise<void> => 
           claimedAt: now,
           startedAt: now,
           statusInfo: JSON.stringify({
-            executor: "remote_mac",
+            executor: "client_task_runtime",
             client_id: clientId,
             started_at: now.toISOString(),
           }),
@@ -359,13 +333,8 @@ router.post("/next-task", async (req: Request, res: Response): Promise<void> => 
         data: {
           task_id: task.taskId,
           task_name: task.taskName,
-          task_mode: taskParams.serviceName ? "service" : "script",
-          script: taskParams.script,
-          timeout_sec: taskParams.timeoutSec,
-          env: taskParams.env,
-          cwd: taskParams.cwd,
-          service_name: taskParams.serviceName,
-          service_payload: taskParams.servicePayload,
+          task_payload: envelope.taskPayload,
+          execution_name: envelope.executionName,
         },
       });
       return;
@@ -403,7 +372,7 @@ router.post("/task-update", async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    if (task.taskType !== "remote_mac") {
+    if (task.taskType !== "client_task") {
       res.status(400).json({ code: 400, message: "task type mismatch" });
       return;
     }
@@ -418,7 +387,7 @@ router.post("/task-update", async (req: Request, res: Response): Promise<void> =
     const mergedInfo: JsonObj = {
       ...oldInfo,
       ...statusInfoRaw,
-      executor: "remote_mac",
+      executor: "client_task_runtime",
       client_id: clientId,
       reported_at: now.toISOString(),
     };

@@ -19,7 +19,7 @@ const { TextArea } = Input;
 
 const taskStatuses = ["queued", "running", "error", "completed"] as const;
 type TaskStatus = (typeof taskStatuses)[number];
-const taskTypes = ["server_script", "remote_mac"] as const;
+const taskTypes = ["server_task", "client_task"] as const;
 type TaskType = (typeof taskTypes)[number];
 
 interface StatusInfo {
@@ -61,13 +61,12 @@ interface TaskRecord {
 }
 
 interface TaskParams {
-  script?: string;
-  timeout_sec?: number;
-  env?: Record<string, unknown>;
-  cwd?: string;
+  task_payload?: Record<string, unknown>;
+  execution_name?: string;
   required_tags?: string[];
-  service_name?: string;
-  service_payload?: unknown;
+  taskPayload?: Record<string, unknown>;
+  executionName?: string;
+  payload?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -206,15 +205,15 @@ function prettyJson(value: unknown): string {
 }
 
 function taskTypeText(taskType: TaskType): string {
-  return taskType === "server_script" ? "服务器执行" : "Mac Mini 执行";
+  return taskType === "server_task" ? "服务器执行" : "客户端执行";
 }
 
 function taskTypeColor(taskType: TaskType): string {
-  return taskType === "server_script" ? "#722ed1" : "#1677ff";
+  return taskType === "server_task" ? "#722ed1" : "#1677ff";
 }
 
 function StatusExtra({ status, info }: { status: string; info: StatusInfo }) {
-  if (status === "running" && info.executor === "remote_mac" && info.client_id) {
+  if (status === "running" && info.executor === "client_task_runtime" && info.client_id) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ color: "#1677ff", fontSize: 11 }}>客户端 {info.client_id} 执行中</span>
@@ -332,7 +331,7 @@ export default function TaskManagement() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createTaskName, setCreateTaskName] = useState("");
-  const [createTaskType, setCreateTaskType] = useState<TaskType>("server_script");
+  const [createTaskType, setCreateTaskType] = useState<TaskType>("server_task");
   const [createRemoteMode, setCreateRemoteMode] = useState<RemoteMode>("script");
   const [createScript, setCreateScript] = useState("echo \"hello from task executor\"");
   const [createServiceName, setCreateServiceName] = useState("demo.mock3s");
@@ -446,7 +445,7 @@ export default function TaskManagement() {
 
   const openCreateModal = () => {
     setCreateTaskName("");
-    setCreateTaskType("server_script");
+    setCreateTaskType("server_task");
     setCreateRemoteMode("script");
     setCreateScript("echo \"hello from task executor\"");
     setCreateServiceName("demo.mock3s");
@@ -468,21 +467,21 @@ export default function TaskManagement() {
       return;
     }
 
-    if (createTaskType === "server_script" && !createScript.trim()) {
-      message.error("server_script 任务必须填写执行脚本");
+    if (createTaskType === "server_task" && !createScript.trim()) {
+      message.error("server_task 任务必须填写执行脚本");
       return;
     }
-    if (createTaskType === "remote_mac" && createRemoteMode === "script" && !createScript.trim()) {
+    if (createTaskType === "client_task" && createRemoteMode === "script" && !createScript.trim()) {
       message.error("脚本模式必须填写执行脚本");
       return;
     }
-    if (createTaskType === "remote_mac" && createRemoteMode === "service" && !createServiceName.trim()) {
+    if (createTaskType === "client_task" && createRemoteMode === "service" && !createServiceName.trim()) {
       message.error("服务模式必须填写 serviceName");
       return;
     }
 
     let envPayload: Record<string, unknown> = {};
-    if (createTaskType === "server_script" || createRemoteMode === "script") {
+    if (createTaskType === "server_task" || createRemoteMode === "script") {
       const envResult = parseJsonObject(createEnv, "环境变量 env");
       if (!envResult.ok) {
         message.error(envResult.message);
@@ -492,7 +491,7 @@ export default function TaskManagement() {
     }
 
     let parsedServicePayload: unknown = undefined;
-    if (createTaskType === "remote_mac" && createRemoteMode === "service") {
+    if (createTaskType === "client_task" && createRemoteMode === "service") {
       const payloadResult = parseJsonAny(createServicePayload, "servicePayload");
       if (!payloadResult.ok) {
         message.error(payloadResult.message);
@@ -501,7 +500,7 @@ export default function TaskManagement() {
       parsedServicePayload = payloadResult.value;
     }
 
-    if (createTaskType === "remote_mac" && createTargetClientId && !clients.some((c) => c.clientId === createTargetClientId)) {
+    if (createTaskType === "client_task" && createTargetClientId && !clients.some((c) => c.clientId === createTargetClientId)) {
       message.error("目标客户端不存在，请刷新后重试");
       return;
     }
@@ -512,22 +511,22 @@ export default function TaskManagement() {
         taskName,
         taskType: createTaskType,
         script:
-          createTaskType === "server_script" || createRemoteMode === "script"
+          createTaskType === "server_task" || createRemoteMode === "script"
             ? createScript
             : undefined,
         serviceName:
-          createTaskType === "remote_mac" && createRemoteMode === "service"
+          createTaskType === "client_task" && createRemoteMode === "service"
             ? createServiceName.trim()
             : undefined,
         servicePayload:
-          createTaskType === "remote_mac" && createRemoteMode === "service"
+          createTaskType === "client_task" && createRemoteMode === "service"
             ? parsedServicePayload
             : undefined,
         timeoutSec: createTimeoutSec,
         env: envPayload,
-        cwd: createTaskType === "server_script" || createRemoteMode === "script" ? createCwd || undefined : undefined,
-        targetClientId: createTaskType === "remote_mac" ? createTargetClientId : undefined,
-        requiredTags: createTaskType === "remote_mac" ? createRequiredTags : [],
+        cwd: createTaskType === "server_task" || createRemoteMode === "script" ? createCwd || undefined : undefined,
+        targetClientId: createTaskType === "client_task" ? createTargetClientId : undefined,
+        requiredTags: createTaskType === "client_task" ? createRequiredTags : [],
         maxRetries: createMaxRetries,
       });
       if (res.data.code === 200) {
@@ -653,7 +652,7 @@ export default function TaskManagement() {
       key: "taskType",
       width: 130,
       render: (taskType: string) => {
-        const normalized = isTaskType(taskType) ? taskType : "server_script";
+        const normalized = isTaskType(taskType) ? taskType : "server_task";
         return (
           <Tag
             style={{
@@ -682,31 +681,37 @@ export default function TaskManagement() {
       ellipsis: true,
       render: (_: unknown, record: TaskRecord) => {
         const params = parseTaskParams(record.taskParams);
-        const serviceName = typeof params.service_name === "string" ? params.service_name : "";
-        if (serviceName) {
+        const taskPayload =
+          params.task_payload && typeof params.task_payload === "object" && !Array.isArray(params.task_payload)
+            ? params.task_payload
+            : params.taskPayload && typeof params.taskPayload === "object" && !Array.isArray(params.taskPayload)
+              ? params.taskPayload
+              : params.payload && typeof params.payload === "object" && !Array.isArray(params.payload)
+                ? params.payload
+                : {};
+        const executionName =
+          typeof params.execution_name === "string"
+            ? params.execution_name
+            : typeof params.executionName === "string"
+              ? params.executionName
+              : "";
+        if (Object.keys(taskPayload).length > 0) {
           return (
             <Tooltip
               title={
                 <pre style={{ margin: 0, whiteSpace: "pre-wrap", maxWidth: 500 }}>
-                  {JSON.stringify(params.service_payload ?? {}, null, 2)}
+                  {JSON.stringify(taskPayload, null, 2)}
                 </pre>
               }
             >
               <Tag style={{ margin: 0, border: "none", background: "#f0f5ff", color: "#1677ff", fontSize: 12 }}>
-                service: {serviceName}
+                payload
               </Tag>
             </Tooltip>
           );
         }
-        const script = typeof params.script === "string" ? params.script : "";
-        if (!script) return <span style={{ color: "#bbb", fontSize: 12 }}>-</span>;
-        return (
-          <Tooltip title={<pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{script}</pre>}>
-            <span style={{ color: "#666", fontSize: 12 }}>
-              {script.split("\n")[0]}
-            </span>
-          </Tooltip>
-        );
+        if (!executionName) return <span style={{ color: "#bbb", fontSize: 12 }}>-</span>;
+        return <span style={{ color: "#666", fontSize: 12 }}>execution: {executionName}</span>;
       },
     },
     {
@@ -714,8 +719,8 @@ export default function TaskManagement() {
       key: "executor",
       width: 170,
       render: (_: unknown, record: TaskRecord) => {
-        const normalizedType = isTaskType(record.taskType) ? record.taskType : "server_script";
-        if (normalizedType === "server_script") {
+        const normalizedType = isTaskType(record.taskType) ? record.taskType : "server_task";
+        if (normalizedType === "server_task") {
           return <span style={{ color: "#666", fontSize: 12 }}>server-local</span>;
         }
         const target = record.targetClientId || "任意在线客户端";
@@ -1010,7 +1015,7 @@ export default function TaskManagement() {
         }}
       >
         <span style={{ fontSize: 12, color: "#999" }}>
-          支持两类任务：服务器本地执行（server_script） / 分发到 Mac Mini 客户端（remote_mac）
+          支持两类任务：服务器执行（server_task） / 客户端执行（client_task）
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span
@@ -1255,15 +1260,15 @@ export default function TaskManagement() {
               value={createTaskType}
               onChange={(value) => {
                 setCreateTaskType(value);
-                if (value === "server_script") setCreateRemoteMode("script");
+                if (value === "server_task") setCreateRemoteMode("script");
               }}
               options={[
-                { value: "server_script", label: "服务器执行 (server_script)" },
-                { value: "remote_mac", label: "分发到 Mac Mini 客户端执行 (remote_mac)" },
+                { value: "server_task", label: "服务器执行 (server_task)" },
+                { value: "client_task", label: "分发到客户端执行 (client_task)" },
               ]}
             />
           </div>
-          {createTaskType === "remote_mac" && (
+          {createTaskType === "client_task" && (
             <div>
               <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>远程任务模式</div>
               <Select
@@ -1276,7 +1281,7 @@ export default function TaskManagement() {
               />
             </div>
           )}
-          {(createTaskType === "server_script" || createRemoteMode === "script") && (
+          {(createTaskType === "server_task" || createRemoteMode === "script") && (
             <div>
               <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>执行脚本</div>
               <TextArea
@@ -1287,7 +1292,7 @@ export default function TaskManagement() {
               />
             </div>
           )}
-          {createTaskType === "remote_mac" && createRemoteMode === "service" && (
+          {createTaskType === "client_task" && createRemoteMode === "service" && (
             <>
               <div>
                 <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>服务名称 serviceName</div>
@@ -1335,7 +1340,7 @@ export default function TaskManagement() {
               />
             </div>
           </div>
-          {(createTaskType === "server_script" || createRemoteMode === "script") && (
+          {(createTaskType === "server_task" || createRemoteMode === "script") && (
             <>
               <div>
                 <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>工作目录（可选）</div>
@@ -1356,7 +1361,7 @@ export default function TaskManagement() {
               </div>
             </>
           )}
-          {createTaskType === "remote_mac" && (
+          {createTaskType === "client_task" && (
             <>
               <div>
                 <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>目标客户端（可选）</div>

@@ -1,5 +1,5 @@
-import { spawn } from "child_process";
 import { PrismaClient, Task } from "@prisma/client";
+import { executeServerTaskByName, hasServerTask } from "./serverTaskRuntime";
 
 const LOCAL_EXECUTOR_ID = "server-local";
 const LOCAL_POLL_INTERVAL_MS = parseInt(process.env.LOCAL_EXECUTOR_POLL_MS || "2000", 10);
@@ -9,20 +9,9 @@ const OFFLINE_TIMEOUT_MS = parseInt(process.env.EXECUTOR_OFFLINE_TIMEOUT_MS || "
 const REMOTE_TASK_STALE_TIMEOUT_MS = parseInt(process.env.REMOTE_TASK_STALE_TIMEOUT_MS || "300000", 10);
 const MAX_LOG_BYTES = parseInt(process.env.TASK_LOG_MAX_BYTES || "65536", 10);
 
-interface ParsedTaskParams {
-  script: string;
-  timeoutSec: number;
-  env: Record<string, string>;
-  cwd?: string;
-}
-
-interface ExecutionResult {
-  code: number | null;
-  signal: NodeJS.Signals | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-  durationMs: number;
+interface ParsedTaskEnvelope {
+  taskPayload: Record<string, unknown>;
+  executionName?: string;
 }
 
 let started = false;
@@ -35,6 +24,11 @@ function parseJson<T>(raw: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function normalizeObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
 }
 
 function trimLog(input: string): string {
@@ -53,65 +47,16 @@ function trimLog(input: string): string {
   return `${marker}${output}`;
 }
 
-function getTaskParams(task: Task): ParsedTaskParams | null {
+function parseTaskEnvelope(task: Task): ParsedTaskEnvelope {
   const parsed = parseJson<Record<string, unknown>>(task.taskParams, {});
-  const script = typeof parsed.script === "string" ? parsed.script : "";
-  if (!script.trim()) return null;
-
-  const timeoutSec =
-    typeof parsed.timeout_sec === "number" && Number.isFinite(parsed.timeout_sec)
-      ? Math.max(1, Math.min(3600, Math.floor(parsed.timeout_sec)))
-      : typeof parsed.timeoutSec === "number" && Number.isFinite(parsed.timeoutSec)
-        ? Math.max(1, Math.min(3600, Math.floor(parsed.timeoutSec)))
-        : 300;
-
-  const envRaw = typeof parsed.env === "object" && parsed.env != null ? (parsed.env as Record<string, unknown>) : {};
-  const env: Record<string, string> = {};
-  Object.entries(envRaw).forEach(([k, v]) => {
-    if (typeof v === "string") env[k] = v;
-    else if (typeof v === "number" || typeof v === "boolean") env[k] = String(v);
-  });
-
-  const cwd = typeof parsed.cwd === "string" && parsed.cwd.trim() ? parsed.cwd : undefined;
-  return { script, timeoutSec, env, cwd };
-}
-
-function executeScript(params: ParsedTaskParams): Promise<ExecutionResult> {
-  return new Promise((resolve) => {
-    const startedAt = Date.now();
-    const stdoutChunks: string[] = [];
-    const stderrChunks: string[] = [];
-    let timedOut = false;
-
-    const child = spawn("bash", ["-lc", params.script], {
-      env: { ...process.env, ...params.env },
-      cwd: params.cwd,
-    });
-
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, params.timeoutSec * 1000);
-
-    child.stdout.on("data", (chunk: Buffer | string) => {
-      stdoutChunks.push(chunk.toString());
-    });
-    child.stderr.on("data", (chunk: Buffer | string) => {
-      stderrChunks.push(chunk.toString());
-    });
-
-    child.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
-      clearTimeout(timeout);
-      resolve({
-        code,
-        signal,
-        stdout: stdoutChunks.join(""),
-        stderr: stderrChunks.join(""),
-        timedOut,
-        durationMs: Date.now() - startedAt,
-      });
-    });
-  });
+  const payload = normalizeObject(parsed.task_payload ?? parsed.taskPayload ?? parsed.payload);
+  const executionNameRaw = parsed.execution_name ?? parsed.executionName;
+  const executionName =
+    typeof executionNameRaw === "string" && executionNameRaw.trim() ? executionNameRaw.trim().slice(0, 120) : undefined;
+  return {
+    taskPayload: payload,
+    executionName,
+  };
 }
 
 async function markTaskError(prisma: PrismaClient, taskId: number, message: string): Promise<void> {
@@ -120,8 +65,9 @@ async function markTaskError(prisma: PrismaClient, taskId: number, message: stri
     where: { id: taskId },
     data: {
       status: "error",
+      resultCode: -1,
       statusInfo: JSON.stringify({
-        executor: "server",
+        executor: "server_task_runtime",
         error: message,
         finished_at: now.toISOString(),
       }),
@@ -131,68 +77,79 @@ async function markTaskError(prisma: PrismaClient, taskId: number, message: stri
 }
 
 async function executeLocalTask(prisma: PrismaClient, task: Task): Promise<void> {
-  const params = getTaskParams(task);
-  if (!params) {
-    await markTaskError(prisma, task.id, "taskParams.script 不能为空");
+  if (!hasServerTask(task.taskName)) {
+    await markTaskError(prisma, task.id, `未注册的服务端任务: ${task.taskName}`);
     return;
   }
 
-  const result = await executeScript(params);
-  const now = new Date();
-  const fullLog = [
-    "[stdout]",
-    result.stdout || "(empty)",
-    "",
-    "[stderr]",
-    result.stderr || "(empty)",
-  ].join("\n");
+  const envelope = parseTaskEnvelope(task);
+  const startedAt = Date.now();
+  const logs: string[] = [];
+  const writeLog = (line: string): void => {
+    logs.push(line);
+  };
 
-  const nextStatus = !result.timedOut && result.code === 0 ? "completed" : "error";
-  const statusInfo = nextStatus === "completed"
-    ? {
-        executor: "server",
-        duration_ms: result.durationMs,
-        result_code: result.code,
-        finished_at: now.toISOString(),
-      }
-    : {
-        executor: "server",
-        duration_ms: result.durationMs,
-        result_code: result.code,
-        signal: result.signal,
-        timeout: result.timedOut,
-        error: result.timedOut ? "执行超时" : "脚本执行失败",
-        finished_at: now.toISOString(),
-      };
-
-  await prisma.task.update({
-    where: { id: task.id },
-    data: {
-      status: nextStatus,
-      resultCode: result.code ?? -1,
-      statusInfo: JSON.stringify(statusInfo),
-      executionLog: trimLog(fullLog),
-      finishedAt: now,
-    },
-  });
+  try {
+    const output = await executeServerTaskByName(task.taskName, envelope.taskPayload, {
+      taskId: task.taskId,
+      executionName: envelope.executionName,
+      log: writeLog,
+    });
+    const now = new Date();
+    await prisma.task.update({
+      where: { id: task.id },
+      data: {
+        status: "completed",
+        resultCode: 0,
+        executionLog: trimLog(logs.join("\n")),
+        statusInfo: JSON.stringify({
+          executor: "server_task_runtime",
+          duration_ms: Date.now() - startedAt,
+          task_name: task.taskName,
+          execution_name: envelope.executionName,
+          output_json: output,
+          finished_at: now.toISOString(),
+        }),
+        finishedAt: now,
+      },
+    });
+  } catch (error) {
+    const now = new Date();
+    const errorObj = error as { message?: string; stack?: string };
+    const errorMessage = errorObj?.message || "服务端任务执行失败";
+    const logText = [logs.join("\n"), errorObj?.stack || errorMessage].filter(Boolean).join("\n\n");
+    await prisma.task.update({
+      where: { id: task.id },
+      data: {
+        status: "error",
+        resultCode: -1,
+        executionLog: trimLog(logText),
+        statusInfo: JSON.stringify({
+          executor: "server_task_runtime",
+          duration_ms: Date.now() - startedAt,
+          task_name: task.taskName,
+          execution_name: envelope.executionName,
+          error: errorMessage,
+          finished_at: now.toISOString(),
+        }),
+        finishedAt: now,
+      },
+    });
+  }
 }
 
 async function claimNextLocalTask(prisma: PrismaClient): Promise<Task | null> {
   const candidates = await prisma.task.findMany({
     where: {
       status: "queued",
-      taskType: "server_script",
+      taskType: "server_task",
     },
     orderBy: { createdAt: "asc" },
     take: 50,
   });
 
   if (candidates.length === 0) return null;
-  const task = candidates.find((item) => {
-    const parsed = getTaskParams(item);
-    return !!parsed?.script.trim();
-  });
-  if (!task) return null;
+  const task = candidates[0];
 
   const now = new Date();
   const claimed = await prisma.task.updateMany({
@@ -206,7 +163,7 @@ async function claimNextLocalTask(prisma: PrismaClient): Promise<Task | null> {
       claimedAt: now,
       startedAt: now,
       statusInfo: JSON.stringify({
-        executor: "server",
+        executor: "server_task_runtime",
         started_at: now.toISOString(),
       }),
     },
@@ -214,6 +171,37 @@ async function claimNextLocalTask(prisma: PrismaClient): Promise<Task | null> {
 
   if (claimed.count === 0) return null;
   return prisma.task.findUnique({ where: { id: task.id } });
+}
+
+async function failLegacyQueuedTasks(prisma: PrismaClient): Promise<void> {
+  const legacy = await prisma.task.findMany({
+    where: {
+      status: "queued",
+      taskType: {
+        in: ["server_script", "remote_mac"],
+      },
+    },
+    orderBy: { createdAt: "asc" },
+    take: 100,
+  });
+  if (legacy.length === 0) return;
+
+  const now = new Date();
+  for (const item of legacy) {
+    await prisma.task.update({
+      where: { id: item.id },
+      data: {
+        status: "error",
+        resultCode: -1,
+        finishedAt: now,
+        statusInfo: JSON.stringify({
+          executor: "task_runtime",
+          error: "脚本/服务模式已下线，仅支持 task_name + task_payload",
+          finished_at: now.toISOString(),
+        }),
+      },
+    });
+  }
 }
 
 async function scheduleLocalTasks(prisma: PrismaClient): Promise<void> {
@@ -263,7 +251,7 @@ async function recoverStaleRemoteTasks(prisma: PrismaClient): Promise<void> {
 
   const staleTasks = await prisma.task.findMany({
     where: {
-      taskType: "remote_mac",
+      taskType: "client_task",
       status: "running",
       claimedAt: { lt: staleCutoff },
     },
@@ -305,7 +293,7 @@ async function recoverStaleRemoteTasks(prisma: PrismaClient): Promise<void> {
           retryCount: { increment: 1 },
           statusInfo: JSON.stringify({
             queue_position: 0,
-            task_type: "remote_mac",
+            task_type: "client_task",
             requeued: true,
             reason: "client offline while running",
             previous_client_id: clientId,
@@ -322,7 +310,7 @@ async function recoverStaleRemoteTasks(prisma: PrismaClient): Promise<void> {
         status: "error",
         finishedAt: new Date(),
         statusInfo: JSON.stringify({
-          executor: "remote_mac",
+          executor: "client_task_runtime",
           error: "客户端离线且超过最大重试次数",
           previous_client_id: clientId,
           retry_count: task.retryCount,
@@ -336,11 +324,13 @@ export function startExecutionEngine(prisma: PrismaClient): void {
   if (started) return;
   started = true;
 
+  void failLegacyQueuedTasks(prisma);
   void scheduleLocalTasks(prisma);
   void refreshExecutorStatus(prisma);
   void recoverStaleRemoteTasks(prisma);
 
   setInterval(() => {
+    void failLegacyQueuedTasks(prisma);
     void scheduleLocalTasks(prisma);
   }, LOCAL_POLL_INTERVAL_MS);
 
