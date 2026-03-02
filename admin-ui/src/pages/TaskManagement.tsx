@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { Table, Tag, Tooltip, Modal, Input, Select, message, Popconfirm } from "antd";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Table, Tag, Tooltip, Modal, Input, Select, InputNumber, message, Popconfirm } from "antd";
 import {
   ReloadOutlined,
   ClockCircleOutlined,
@@ -17,6 +17,8 @@ const { TextArea } = Input;
 
 const taskStatuses = ["queued", "running", "error", "completed"] as const;
 type TaskStatus = (typeof taskStatuses)[number];
+const taskTypes = ["server_script", "remote_mac"] as const;
+type TaskType = (typeof taskTypes)[number];
 
 interface StatusInfo {
   queue_position?: number;
@@ -29,6 +31,9 @@ interface StatusInfo {
   file_size?: string;
   rows?: number;
   count?: number;
+  executor?: string;
+  client_id?: string;
+  timeout?: boolean;
   [key: string]: unknown;
 }
 
@@ -36,11 +41,43 @@ interface TaskRecord {
   id: number;
   taskId: string;
   taskName: string;
+  taskType: string;
+  targetClientId?: string | null;
+  claimedByClientId?: string | null;
   taskParams: string;
   status: string;
   statusInfo: string;
+  executionLog: string;
+  resultCode?: number | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  maxRetries: number;
+  retryCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+interface TaskParams {
+  script?: string;
+  timeout_sec?: number;
+  env?: Record<string, unknown>;
+  cwd?: string;
+  required_tags?: string[];
+  [key: string]: unknown;
+}
+
+interface ExecutorClient {
+  clientId: string;
+  name: string;
+  platform: string;
+  appVersion: string;
+  tags: string[];
+  status: string;
+  ip?: string;
+  lastHeartbeat: string;
+  tasksClaimed: number;
+  tasksSuccess: number;
+  tasksFailed: number;
 }
 
 interface StatusDef {
@@ -81,7 +118,19 @@ function isTaskStatus(status: string): status is TaskStatus {
   return taskStatuses.includes(status as TaskStatus);
 }
 
+function isTaskType(taskType: string): taskType is TaskType {
+  return taskTypes.includes(taskType as TaskType);
+}
+
 function parseInfo(raw: string): StatusInfo {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function parseTaskParams(raw: string): TaskParams {
   try {
     return JSON.parse(raw);
   } catch {
@@ -109,7 +158,23 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return maybeError.response?.data?.message || fallback;
 }
 
+function taskTypeText(taskType: TaskType): string {
+  return taskType === "server_script" ? "服务器执行" : "Mac Mini 执行";
+}
+
+function taskTypeColor(taskType: TaskType): string {
+  return taskType === "server_script" ? "#722ed1" : "#1677ff";
+}
+
 function StatusExtra({ status, info }: { status: string; info: StatusInfo }) {
+  if (status === "running" && info.executor === "remote_mac" && info.client_id) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ color: "#1677ff", fontSize: 11 }}>客户端 {info.client_id} 执行中</span>
+      </div>
+    );
+  }
+
   if (status === "queued" && info.queue_position != null) {
     return (
       <span style={{ color: "#bbb", fontSize: 11 }}>
@@ -192,13 +257,22 @@ function StatusExtra({ status, info }: { status: string; info: StatusInfo }) {
 
 export default function TaskManagement() {
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
+  const [clients, setClients] = useState<ExecutorClient[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [clientsLoading, setClientsLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createTaskName, setCreateTaskName] = useState("");
-  const [createTaskParams, setCreateTaskParams] = useState("{\n  \n}");
+  const [createTaskType, setCreateTaskType] = useState<TaskType>("server_script");
+  const [createScript, setCreateScript] = useState("echo \"hello from task executor\"");
+  const [createTimeoutSec, setCreateTimeoutSec] = useState(300);
+  const [createEnv, setCreateEnv] = useState("{\n  \n}");
+  const [createCwd, setCreateCwd] = useState("");
+  const [createTargetClientId, setCreateTargetClientId] = useState<string | undefined>(undefined);
+  const [createRequiredTags, setCreateRequiredTags] = useState<string[]>([]);
+  const [createMaxRetries, setCreateMaxRetries] = useState(0);
   const [statusOpen, setStatusOpen] = useState(false);
   const [statusSaving, setStatusSaving] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskRecord | null>(null);
@@ -222,6 +296,20 @@ export default function TaskManagement() {
     }
   }, []);
 
+  const fetchClients = useCallback(async () => {
+    setClientsLoading(true);
+    try {
+      const res = await adminClient.get("/api/admin/executor/clients");
+      if (res.data.code === 200) {
+        setClients(res.data.data);
+      }
+    } catch {
+      // handled by interceptor
+    } finally {
+      setClientsLoading(false);
+    }
+  }, []);
+
   const refreshPage = useCallback(
     (targetPage: number = page) => {
       fetchTasks(targetPage);
@@ -233,9 +321,21 @@ export default function TaskManagement() {
     fetchTasks(page);
   }, [page, fetchTasks]);
 
+  useEffect(() => {
+    fetchClients();
+  }, [fetchClients]);
+
   const openCreateModal = () => {
     setCreateTaskName("");
-    setCreateTaskParams("{\n  \n}");
+    setCreateTaskType("server_script");
+    setCreateScript("echo \"hello from task executor\"");
+    setCreateTimeoutSec(300);
+    setCreateEnv("{\n  \n}");
+    setCreateCwd("");
+    setCreateTargetClientId(undefined);
+    setCreateRequiredTags([]);
+    setCreateMaxRetries(0);
+    fetchClients();
     setCreateOpen(true);
   };
 
@@ -246,9 +346,19 @@ export default function TaskManagement() {
       return;
     }
 
-    const parsed = parseJsonObject(createTaskParams, "任务参数");
-    if (!parsed.ok) {
-      message.error(parsed.message);
+    if (!createScript.trim()) {
+      message.error("请输入执行脚本");
+      return;
+    }
+
+    const envResult = parseJsonObject(createEnv, "环境变量 env");
+    if (!envResult.ok) {
+      message.error(envResult.message);
+      return;
+    }
+
+    if (createTaskType === "remote_mac" && createTargetClientId && !clients.some((c) => c.clientId === createTargetClientId)) {
+      message.error("目标客户端不存在，请刷新后重试");
       return;
     }
 
@@ -256,7 +366,14 @@ export default function TaskManagement() {
     try {
       const res = await adminClient.post("/api/admin/tasks", {
         taskName,
-        taskParams: parsed.value,
+        taskType: createTaskType,
+        script: createScript,
+        timeoutSec: createTimeoutSec,
+        env: envResult.value,
+        cwd: createCwd || undefined,
+        targetClientId: createTaskType === "remote_mac" ? createTargetClientId : undefined,
+        requiredTags: createTaskType === "remote_mac" ? createRequiredTags : [],
+        maxRetries: createMaxRetries,
       });
       if (res.data.code === 200) {
         message.success("任务已创建");
@@ -328,38 +445,101 @@ export default function TaskManagement() {
     }
   };
 
+  const handleDeleteClient = async (clientId: string) => {
+    try {
+      const res = await adminClient.delete(`/api/admin/executor/clients/${encodeURIComponent(clientId)}`);
+      if (res.data.code === 200) {
+        message.success("客户端记录已删除");
+        fetchClients();
+      }
+    } catch (error: unknown) {
+      message.error(getErrorMessage(error, "删除客户端失败"));
+    }
+  };
+
+  const clientOptions = useMemo(
+    () =>
+      clients.map((client) => ({
+        value: client.clientId,
+        label: `${client.name} (${client.clientId})`,
+      })),
+    [clients]
+  );
+
   const columns = [
     {
       title: "任务ID",
       dataIndex: "taskId",
       key: "taskId",
-      width: 180,
+      width: 170,
       render: (text: string) => (
         <span style={{ fontFamily: "monospace", fontSize: 12, color: "#666" }}>{text}</span>
       ),
     },
     {
+      title: "类型",
+      dataIndex: "taskType",
+      key: "taskType",
+      width: 130,
+      render: (taskType: string) => {
+        const normalized = isTaskType(taskType) ? taskType : "server_script";
+        return (
+          <Tag
+            style={{
+              border: "none",
+              borderRadius: 4,
+              background: "#fafafa",
+              color: taskTypeColor(normalized),
+              fontSize: 12,
+            }}
+          >
+            {taskTypeText(normalized)}
+          </Tag>
+        );
+      },
+    },
+    {
       title: "任务名称",
       dataIndex: "taskName",
       key: "taskName",
-      width: 160,
+      width: 140,
     },
     {
-      title: "任务参数",
-      dataIndex: "taskParams",
-      key: "taskParams",
-      width: 180,
+      title: "脚本",
+      key: "script",
+      width: 220,
       ellipsis: true,
-      render: (text: string) => {
-        try {
-          return (
-            <span style={{ color: "#999", fontSize: 12 }}>
-              {JSON.stringify(JSON.parse(text))}
+      render: (_: unknown, record: TaskRecord) => {
+        const params = parseTaskParams(record.taskParams);
+        const script = typeof params.script === "string" ? params.script : "";
+        if (!script) return <span style={{ color: "#bbb", fontSize: 12 }}>-</span>;
+        return (
+          <Tooltip title={<pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{script}</pre>}>
+            <span style={{ color: "#666", fontSize: 12 }}>
+              {script.split("\n")[0]}
             </span>
-          );
-        } catch {
-          return <span style={{ color: "#999", fontSize: 12 }}>{text}</span>;
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: "执行节点",
+      key: "executor",
+      width: 170,
+      render: (_: unknown, record: TaskRecord) => {
+        const normalizedType = isTaskType(record.taskType) ? record.taskType : "server_script";
+        if (normalizedType === "server_script") {
+          return <span style={{ color: "#666", fontSize: 12 }}>server-local</span>;
         }
+        const target = record.targetClientId || "任意在线客户端";
+        const claimed = record.claimedByClientId ? ` / 已分配: ${record.claimedByClientId}` : "";
+        return (
+          <Tooltip title={`目标: ${target}${claimed}`}>
+            <span style={{ color: "#666", fontSize: 12 }}>
+              {record.claimedByClientId || target}
+            </span>
+          </Tooltip>
+        );
       },
     },
     {
@@ -393,17 +573,37 @@ export default function TaskManagement() {
     {
       title: "详情",
       key: "statusDetail",
-      width: 240,
+      width: 220,
       render: (_: unknown, record: TaskRecord) => {
         const info = parseInfo(record.statusInfo);
         return <StatusExtra status={record.status} info={info} />;
       },
     },
     {
+      title: "日志",
+      key: "executionLog",
+      width: 120,
+      render: (_: unknown, record: TaskRecord) =>
+        record.executionLog ? (
+          <Tooltip
+            title={
+              <pre style={{ margin: 0, whiteSpace: "pre-wrap", maxWidth: 500 }}>
+                {record.executionLog}
+              </pre>
+            }
+            placement="topLeft"
+          >
+            <span style={{ fontSize: 12, color: "#1677ff", cursor: "pointer" }}>查看日志</span>
+          </Tooltip>
+        ) : (
+          <span style={{ fontSize: 12, color: "#bbb" }}>-</span>
+        ),
+    },
+    {
       title: "创建时间",
       dataIndex: "createdAt",
       key: "createdAt",
-      width: 160,
+      width: 150,
       render: (t: string) => (
         <span style={{ color: "#999", fontSize: 12 }}>
           {new Date(t).toLocaleString("zh-CN")}
@@ -414,7 +614,7 @@ export default function TaskManagement() {
       title: "更新时间",
       dataIndex: "updatedAt",
       key: "updatedAt",
-      width: 160,
+      width: 150,
       render: (t: string) => (
         <span style={{ color: "#999", fontSize: 12 }}>
           {new Date(t).toLocaleString("zh-CN")}
@@ -424,7 +624,7 @@ export default function TaskManagement() {
     {
       title: "操作",
       key: "actions",
-      width: 180,
+      width: 170,
       render: (_: unknown, record: TaskRecord) => (
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <span
@@ -472,6 +672,95 @@ export default function TaskManagement() {
     },
   ];
 
+  const clientColumns = [
+    {
+      title: "客户端ID",
+      dataIndex: "clientId",
+      key: "clientId",
+      width: 180,
+      render: (text: string) => (
+        <span style={{ fontFamily: "monospace", fontSize: 12, color: "#666" }}>{text}</span>
+      ),
+    },
+    {
+      title: "名称",
+      dataIndex: "name",
+      key: "name",
+      width: 140,
+    },
+    {
+      title: "状态",
+      dataIndex: "status",
+      key: "status",
+      width: 100,
+      render: (status: string) => (
+        <Tag color={status === "online" ? "green" : "default"} style={{ fontSize: 12 }}>
+          {status === "online" ? "在线" : "离线"}
+        </Tag>
+      ),
+    },
+    {
+      title: "平台",
+      key: "platform",
+      width: 120,
+      render: (_: unknown, record: ExecutorClient) => (
+        <span style={{ color: "#666", fontSize: 12 }}>
+          {record.platform} · {record.appVersion}
+        </span>
+      ),
+    },
+    {
+      title: "标签",
+      dataIndex: "tags",
+      key: "tags",
+      width: 170,
+      render: (tags: string[]) =>
+        tags.length ? (
+          <span style={{ color: "#666", fontSize: 12 }}>{tags.join(", ")}</span>
+        ) : (
+          <span style={{ color: "#bbb", fontSize: 12 }}>-</span>
+        ),
+    },
+    {
+      title: "最近心跳",
+      dataIndex: "lastHeartbeat",
+      key: "lastHeartbeat",
+      width: 160,
+      render: (t: string) => (
+        <span style={{ color: "#999", fontSize: 12 }}>
+          {new Date(t).toLocaleString("zh-CN")}
+        </span>
+      ),
+    },
+    {
+      title: "任务统计",
+      key: "stats",
+      width: 180,
+      render: (_: unknown, record: ExecutorClient) => (
+        <span style={{ color: "#999", fontSize: 12 }}>
+          领取 {record.tasksClaimed} / 成功 {record.tasksSuccess} / 失败 {record.tasksFailed}
+        </span>
+      ),
+    },
+    {
+      title: "操作",
+      key: "actions",
+      width: 90,
+      render: (_: unknown, record: ExecutorClient) => (
+        <Popconfirm
+          title="删除客户端记录？"
+          description={`客户端 ${record.clientId}`}
+          okText="删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+          onConfirm={() => handleDeleteClient(record.clientId)}
+        >
+          <span style={{ fontSize: 12, color: "#999", cursor: "pointer" }}>删除</span>
+        </Popconfirm>
+      ),
+    },
+  ];
+
   return (
     <div>
       <div
@@ -482,7 +771,9 @@ export default function TaskManagement() {
           marginBottom: 16,
         }}
       >
-        <span style={{ fontSize: 12, color: "#999" }}>可在此直接创建任务、修改状态、删除任务</span>
+        <span style={{ fontSize: 12, color: "#999" }}>
+          支持两类任务：服务器本地执行（server_script） / 分发到 Mac Mini 客户端（remote_mac）
+        </span>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <span
             onClick={openCreateModal}
@@ -518,6 +809,23 @@ export default function TaskManagement() {
             <ReloadOutlined style={{ fontSize: 12 }} />
             刷新列表
           </span>
+          <span
+            onClick={fetchClients}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 13,
+              color: "#999",
+              cursor: "pointer",
+              padding: "4px 0",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "#333")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "#999")}
+          >
+            <ReloadOutlined style={{ fontSize: 12 }} />
+            刷新客户端
+          </span>
         </div>
       </div>
 
@@ -535,6 +843,20 @@ export default function TaskManagement() {
           showTotal: (t) => <span style={{ fontSize: 12, color: "#999" }}>共 {t} 条</span>,
           size: "small",
         }}
+        scroll={{ x: 1620 }}
+      />
+
+      <div style={{ marginTop: 22, marginBottom: 10, fontSize: 13, fontWeight: 500, color: "#333" }}>
+        执行客户端状态
+      </div>
+      <Table
+        columns={clientColumns}
+        dataSource={clients}
+        rowKey="clientId"
+        loading={clientsLoading}
+        size="small"
+        pagination={false}
+        scroll={{ x: 1140 }}
       />
 
       <Modal
@@ -557,14 +879,89 @@ export default function TaskManagement() {
             />
           </div>
           <div>
-            <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>任务参数 (JSON 对象)</div>
+            <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>任务类型</div>
+            <Select
+              value={createTaskType}
+              onChange={(value) => setCreateTaskType(value)}
+              options={[
+                { value: "server_script", label: "服务器执行 (server_script)" },
+                { value: "remote_mac", label: "分发到 Mac Mini 客户端执行 (remote_mac)" },
+              ]}
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>执行脚本</div>
             <TextArea
-              value={createTaskParams}
-              onChange={(e) => setCreateTaskParams(e.target.value)}
+              value={createScript}
+              onChange={(e) => setCreateScript(e.target.value)}
               autoSize={{ minRows: 5, maxRows: 10 }}
               style={{ fontFamily: "'SF Mono', monospace", fontSize: 12 }}
             />
           </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>超时(秒)</div>
+              <InputNumber
+                min={1}
+                max={3600}
+                style={{ width: "100%" }}
+                value={createTimeoutSec}
+                onChange={(value) => setCreateTimeoutSec(value || 300)}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>最大重试次数</div>
+              <InputNumber
+                min={0}
+                max={10}
+                style={{ width: "100%" }}
+                value={createMaxRetries}
+                onChange={(value) => setCreateMaxRetries(value || 0)}
+              />
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>工作目录（可选）</div>
+            <Input
+              value={createCwd}
+              onChange={(e) => setCreateCwd(e.target.value)}
+              placeholder="例如：/Users/runner/workspace"
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>环境变量 env (JSON 对象)</div>
+            <TextArea
+              value={createEnv}
+              onChange={(e) => setCreateEnv(e.target.value)}
+              autoSize={{ minRows: 4, maxRows: 8 }}
+              style={{ fontFamily: "'SF Mono', monospace", fontSize: 12 }}
+            />
+          </div>
+          {createTaskType === "remote_mac" && (
+            <>
+              <div>
+                <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>目标客户端（可选）</div>
+                <Select
+                  allowClear
+                  value={createTargetClientId}
+                  options={clientOptions}
+                  onChange={(value) => setCreateTargetClientId(value)}
+                  placeholder="不指定则由任意匹配客户端领取"
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>required_tags（可选）</div>
+                <Select
+                  mode="tags"
+                  style={{ width: "100%" }}
+                  value={createRequiredTags}
+                  onChange={(values) => setCreateRequiredTags(values)}
+                  placeholder="例如: xcode,ios,android"
+                  tokenSeparators={[",", " "]}
+                />
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 

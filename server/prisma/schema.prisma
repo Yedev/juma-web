@@ -29,11 +29,41 @@ model Task {
   id         Int      @id @default(autoincrement())
   taskId     String   @unique @map("task_id")
   taskName   String   @map("task_name")
+  taskType   String   @default("server_script") @map("task_type")
+  targetClientId String? @map("target_client_id")
+  claimedByClientId String? @map("claimed_by_client_id")
   taskParams String   @map("task_params")
   status     String   @default("queued")
   statusInfo String   @default("{}") @map("status_info")
+  executionLog String @default("") @map("execution_log")
+  resultCode Int? @map("result_code")
+  claimedAt  DateTime? @map("claimed_at")
+  startedAt  DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  maxRetries Int @default(0) @map("max_retries")
+  retryCount Int @default(0) @map("retry_count")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("tasks")
+}
+
+model ExecutorClient {
+  id            Int      @id @default(autoincrement())
+  clientId      String   @unique @map("client_id")
+  name          String
+  platform      String   @default("darwin")
+  appVersion    String   @default("unknown") @map("app_version")
+  tags          String   @default("[]")
+  capabilities  String   @default("{}")
+  status        String   @default("online")
+  ip            String?
+  lastHeartbeat DateTime @default(now()) @map("last_heartbeat")
+  tasksClaimed  Int      @default(0) @map("tasks_claimed")
+  tasksSuccess  Int      @default(0) @map("tasks_success")
+  tasksFailed   Int      @default(0) @map("tasks_failed")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("executor_clients")
 }
