@@ -201,7 +201,7 @@ function taskTypeColor(taskType: TaskType): string {
 }
 
 function StatusExtra({ status, info }: { status: string; info: StatusInfo }) {
-  if (status === "running" && info.executor === "client_task_runtime" && info.client_id) {
+  if (status === "running" && ["client_task_runtime", "client_task_runtime_ws"].includes(info.executor || "") && info.client_id) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ color: "#1677ff", fontSize: 11 }}>客户端 {info.client_id} 执行中</span>

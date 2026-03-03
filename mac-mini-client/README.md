@@ -1,10 +1,10 @@
-# Mac Mini 执行客户端
+# Mac Mini 执行客户端（WebSocket）
 
-用于无公网 IP 的 Mac Mini 主动连接服务器执行任务。
+用于无公网 IP 的 Mac Mini 主动连接服务器执行任务（WS 长连接推送模式）。
 
 ## 运行要求
 
-- Node.js 18+
+- Node.js 22+
 - 能访问后端地址（例如 `http://your-server:3001`）
 
 ## 启动
@@ -24,21 +24,26 @@ npm start
 | `CLIENT_NAME` | 客户端显示名称 | 主机名 |
 | `CLIENT_TAGS` | 客户端标签，逗号分隔（如 `xcode,ios`） | 空 |
 | `CLIENT_VERSION` | 客户端版本号 | `1.0.0` |
-| `WORK_DIR` | 脚本执行目录 | 当前目录 |
-| `POLL_INTERVAL_MS` | 拉任务间隔 | `4000` |
+| `WORK_DIR` | 任务执行目录 | 当前目录 |
 | `HEARTBEAT_INTERVAL_MS` | 心跳间隔 | `10000` |
+| `RECONNECT_DELAY_MS` | 断线重连间隔 | `3000` |
+| `LOG_FLUSH_INTERVAL_MS` | 日志上报最短间隔 | `2000` |
+| `LOG_FLUSH_SIZE` | 日志上报最小批量字节数 | `2048` |
 | `DEMO_TASK_DELAY_MS` | 示例任务 `client.mock3s` 的模拟处理时长 | `3000` |
 
-## 任务执行流程
+## WebSocket 协议流程
 
-1. 客户端注册 `/api/executor/register`
-2. 定时心跳 `/api/executor/heartbeat`
-3. 主动拉取任务 `/api/executor/next-task`
-4. 执行 task 后回传 `/api/executor/task-update`（状态/日志/结果）
+1. 客户端连接 `ws://<host>/ws/executor?key=<EXECUTOR_KEY>`
+2. 连接成功后发送 `client.hello`
+3. 服务端返回 `server.hello`
+4. 服务端推送 `task.assign`
+5. 客户端执行任务并通过 `task.update` 上报 `running/completed/error` 状态
+6. 客户端通过 `task.log` 持续上报执行日志
+7. 客户端定时发送 `client.heartbeat`
 
 ## 能力协商协议（Tasks Protocol）
 
-客户端在 `register/heartbeat` 时会上报：
+客户端在 `client.hello` 与 `client.heartbeat` 中会上报：
 
 - `capabilities`: 机器能力（CPU、内存、loadavg 等）
 - `tasks`: 可提供的任务列表，例如：
@@ -53,9 +58,7 @@ npm start
 ]
 ```
 
-服务端会据此分发 `client_task` 任务：
-
-- 下发字段：`task_name + task_payload + execution_name`
+服务端会据此分发 `client_task` 任务，仅下发客户端声明支持的 `task_name`。
 
 ## 示例任务
 
@@ -63,14 +66,3 @@ npm start
 
 - `client.echo`
 - `client.mock3s`
-
-## 已注册任务名（服务端）
-
-`/api/v1/app/task/execute` 仅支持服务端已注册的 task 名称，当前示例包括：
-
-- `server.echo`（服务端执行）
-- `client.echo`（客户端执行）
-- `client.mock3s`（客户端执行）
-
-如果调用未注册 task（例如 `demo.not-exists`），服务端会返回 `404` 和“任务不存在”。
-

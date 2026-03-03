@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * Mac Mini 执行客户端（Task 模式）
- * - 客户端主动向服务器注册/心跳/拉任务
- * - 仅支持 task_name + task_payload 执行，不支持脚本
+ * Mac Mini 执行客户端（WebSocket Task 模式）
+ * - 客户端通过 WebSocket 主动连接服务端
+ * - 服务端主动推送 task.assign
+ * - 客户端通过 task.update 回传状态，通过 task.log 回传执行日志
  */
 
 const os = require("os");
@@ -20,15 +21,20 @@ const CLIENT_TAGS = (process.env.CLIENT_TAGS || "")
   .filter(Boolean);
 const APP_VERSION = process.env.CLIENT_VERSION || "1.0.0";
 const WORK_DIR = process.env.WORK_DIR || process.cwd();
-const REQUEST_TIMEOUT_MS = parseInt(process.env.REQUEST_TIMEOUT_MS || "20000", 10);
-const DEFAULT_POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || "4000", 10);
 const DEFAULT_HEARTBEAT_INTERVAL_MS = parseInt(process.env.HEARTBEAT_INTERVAL_MS || "10000", 10);
 const LOG_FLUSH_INTERVAL_MS = parseInt(process.env.LOG_FLUSH_INTERVAL_MS || "2000", 10);
 const LOG_FLUSH_SIZE = parseInt(process.env.LOG_FLUSH_SIZE || "2048", 10);
+const RECONNECT_DELAY_MS = parseInt(process.env.RECONNECT_DELAY_MS || "3000", 10);
 
-let runningTask = null;
-let pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
+const HTTP_URL = new URL(SERVER_URL);
+const WS_PROTOCOL = HTTP_URL.protocol === "https:" ? "wss:" : "ws:";
+const WS_URL = `${WS_PROTOCOL}//${HTTP_URL.host}/ws/executor?key=${encodeURIComponent(EXECUTOR_KEY)}`;
+
+let ws = null;
 let heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
+let heartbeatTimer = null;
+let reconnectTimer = null;
+let runningTaskId = null;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -57,83 +63,32 @@ function getTaskDefinitions() {
   return getRegisteredTaskDefinitions();
 }
 
-async function apiPost(path, payload, timeoutMs = REQUEST_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(`${SERVER_URL}${path}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-executor-key": EXECUTOR_KEY,
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const msg = data?.message || `HTTP ${res.status}`;
-      throw new Error(msg);
-    }
-    return data;
-  } finally {
-    clearTimeout(timer);
-  }
+function sendWs(type, payload = {}) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(
+    JSON.stringify({
+      type,
+      payload,
+      ts: Date.now(),
+    })
+  );
+  return true;
 }
 
-async function postWithRetry(path, payload, retries = 3) {
-  let lastError = null;
-  for (let i = 0; i < retries; i += 1) {
-    try {
-      return await apiPost(path, payload);
-    } catch (error) {
-      lastError = error;
-      const wait = Math.min(5000, 300 * (i + 1));
-      await sleep(wait);
-    }
-  }
-  throw lastError || new Error("request failed");
-}
-
-async function register() {
-  const data = await postWithRetry("/api/executor/register", {
-    client_id: CLIENT_ID,
-    name: CLIENT_NAME,
-    platform: process.platform,
-    app_version: APP_VERSION,
-    tags: CLIENT_TAGS,
-    capabilities: buildCapabilities(),
-    tasks: getTaskDefinitions(),
-  });
-  const remotePoll = Number(data?.data?.poll_interval_ms);
-  const remoteHeartbeat = Number(data?.data?.heartbeat_interval_ms);
-  if (Number.isFinite(remotePoll) && remotePoll > 1000) pollIntervalMs = remotePoll;
-  if (Number.isFinite(remoteHeartbeat) && remoteHeartbeat > 3000) heartbeatIntervalMs = remoteHeartbeat;
-}
-
-async function sendHeartbeat() {
-  await postWithRetry("/api/executor/heartbeat", {
-    client_id: CLIENT_ID,
-    capabilities: buildCapabilities(),
-    tasks: getTaskDefinitions(),
-  });
-}
-
-async function fetchNextTask() {
-  const data = await postWithRetry("/api/executor/next-task", {
-    client_id: CLIENT_ID,
-  });
-  return data?.data || null;
-}
-
-async function updateTask(taskId, status, statusInfo = {}, appendLog = "", resultCode = null) {
-  await postWithRetry("/api/executor/task-update", {
-    client_id: CLIENT_ID,
+function updateTask(taskId, status, statusInfo = {}, resultCode = null) {
+  return sendWs("task.update", {
     task_id: taskId,
     status,
     status_info: statusInfo,
-    append_log: appendLog || undefined,
     result_code: resultCode,
+  });
+}
+
+function appendTaskLog(taskId, appendLog) {
+  if (!appendLog) return false;
+  return sendWs("task.log", {
+    task_id: taskId,
+    append_log: appendLog,
   });
 }
 
@@ -148,30 +103,29 @@ async function executeTask(task) {
 
   const taskInstance = getRegisteredTask(taskName);
   if (!taskInstance) {
-    await updateTask(
+    updateTask(
       taskId,
       "error",
       {
         error: `任务未注册: ${taskName}`,
         finished_at: nowIso(),
-        executor: "client_task_runtime",
+        executor: "client_task_runtime_ws",
         client_id: CLIENT_ID,
         task_name: taskName,
         execution_name: executionName,
       },
-      "",
       -1
     );
     return;
   }
 
-  runningTask = taskId;
+  runningTaskId = taskId;
   try {
-    await updateTask(taskId, "running", {
+    updateTask(taskId, "running", {
       current_step: `开始执行 ${taskName}`,
       progress: 5,
       started_at: nowIso(),
-      executor: "client_task_runtime",
+      executor: "client_task_runtime_ws",
       client_id: CLIENT_ID,
       task_name: taskName,
       execution_name: executionName,
@@ -189,24 +143,7 @@ async function executeTask(task) {
       const payload = logBuffer;
       logBuffer = "";
       lastFlushTs = Date.now();
-      try {
-        await updateTask(
-          taskId,
-          "running",
-          {
-            current_step: `执行 ${taskName} 中`,
-            progress: 60,
-            executor: "client_task_runtime",
-            client_id: CLIENT_ID,
-            task_name: taskName,
-            execution_name: executionName,
-          },
-          payload,
-          null
-        );
-      } catch (error) {
-        console.warn(`[${nowIso()}] flush log failed:`, error.message);
-      }
+      appendTaskLog(taskId, payload);
     };
 
     const context = {
@@ -226,12 +163,12 @@ async function executeTask(task) {
     await flushLogs(true);
 
     const durationMs = Date.now() - startTime;
-    await updateTask(taskId, "completed", {
+    updateTask(taskId, "completed", {
       current_step: "执行完成",
       progress: 100,
       duration_ms: durationMs,
       finished_at: nowIso(),
-      executor: "client_task_runtime",
+      executor: "client_task_runtime_ws",
       client_id: CLIENT_ID,
       task_name: taskName,
       execution_name: executionName,
@@ -239,76 +176,145 @@ async function executeTask(task) {
     });
   } catch (error) {
     const fallbackLog = error?.stack || String(error);
-    await updateTask(
+    appendTaskLog(taskId, fallbackLog);
+    updateTask(
       taskId,
       "error",
       {
         error: error?.message || "任务执行异常",
         finished_at: nowIso(),
-        executor: "client_task_runtime",
+        executor: "client_task_runtime_ws",
         client_id: CLIENT_ID,
         task_name: taskName,
         execution_name: executionName,
       },
-      fallbackLog,
       -1
     );
   } finally {
-    runningTask = null;
+    runningTaskId = null;
   }
 }
 
-async function heartbeatLoop() {
-  while (true) {
-    try {
-      await sendHeartbeat();
-    } catch (error) {
-      console.warn(`[${nowIso()}] heartbeat failed:`, error.message);
-    }
-    await sleep(heartbeatIntervalMs);
+function clearTimers() {
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
   }
 }
 
-async function pollLoop() {
-  while (true) {
-    try {
-      if (!runningTask) {
-        const task = await fetchNextTask();
-        if (task?.task_id) {
-          console.log(`[${nowIso()}] claimed task ${task.task_id}, task_name=${task.task_name}`);
-          await executeTask(task);
-        }
-      }
-    } catch (error) {
-      console.warn(`[${nowIso()}] poll failed:`, error.message);
-    }
-    await sleep(pollIntervalMs);
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connect();
+  }, RECONNECT_DELAY_MS);
+}
+
+function startHeartbeat() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(() => {
+    sendWs("client.heartbeat", {
+      client_id: CLIENT_ID,
+      capabilities: buildCapabilities(),
+      tasks: getTaskDefinitions(),
+      running_task_id: runningTaskId || null,
+    });
+  }, heartbeatIntervalMs);
+}
+
+function handleMessage(raw) {
+  let envelope = {};
+  try {
+    envelope = JSON.parse(String(raw));
+  } catch {
+    return;
   }
+
+  const type = envelope?.type;
+  const payload = envelope?.payload || {};
+
+  if (type === "server.hello") {
+    const remoteHeartbeat = Number(payload.heartbeat_interval_ms);
+    if (Number.isFinite(remoteHeartbeat) && remoteHeartbeat > 3000) {
+      heartbeatIntervalMs = remoteHeartbeat;
+    }
+    console.log(
+      `[${nowIso()}] registered via ws, heartbeat=${heartbeatIntervalMs}ms, accepted_tasks=${(payload.accepted_tasks || [])
+        .map((item) => item?.name)
+        .filter(Boolean)
+        .join(",") || "(none)"}`
+    );
+    startHeartbeat();
+    return;
+  }
+
+  if (type === "task.assign") {
+    if (runningTaskId) {
+      console.warn(`[${nowIso()}] skip task ${payload.task_id}, another task is running`);
+      return;
+    }
+    console.log(`[${nowIso()}] received task ${payload.task_id}, task_name=${payload.task_name}`);
+    void executeTask(payload);
+    return;
+  }
+
+  if (type === "server.error") {
+    console.warn(`[${nowIso()}] server error: ${payload.message || "unknown"}`);
+  }
+}
+
+function connect() {
+  clearTimers();
+  ws = new WebSocket(WS_URL);
+
+  ws.addEventListener("open", () => {
+    console.log(`[${nowIso()}] ws connected: ${WS_URL}`);
+    sendWs("client.hello", {
+      client_id: CLIENT_ID,
+      name: CLIENT_NAME,
+      platform: process.platform,
+      app_version: APP_VERSION,
+      tags: CLIENT_TAGS,
+      capabilities: buildCapabilities(),
+      tasks: getTaskDefinitions(),
+    });
+    startHeartbeat();
+  });
+
+  ws.addEventListener("message", (event) => {
+    handleMessage(event.data);
+  });
+
+  ws.addEventListener("close", () => {
+    console.warn(`[${nowIso()}] ws disconnected, reconnect in ${RECONNECT_DELAY_MS}ms`);
+    clearTimers();
+    scheduleReconnect();
+  });
+
+  ws.addEventListener("error", (error) => {
+    console.warn(`[${nowIso()}] ws error:`, error?.message || "unknown");
+  });
 }
 
 async function main() {
   const taskDefs = getTaskDefinitions().map((item) => item.name).join(", ") || "(none)";
-  console.log(`[${nowIso()}] mac-mini client starting`);
+  console.log(`[${nowIso()}] mac-mini ws client starting`);
   console.log(
-    `[${nowIso()}] server=${SERVER_URL} client_id=${CLIENT_ID} tags=${CLIENT_TAGS.join(",") || "(none)"} tasks=${taskDefs}`
+    `[${nowIso()}] ws=${WS_URL} client_id=${CLIENT_ID} tags=${CLIENT_TAGS.join(",") || "(none)"} tasks=${taskDefs}`
   );
 
-  while (true) {
-    try {
-      await register();
-      console.log(`[${nowIso()}] registered, poll=${pollIntervalMs}ms, heartbeat=${heartbeatIntervalMs}ms`);
-      break;
-    } catch (error) {
-      console.warn(`[${nowIso()}] register failed, retry in 3s:`, error.message);
-      await sleep(3000);
-    }
-  }
+  connect();
 
-  await Promise.all([heartbeatLoop(), pollLoop()]);
+  while (true) {
+    await sleep(24 * 60 * 60 * 1000);
+  }
 }
 
 main().catch((error) => {
   console.error(`[${nowIso()}] fatal:`, error);
   process.exit(1);
 });
-

@@ -5,8 +5,9 @@ import { PrismaClient } from "@prisma/client";
 import authRoutes from "./routes/auth";
 import adminRoutes from "./routes/admin";
 import appRoutes from "./routes/app";
-import executorRoutes from "./routes/executor";
+import { createServer } from "http";
 import { startExecutionEngine } from "./services/executionEngine";
+import { createExecutorWsGateway } from "./ws/executorWsGateway";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3001", 10);
@@ -22,18 +23,19 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/v1/app", appRoutes);
-app.use("/api/executor", executorRoutes);
-
 const staticDir = path.resolve(__dirname, "../public");
 app.use(express.static(staticDir));
 app.get("*", (_req, res) => {
   res.sendFile(path.join(staticDir, "index.html"));
 });
 
+const server = createServer(app);
+createExecutorWsGateway(server, prisma);
 startExecutionEngine(prisma);
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
+  console.log(`Executor WS listening at ws://localhost:${PORT}/ws/executor`);
 });
 
 export default app;
