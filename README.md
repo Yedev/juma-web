@@ -183,6 +183,7 @@ curl --request GET "${BASE_URL}/api/v1/app/task/catalog" \
   - `server.echo`（服务端执行）
   - `client.echo`（客户端执行）
   - `client.mock3s`（客户端执行）
+  - `client.fail_demo`（客户端执行，故障演练）
 
 #### 3.1 服务端执行示例（server.echo）
 

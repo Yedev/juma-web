@@ -66,3 +66,4 @@ npm start
 
 - `client.echo`
 - `client.mock3s`
+- `client.fail_demo`（故障演练，主动抛错）

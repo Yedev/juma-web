@@ -76,20 +76,28 @@ function sendWs(type, payload = {}) {
 }
 
 function updateTask(taskId, status, statusInfo = {}, resultCode = null) {
-  return sendWs("task.update", {
+  const ok = sendWs("task.update", {
     task_id: taskId,
     status,
     status_info: statusInfo,
     result_code: resultCode,
   });
+  if (!ok) {
+    console.warn(`[${nowIso()}] send task.update failed, task_id=${taskId}, status=${status}`);
+  }
+  return ok;
 }
 
 function appendTaskLog(taskId, appendLog) {
   if (!appendLog) return false;
-  return sendWs("task.log", {
+  const ok = sendWs("task.log", {
     task_id: taskId,
     append_log: appendLog,
   });
+  if (!ok) {
+    console.warn(`[${nowIso()}] send task.log failed, task_id=${taskId}`);
+  }
+  return ok;
 }
 
 function toPayloadObject(payload) {

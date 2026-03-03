@@ -156,6 +156,31 @@ function buildClientMock3sTask(input: Record<string, unknown>, executionName?: s
   };
 }
 
+
+function buildClientFailDemoTask(input: Record<string, unknown>, executionName?: string): PreparedTaskPayload {
+  const message = pickString(input, "message", "client.fail_demo 人工触发异常", 300);
+  const beforeFailMs = pickNumber(input, "before_fail_ms", 1200, 0, 60000);
+  const failAtStep = pickNumber(input, "fail_at_step", 2, 1, 5);
+  const totalSteps = pickNumber(input, "total_steps", 4, 1, 10);
+  const targetClientId = pickOptionalString(input, "target_client_id", 120);
+  const requiredTags = pickStringArray(input, "required_tags");
+  const maxRetries = pickNumber(input, "max_retries", 0, 0, 10);
+
+  return {
+    taskType: "client_task",
+    taskPayload: {
+      message,
+      before_fail_ms: beforeFailMs,
+      fail_at_step: failAtStep,
+      total_steps: totalSteps,
+    },
+    targetClientId,
+    requiredTags,
+    maxRetries,
+    executionName,
+  };
+}
+
 function buildRegisteredTasks(): RegisteredTaskInternal[] {
   const serverTasks: RegisteredTaskInternal[] = listServerTaskDefinitions().map((task) => ({
     taskName: task.taskName,
@@ -257,6 +282,62 @@ function buildRegisteredTasks(): RegisteredTaskInternal[] {
         },
       },
       buildTaskPayload: buildClientMock3sTask,
+    },
+    {
+      taskName: "client.fail_demo",
+      title: "客户端异常处理示例任务",
+      description: "分发到客户端并主动抛错，用于验证异常处理、日志与 error 状态回传。",
+      taskType: "client_task",
+      executeMode: "task",
+      params: [
+        {
+          name: "message",
+          type: "string",
+          required: false,
+          description: "异常消息文本",
+          defaultValue: "client.fail_demo 人工触发异常",
+        },
+        {
+          name: "before_fail_ms",
+          type: "number",
+          required: false,
+          description: "触发异常前等待时长（毫秒）",
+          defaultValue: 1200,
+        },
+        {
+          name: "fail_at_step",
+          type: "number",
+          required: false,
+          description: "第几步触发异常（1-5）",
+          defaultValue: 2,
+        },
+        {
+          name: "total_steps",
+          type: "number",
+          required: false,
+          description: "总步骤数（1-10）",
+          defaultValue: 4,
+        },
+        {
+          name: "target_client_id",
+          type: "string",
+          required: false,
+          description: "指定客户端 ID（可选）",
+        },
+        {
+          name: "required_tags",
+          type: "array",
+          required: false,
+          description: "客户端标签过滤（可选）",
+        },
+      ],
+      exampleTaskPayload: {
+        message: "模拟打包失败",
+        before_fail_ms: 1500,
+        fail_at_step: 3,
+        total_steps: 5,
+      },
+      buildTaskPayload: buildClientFailDemoTask,
     },
   ];
 
