@@ -36,9 +36,10 @@ npm run dev
 - **服务端本地执行引擎**：`server/src/services/executionEngine.ts`
   - 定时扫描 `queued + server_task` 任务
   - 通过 `ServerTask` 基类注册器执行任务逻辑
-- **远程执行器网关**：`server/src/routes/executor.ts`
-  - 客户端注册、心跳、拉任务、回传结果
-  - 客户端连接时会声明 `tasks`（支持的任务能力）
+- **远程执行器网关（WebSocket）**：`server/src/ws/executorWsGateway.ts`
+  - 客户端通过 `ws://host/ws/executor` 建立长连接
+  - 客户端发送 `client.hello` / `client.heartbeat`，服务端推送 `task.assign`
+  - 客户端通过 `task.update` 回传状态，通过 `task.log` 回传日志
   - 通过共享密钥 `EXECUTOR_KEY` 做鉴权
 - **客户端状态可视化**：任务管理页下方可查看执行客户端在线/离线、心跳、统计信息
 
@@ -46,9 +47,9 @@ npm run dev
 
 Mac Mini 不需要被外网访问，采用“**客户端主动连接服务端**”方式：
 
-1. 客户端定时心跳（服务端据此判断在线/离线）
-2. 客户端主动轮询拉取任务
-3. 客户端本地执行并回传日志/结果
+1. 客户端主动建立 WS 长连接并上报能力
+2. 服务端按能力实时推送任务（无轮询）
+3. 客户端执行后通过 WS 回传日志/结果
 
 推荐配置的服务端环境变量：
 
@@ -59,20 +60,20 @@ REMOTE_TASK_STALE_TIMEOUT_MS=300000
 LOCAL_EXECUTOR_CONCURRENCY=1
 ```
 
-### 任务协商协议（client -> server）
+### 任务协商协议（WebSocket）
 
-客户端在 `POST /api/executor/register` 与 `POST /api/executor/heartbeat` 时可上报：
+客户端连接 `ws://<host>/ws/executor?key=<EXECUTOR_KEY>` 后：
 
-- `tasks`: 支持的任务列表
-  - `name`（必填）
-  - `version`（可选）
-  - `description`（可选）
+- 发送 `client.hello`，上报 `tasks/capabilities/tags`
+- 定时发送 `client.heartbeat` 刷新在线状态
+- 服务端推送 `task.assign`（`task_name + task_payload + execution_name`）
+- 客户端通过 `task.update` 回传 `running/completed/error`，通过 `task.log` 回传执行日志
 
-任务下发时：
+任务分发规则：
 
-- 仅下发 `task_name + task_payload + execution_name`
-- 只有声明支持该 `task_name` 的客户端可领取
-- 客户端执行后将结果 JSON 回传到 `status_info.output_json`
+- 只有声明支持该 `task_name` 的客户端会被分配
+- 支持 `required_tags` 与 `target_client_id` 筛选
+- 客户端执行后结果 JSON 写入 `status_info.output_json`
 
 ---
 
@@ -182,6 +183,7 @@ curl --request GET "${BASE_URL}/api/v1/app/task/catalog" \
   - `server.echo`（服务端执行）
   - `client.echo`（客户端执行）
   - `client.mock3s`（客户端执行）
+  - `client.fail_demo`（客户端执行，故障演练）
 
 #### 3.1 服务端执行示例（server.echo）
 
