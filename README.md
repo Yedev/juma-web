@@ -2,6 +2,58 @@
 
 移动端应用后台管理系统（Express + TypeScript + Prisma + SQLite，前端为 Vite + React + TypeScript + Ant Design）。
 
+## 功能概览
+
+### 认证与安全
+- **后台登录**：用户名/密码认证，JWT 令牌（24小时有效期），bcrypt 密码加密
+- **移动端 API 鉴权**：MD5 签名 + 13位毫秒时间戳，防重放（±5分钟容差）
+- **WebSocket 鉴权**：共享密钥（`EXECUTOR_SHARED_KEY`）认证
+
+### 任务管理系统
+- **两种任务类型**：
+  - `server_task` — 后端服务器本地执行
+  - `client_task` — 通过 WebSocket 分发至远程执行器
+- **任务生命周期**：`queued → running → completed / error`
+- **任务能力**：创建、查看、编辑状态、删除、进度追踪、执行日志（64KB上限）、可配置重试（0-10次）
+- **任务分发**：支持 `target_client_id` 指定客户端、`required_tags` 标签筛选
+- **已注册任务**：`server.echo`、`client.echo`、`client.mock3s`、`client.fail_demo`
+
+### 远程执行器系统（WebSocket）
+- WebSocket 长连接网关（`/ws/executor`），客户端主动连接（无需公网 IP）
+- 心跳检测与离线自动标记（默认60秒超时）
+- 基于能力声明的任务推送（`client.hello` 上报 tasks/tags/capabilities）
+- 执行状态与日志实时回传（`task.update` / `task.log`）
+- Mac Mini 客户端（`mac-mini-client/`）：自动重连、标签配置、日志缓冲
+
+### Web 管理后台（3个页面）
+| 页面 | 路径 | 功能 |
+|------|------|------|
+| 任务管理 | `/tasks` | 任务 CRUD、一键触发示例任务、执行日志弹窗、客户端状态面板 |
+| 配置管理 | `/config` | 多键 JSON 配置、Monaco 编辑器（语法高亮/格式化/校验） |
+| API 接口说明 | `/api-playground` | 交互式 API 文档、在线测试、自动签名注入 |
+
+### 移动端 API（`/api/v1/app/`）
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/config` | 获取 JSON 配置（默认 key: `global_json`） |
+| GET | `/task/catalog` | 查询已注册任务目录（含参数说明与示例） |
+| POST | `/task/execute` | 提交任务执行 |
+| PUT | `/task/status` | 更新任务状态 |
+| GET | `/task/status` | 查询任务详情（含日志/结果/耗时） |
+
+### 后台管理 API（`/api/admin/`）
+- 任务管理：列表（分页）、创建、按名称执行、更新状态、删除
+- 执行器客户端：列表、删除
+- 配置管理：列表、读取、创建/更新、删除
+
+### 开发与部署
+- **前端**：Vite + React + TypeScript + Ant Design（端口 5173）
+- **后端**：Express + TypeScript + Prisma + SQLite（端口 3001）
+- **开发体验**：热重载（tsx watch + Vite HMR）、数据库自动种子数据
+- **部署**：Docker 支持、丰富的环境变量配置
+
+---
+
 ## 快速启动
 
 ```bash
