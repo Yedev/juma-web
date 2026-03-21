@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import authRoutes from "./routes/auth";
 import adminRoutes from "./routes/admin";
 import appRoutes from "./routes/app";
+import deepreadRoutes from "./routes/deepread";
 import { createServer } from "http";
 import { startExecutionEngine } from "./services/executionEngine";
 import { createExecutorWsGateway } from "./ws/executorWsGateway";
@@ -23,6 +24,7 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/v1/app", appRoutes);
+app.use("/api/v1/dr", deepreadRoutes);
 const staticDir = path.resolve(__dirname, "../public");
 app.use(express.static(staticDir));
 app.get("*", (_req, res) => {

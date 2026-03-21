@@ -4,19 +4,34 @@ import {
   SettingOutlined,
   ApiOutlined,
   LogoutOutlined,
+  AppstoreOutlined,
+  BranchesOutlined,
+  ReadOutlined,
+  TeamOutlined,
 } from "@ant-design/icons";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 
-const menuItems = [
+type MenuItem = { key: string; icon: React.ReactNode; label: string } | { type: "divider"; label: string };
+
+const menuItems: MenuItem[] = [
   { key: "/tasks", icon: <UnorderedListOutlined />, label: "任务管理" },
   { key: "/config", icon: <SettingOutlined />, label: "配置管理" },
   { key: "/api-playground", icon: <ApiOutlined />, label: "API接口说明" },
+  { type: "divider", label: "DeepRead" },
+  { key: "/dr/spaces", icon: <AppstoreOutlined />, label: "空间管理" },
+  { key: "/dr/channels", icon: <BranchesOutlined />, label: "频道管理" },
+  { key: "/dr/articles", icon: <ReadOutlined />, label: "文章管理" },
+  { key: "/dr/users", icon: <TeamOutlined />, label: "用户管理" },
 ];
 
 const pageTitle: Record<string, string> = {
   "/tasks": "任务管理",
   "/config": "配置管理",
   "/api-playground": "API接口说明",
+  "/dr/spaces": "空间管理",
+  "/dr/channels": "频道管理",
+  "/dr/articles": "文章管理",
+  "/dr/users": "用户管理",
 };
 
 export default function AdminLayout() {
@@ -63,15 +78,34 @@ export default function AdminLayout() {
         </div>
 
         {/* Nav */}
-        <nav style={{ flex: 1, padding: "8px 0" }}>
-          {menuItems.map((item) => {
-            const isActive = location.pathname === item.key;
-            const isHovered = hoveredKey === item.key;
+        <nav style={{ flex: 1, padding: "8px 0", overflow: "auto" }}>
+          {menuItems.map((item, idx) => {
+            if ("type" in item && item.type === "divider") {
+              return (
+                <div
+                  key={`divider-${idx}`}
+                  style={{
+                    padding: "12px 16px 4px",
+                    margin: "4px 8px 0",
+                    fontSize: 11,
+                    color: "#bbb",
+                    fontWeight: 500,
+                    letterSpacing: 1,
+                    borderTop: "1px solid #f0f0f0",
+                  }}
+                >
+                  {item.label}
+                </div>
+              );
+            }
+            const navItem = item as { key: string; icon: React.ReactNode; label: string };
+            const isActive = location.pathname === navItem.key;
+            const isHovered = hoveredKey === navItem.key;
             return (
               <div
-                key={item.key}
-                onClick={() => navigate(item.key)}
-                onMouseEnter={() => setHoveredKey(item.key)}
+                key={navItem.key}
+                onClick={() => navigate(navItem.key)}
+                onMouseEnter={() => setHoveredKey(navItem.key)}
                 onMouseLeave={() => setHoveredKey(null)}
                 style={{
                   display: "flex",
@@ -89,8 +123,8 @@ export default function AdminLayout() {
                   transition: "all 0.15s ease",
                 }}
               >
-                <span style={{ fontSize: 15, opacity: 0.7 }}>{item.icon}</span>
-                <span>{item.label}</span>
+                <span style={{ fontSize: 15, opacity: 0.7 }}>{navItem.icon}</span>
+                <span>{navItem.label}</span>
               </div>
             );
           })}
