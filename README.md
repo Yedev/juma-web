@@ -1,567 +1,686 @@
 # juma-web
 
-移动端应用后台管理系统（Express + TypeScript + Prisma + SQLite，前端为 Vite + React + TypeScript + Ant Design）。
+> 移动端应用后台管理系统 + DeepRead 深度阅读平台
+>
+> **技术栈**：Express · TypeScript · Prisma · SQLite · Vite · React · Ant Design
 
-## 功能概览
+---
 
-### 认证与安全
-- **后台登录**：用户名/密码认证，JWT 令牌（24小时有效期），bcrypt 密码加密
-- **移动端 API 鉴权**：MD5 签名 + 13位毫秒时间戳，防重放（±5分钟容差）
-- **WebSocket 鉴权**：共享密钥（`EXECUTOR_SHARED_KEY`）认证
+## 目录
 
-### 任务管理系统
-- **两种任务类型**：
-  - `server_task` — 后端服务器本地执行
-  - `client_task` — 通过 WebSocket 分发至远程执行器
-- **任务生命周期**：`queued → running → completed / error`
-- **任务能力**：创建、查看、编辑状态、删除、进度追踪、执行日志（64KB上限）、可配置重试（0-10次）
-- **任务分发**：支持 `target_client_id` 指定客户端、`required_tags` 标签筛选
-- **已注册任务**：`server.echo`、`client.echo`、`client.mock3s`、`client.fail_demo`
+- [项目简介](#项目简介)
+- [系统架构](#系统架构)
+- [技术栈](#技术栈)
+- [快速启动](#快速启动)
+- [目录结构](#目录结构)
+- [功能模块](#功能模块)
+- [环境变量](#环境变量)
+- [API 文档](#api-文档)
+- [任务执行系统](#任务执行系统)
+- [WebSocket 协议](#websocket-协议)
+- [DeepRead 平台](#deepread-平台)
+- [数据库模型](#数据库模型)
+- [部署指南](#部署指南)
 
-### 远程执行器系统（WebSocket）
-- WebSocket 长连接网关（`/ws/executor`），客户端主动连接（无需公网 IP）
-- 心跳检测与离线自动标记（默认60秒超时）
-- 基于能力声明的任务推送（`client.hello` 上报 tasks/tags/capabilities）
-- 执行状态与日志实时回传（`task.update` / `task.log`）
-- Mac Mini 客户端（`mac-mini-client/`）：自动重连、标签配置、日志缓冲
+---
 
-### Web 管理后台（7个页面）
-| 页面 | 路径 | 功能 |
+## 项目简介
+
+juma-web 是一个全栈管理系统，包含两个核心模块：
+
+1. **移动端应用管理后台**：提供任务管理、远程执行器调度、应用配置管理等能力，支持分布式任务执行（如 Mac Mini iOS 构建机）。
+2. **DeepRead 深度阅读平台**：完整的内容阅读平台，支持空间/频道/文章管理、用户认证、批注、合集和 AI 对话。
+
+---
+
+## 系统架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         客户端层                                  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
+│  │  Admin UI    │  │  移动端 App  │  │  Mac Mini 执行器      │  │
+│  │ (React/Vite) │  │ (iOS/Android)│  │ (mac-mini-client)    │  │
+│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘  │
+└─────────┼─────────────────┼───────────────────────┼─────────────┘
+          │ HTTP (JWT)       │ HTTP (x-sign)         │ WebSocket
+          ▼                  ▼                       ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Express 服务器 (端口 3001)                   │
+│                                                                   │
+│  ┌───────────────┐  ┌────────────────┐  ┌──────────────────┐   │
+│  │  /api/admin   │  │ /api/v1/app    │  │  /ws/executor    │   │
+│  │  (管理后台)    │  │ (移动端 API)   │  │  (WebSocket 网关) │   │
+│  └───────────────┘  └────────────────┘  └──────────────────┘   │
+│                                                                   │
+│  ┌───────────────┐  ┌────────────────┐  ┌──────────────────┐   │
+│  │  /api/v1/dr   │  │  执行引擎       │  │  任务注册中心     │   │
+│  │ (DeepRead API)│  │ (本地任务调度)  │  │  (taskRegistry)  │   │
+│  └───────────────┘  └────────────────┘  └──────────────────┘   │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │                   Prisma ORM (SQLite)                    │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 任务分发流程
+
+```
+移动端/管理后台
+      │
+      │ POST /api/v1/app/task/execute
+      ▼
+  任务入队 (queued)
+      │
+      ├─── server_task ──► 本地执行引擎 (executionEngine) ──► 执行完成
+      │
+      └─── client_task ──► WebSocket 网关 ──► Mac Mini 客户端执行
+                                                      │
+                                          task.update / task.log
+                                                      │
+                                              状态回写数据库
+```
+
+---
+
+## 技术栈
+
+### 后端 (server/)
+
+| 技术 | 版本 | 用途 |
 |------|------|------|
-| 任务管理 | `/tasks` | 任务 CRUD、一键触发示例任务、执行日志弹窗、客户端状态面板 |
-| 配置管理 | `/config` | 多键 JSON 配置、Monaco 编辑器（语法高亮/格式化/校验） |
-| API 接口说明 | `/api-playground` | 交互式 API 文档、在线测试、自动签名注入 |
-| 空间管理 | `/dr/spaces` | DeepRead 空间 CRUD、邀请码复制、成员查看 |
-| 频道管理 | `/dr/channels` | DeepRead 频道 CRUD、空间筛选 |
-| 文章管理 | `/dr/articles` | DeepRead 文章 CRUD、Monaco HTML 编辑器、空间/频道联动筛选 |
-| 用户管理 | `/dr/users` | DeepRead 用户列表（只读）、展开查看加入的空间 |
+| Node.js | 22+ | 运行时 |
+| Express | 4.21.2 | Web 框架 |
+| TypeScript | 5.7.3 | 类型系统 |
+| Prisma | 6.19.2 | ORM |
+| SQLite | - | 数据库 |
+| jsonwebtoken | 9.0.2 | JWT 认证 |
+| bcryptjs | 2.4.3 | 密码哈希 |
+| cors | 2.8.5 | 跨域处理 |
 
-### 移动端 API（`/api/v1/app/`）
-| 方法 | 路径 | 说明 |
+### 前端 (admin-ui/)
+
+| 技术 | 版本 | 用途 |
 |------|------|------|
-| GET | `/config` | 获取 JSON 配置（默认 key: `global_json`） |
-| GET | `/task/catalog` | 查询已注册任务目录（含参数说明与示例） |
-| POST | `/task/execute` | 提交任务执行 |
-| PUT | `/task/status` | 更新任务状态 |
-| GET | `/task/status` | 查询任务详情（含日志/结果/耗时） |
+| React | 19.2.0 | UI 框架 |
+| Vite | 7.3.1 | 构建工具 |
+| TypeScript | 5.9.3 | 类型系统 |
+| Ant Design | 6.3.1 | UI 组件库 |
+| react-router-dom | 7.13.1 | 路由 |
+| axios | 1.13.5 | HTTP 客户端 |
+| Monaco Editor | 4.7.0 | 代码编辑器 |
+| crypto-js | 4.2.0 | MD5 签名 |
 
-### DeepRead 客户端 API（`/api/v1/dr/`）
+### 执行器客户端 (mac-mini-client/)
 
-鉴权方式：外层 x-sign 签名 + 内层 Bearer JWT（部分接口免登录）。
-
-| 方法 | 路径 | 鉴权 | 说明 |
-|------|------|------|------|
-| POST | `/sms/send` | sign | 发送短信验证码（开发模式固定 `888888`） |
-| POST | `/login` | sign | 验证码登录（自动注册新用户），返回 JWT |
-| POST | `/space/join` | sign + JWT | 通过邀请码加入空间 |
-| GET | `/articles` | sign + JWT | 文章列表（`space_id` 必填，`channel_id`/分页可选） |
-| GET | `/articles/:articleId` | sign + JWT | 文章详情（含 HTML 正文，阅读数 +1） |
-| PUT | `/articles/:articleId/bookmark` | sign + JWT | 收藏/取消收藏 |
-| PUT | `/articles/:articleId/read` | sign + JWT | 标记已读（支持进度百分比） |
-| POST | `/highlights` | sign + JWT | 创建高亮批注 |
-| PUT | `/highlights/:highlightId` | sign + JWT | 更新批注（颜色/笔记） |
-| DELETE | `/highlights/:highlightId` | sign + JWT | 删除批注（仅自己的） |
-| GET | `/highlights` | sign + JWT | 获取文章批注列表 |
-| POST | `/collections` | sign + JWT | 创建合集 |
-| PUT | `/collections/:collectionId/articles` | sign + JWT | 合集添加/移除文章 |
-| GET | `/collections` | sign + JWT | 获取合集列表（含文章数） |
-| POST | `/ai/chat` | sign + JWT | AI 对话（基于文章内容，Gemini 2.0 Flash） |
-
-### 后台管理 API（`/api/admin/`）
-
-通用管理（JWT 后台鉴权）：
-- 任务管理：列表（分页）、创建、按名称执行、更新状态、删除
-- 执行器客户端：列表、删除
-- 配置管理：列表、读取、创建/更新、删除
-
-DeepRead 管理（`/api/admin/dr/`）：
-
-| 方法 | 路径 | 说明 |
+| 技术 | 版本 | 用途 |
 |------|------|------|
-| GET | `/dr/spaces` | 空间列表（含成员数/频道数/文章数统计） |
-| POST | `/dr/spaces` | 创建空间（自动生成 spaceId + 6位邀请码） |
-| PUT | `/dr/spaces/:spaceId` | 编辑空间 |
-| DELETE | `/dr/spaces/:spaceId` | 删除空间（级联删除成员/频道/文章） |
-| GET | `/dr/spaces/:spaceId/members` | 空间成员列表 |
-| GET | `/dr/channels` | 频道列表（`space_id` 可选筛选，含文章数统计） |
-| POST | `/dr/channels` | 创建频道 |
-| PUT | `/dr/channels/:channelId` | 编辑频道 |
-| DELETE | `/dr/channels/:channelId` | 删除频道 |
-| GET | `/dr/articles` | 文章列表（分页，`space_id`/`channel_id` 可选筛选） |
-| POST | `/dr/articles` | 创建文章 |
-| PUT | `/dr/articles/:articleId` | 编辑文章 |
-| DELETE | `/dr/articles/:articleId` | 删除文章（级联删除收藏/已读/批注） |
-| GET | `/dr/users` | 用户列表（分页，含空间数/批注数统计） |
-| GET | `/dr/users/:userId` | 用户详情（含加入的空间列表） |
-
-### 开发与部署
-- **前端**：Vite + React + TypeScript + Ant Design（端口 5173）
-- **后端**：Express + TypeScript + Prisma + SQLite（端口 3001）
-- **开发体验**：热重载（tsx watch + Vite HMR）、数据库自动种子数据
-- **部署**：Docker 支持、丰富的环境变量配置
+| Node.js | 22+ | 运行时 |
+| WebSocket (原生) | - | 与服务器通信 |
 
 ---
 
 ## 快速启动
+
+### 前提条件
+
+- Node.js 22+
+- npm 10+
+
+### 1. 启动后端
 
 ```bash
 cd server
 npm install
 npx prisma generate
 npx prisma db push
-npm run db:seed
-npm run dev
-
-cd ../admin-ui
-npm install
-npm run dev
+npm run db:seed       # 初始化种子数据
+npm run dev           # 启动开发服务器（端口 3001）
 ```
 
-- 后端默认端口：`3001`
-- 前端默认端口：`5173`
-- 默认后台账号：`juma / juma2026`
-
----
-
-## 任务执行系统（Task 模式）
-
-已支持两种 Task 类型：
-
-1. `server_task`：在服务端执行已注册 `server.name` 任务
-2. `client_task`：分发给客户端执行已注册 `client.name` 任务
-
-### 架构说明
-
-- **任务创建与管理**：在后台「任务管理」页面创建任务、查看状态、手工更新、删除任务
-- **服务端本地执行引擎**：`server/src/services/executionEngine.ts`
-  - 定时扫描 `queued + server_task` 任务
-  - 通过 `ServerTask` 基类注册器执行任务逻辑
-- **远程执行器网关（WebSocket）**：`server/src/ws/executorWsGateway.ts`
-  - 客户端通过 `ws://host/ws/executor` 建立长连接
-  - 客户端发送 `client.hello` / `client.heartbeat`，服务端推送 `task.assign`
-  - 客户端通过 `task.update` 回传状态，通过 `task.log` 回传日志
-  - 通过共享密钥 `EXECUTOR_KEY` 做鉴权
-- **客户端状态可视化**：任务管理页下方可查看执行客户端在线/离线、心跳、统计信息
-
-### 远程执行（无公网 IP）的关键点
-
-Mac Mini 不需要被外网访问，采用“**客户端主动连接服务端**”方式：
-
-1. 客户端主动建立 WS 长连接并上报能力
-2. 服务端按能力实时推送任务（无轮询）
-3. 客户端执行后通过 WS 回传日志/结果
-
-推荐配置的服务端环境变量：
+### 2. 启动前端
 
 ```bash
-EXECUTOR_SHARED_KEY="juma_executor_2026"
-EXECUTOR_OFFLINE_TIMEOUT_MS=60000
-REMOTE_TASK_STALE_TIMEOUT_MS=300000
-LOCAL_EXECUTOR_CONCURRENCY=1
+cd admin-ui
+npm install
+npm run dev           # 启动开发服务器（端口 5173）
 ```
 
-### 任务协商协议（WebSocket）
-
-客户端连接 `ws://<host>/ws/executor?key=<EXECUTOR_KEY>` 后：
-
-- 发送 `client.hello`，上报 `tasks/capabilities/tags`
-- 定时发送 `client.heartbeat` 刷新在线状态
-- 服务端推送 `task.assign`（`task_name + task_payload + execution_name`）
-- 客户端通过 `task.update` 回传 `running/completed/error`，通过 `task.log` 回传执行日志
-
-任务分发规则：
-
-- 只有声明支持该 `task_name` 的客户端会被分配
-- 支持 `required_tags` 与 `target_client_id` 筛选
-- 客户端执行后结果 JSON 写入 `status_info.output_json`
-
----
-
-## Mac Mini 客户端
-
-目录：`mac-mini-client/`
+### 3. 启动执行器客户端（可选）
 
 ```bash
 cd mac-mini-client
+npm install
+SERVER_URL="http://localhost:3001" \
+EXECUTOR_KEY="juma_executor_2026" \
+CLIENT_ID="macmini-local-01" \
+CLIENT_TAGS="xcode,ios" \
 npm start
 ```
 
-常用环境变量：
+### 默认账号
 
-```bash
-SERVER_URL="http://your-server:3001"
-EXECUTOR_KEY="juma_executor_2026"
-CLIENT_ID="macmini-build-01"
-CLIENT_NAME="MacMini Build 01"
-CLIENT_TAGS="xcode,ios"
-WORK_DIR="/Users/runner/workspace"
-npm start
+| 系统 | 账号 | 密码/验证码 |
+|------|------|------------|
+| 管理后台 | `juma` | `juma2026` |
+| DeepRead 测试用户 | `13800138000` | `888888`（开发模式固定） |
+
+---
+
+## 目录结构
+
+```
+juma-web/
+├── server/                        # 后端服务
+│   ├── src/
+│   │   ├── index.ts               # 服务入口
+│   │   ├── middleware/
+│   │   │   ├── auth.ts            # 管理员 JWT 认证
+│   │   │   ├── drAuth.ts          # DeepRead JWT 认证
+│   │   │   └── sign.ts            # x-sign 签名验证（MD5）
+│   │   ├── routes/
+│   │   │   ├── auth.ts            # 登录接口
+│   │   │   ├── app.ts             # 移动端 API
+│   │   │   ├── admin.ts           # 管理后台 API
+│   │   │   └── deepread.ts        # DeepRead 客户端 API
+│   │   ├── services/
+│   │   │   ├── taskRegistry.ts    # 任务定义与注册中心
+│   │   │   ├── taskEnqueue.ts     # 任务入队
+│   │   │   ├── taskNaming.ts      # 任务命名规则
+│   │   │   ├── serverTaskRuntime.ts  # 服务端任务执行
+│   │   │   └── executionEngine.ts    # 本地任务轮询引擎
+│   │   ├── ws/
+│   │   │   └── executorWsGateway.ts  # WebSocket 执行器网关
+│   │   └── prisma/
+│   │       └── seed.ts            # 数据库种子脚本
+│   ├── prisma/
+│   │   └── schema.prisma          # 数据库 Schema（SQLite）
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── admin-ui/                      # 管理后台前端（React）
+│   ├── src/
+│   │   ├── main.tsx
+│   │   ├── App.tsx                # 路由与布局配置
+│   │   ├── layouts/
+│   │   │   └── AdminLayout.tsx    # 侧边栏 + 主内容布局
+│   │   ├── pages/
+│   │   │   ├── Login.tsx
+│   │   │   ├── TaskManagement.tsx
+│   │   │   ├── ConfigManagement.tsx
+│   │   │   ├── ApiPlayground.tsx
+│   │   │   ├── DrSpaceManagement.tsx
+│   │   │   ├── DrChannelManagement.tsx
+│   │   │   ├── DrArticleManagement.tsx
+│   │   │   └── DrUserManagement.tsx
+│   │   ├── api/
+│   │   │   └── client.ts          # Axios 实例（自动注入 Bearer Token）
+│   │   └── utils/
+│   │       └── sign.ts            # x-sign 生成工具
+│   └── package.json
+│
+├── mac-mini-client/               # 远程执行器客户端
+│   ├── client.js                  # WebSocket 客户端主程序
+│   ├── tasks/                     # 任务实现（client.* 系列）
+│   └── package.json
+│
+├── docs/                          # 详细文档
+│   ├── architecture.md            # 系统架构详解
+│   ├── api-reference.md           # 完整 API 参考
+│   ├── development.md             # 开发指南
+│   └── deployment.md              # 部署指南
+│
+├── Dockerfile                     # 多阶段构建（前端 + 后端）
+├── deploy.sh                      # 部署脚本
+├── PRD.md                         # 产品需求文档
+└── AGENTS.md                      # AI Agent 开发规范
 ```
 
 ---
 
-## 移动端 API 鉴权说明（x-sign）
+## 功能模块
 
-所有移动端接口都在 `/api/v1/app/*` 下，必须携带以下请求头：
+### 管理后台（Web UI）
 
-- `x-timestamp`: 13 位毫秒时间戳（例如 `1709000000000`）
-- `x-sign`: 签名，计算公式：
+| 页面 | 路径 | 功能描述 |
+|------|------|----------|
+| 登录 | `/login` | 用户名/密码登录 |
+| 任务管理 | `/tasks` | 任务 CRUD、一键触发、执行日志查看、执行器客户端状态 |
+| 配置管理 | `/config` | JSON 配置管理，Monaco 编辑器（语法高亮/格式化/校验） |
+| API 接口文档 | `/api-playground` | 交互式 API 文档，内置测试面板，自动签名注入 |
+| 空间管理 | `/dr/spaces` | DeepRead 空间 CRUD、邀请码生成与复制、成员查看 |
+| 频道管理 | `/dr/channels` | DeepRead 频道 CRUD、按空间筛选 |
+| 文章管理 | `/dr/articles` | DeepRead 文章 CRUD、Monaco HTML 编辑器 |
+| 用户管理 | `/dr/users` | DeepRead 用户列表（只读），展开查看加入的空间 |
 
-```text
-MD5(APP_SECRET + x-timestamp)
-```
+### 移动端 API（`/api/v1/app/`）
 
-默认 `APP_SECRET`：
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/config` | 获取 JSON 配置（默认 key: `global_json`） |
+| GET | `/task/catalog` | 查询已注册任务目录（含参数说明与示例） |
+| POST | `/task/execute` | 提交任务执行 |
+| PUT | `/task/status` | 更新任务状态/进度 |
+| GET | `/task/status` | 查询任务详情（含日志/结果/耗时） |
 
-```text
-juma2026_secret
-```
+### 管理后台 API（`/api/admin/`）
 
-服务端校验逻辑（`server/src/middleware/sign.ts`）：
+- **任务管理**：任务列表（分页）、按名称执行、创建、更新状态、删除、查看任务定义
+- **执行器客户端**：在线/离线列表、删除
+- **配置管理**：多 key JSON 配置的增删改查
+- **DeepRead 管理**：空间/频道/文章/用户的完整 CRUD
 
-1. 缺失或非法 `x-timestamp`：返回 `403`
-2. 时间戳与服务器时间误差超过 ±5 分钟：返回 `403`（防重放）
-3. 缺失或错误 `x-sign`：返回 `401`
+### DeepRead 客户端 API（`/api/v1/dr/`）
 
-### 签名生成脚本（Linux）
-
-```bash
-APP_SECRET="juma2026_secret"
-BASE_URL="http://localhost:3001"
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-```
-
----
-
-## API 列表与 curl 示例
-
-### 1) 获取应用配置
-
-- **Method**: `GET`
-- **URL**: `/api/v1/app/config`
-- **Query**: `key`（可选，默认 `global_json`）
-
-```bash
-APP_SECRET="juma2026_secret"
-BASE_URL="http://localhost:3001"
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request GET "${BASE_URL}/api/v1/app/config?key=global_json" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}"
-```
-
-### 2) 查询支持任务列表
-
-- **Method**: `GET`
-- **URL**: `/api/v1/app/task/catalog`
-- **说明**：返回服务端已注册的所有 task 定义（含执行类型、参数说明、示例参数）
-
-```bash
-APP_SECRET="juma2026_secret"
-BASE_URL="http://localhost:3001"
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request GET "${BASE_URL}/api/v1/app/task/catalog" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}"
-```
-
-### 3) 触发任务执行
-
-- **Method**: `POST`
-- **URL**: `/api/v1/app/task/execute`
-- **Body**:
-  - `task_name`: string（必填，必须为已注册 task）
-  - `task_payload`: object（可选，不同 task 的 payload 结构不同）
-  - `execution_name`: string（可选，用于标识任务实例）
-- **未注册 task**：返回 `404`，`message` 为“任务不存在”
-- **当前内置示例 task**：
-  - `server.echo`（服务端执行）
-  - `client.echo`（客户端执行）
-  - `client.mock3s`（客户端执行）
-  - `client.fail_demo`（客户端执行，故障演练）
-
-#### 3.1 服务端执行示例（server.echo）
-
-```bash
-APP_SECRET="juma2026_secret"
-BASE_URL="http://localhost:3001"
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request POST "${BASE_URL}/api/v1/app/task/execute" \
-  --header "Content-Type: application/json" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}" \
-  --data '{
-    "task_name":"server.echo",
-    "task_payload":{
-      "message":"同步商品索引",
-      "repeat":3,
-      "sleep_ms":400
-    },
-    "execution_name":"sync-product-index-001"
-  }'
-```
-
-#### 3.2 客户端执行示例（client.mock3s）
-
-```bash
-APP_SECRET="juma2026_secret"
-BASE_URL="http://localhost:3001"
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request POST "${BASE_URL}/api/v1/app/task/execute" \
-  --header "Content-Type: application/json" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}" \
-  --data '{
-    "task_name":"client.mock3s",
-    "task_payload":{
-      "payload":{
-        "build_id":"build-20260302-001",
-        "branch":"main",
-        "notify":true
-      },
-      "required_tags":["xcode"]
-    }
-  }'
-```
-
-#### 3.3 未注册任务示例（返回任务不存在）
-
-```bash
-APP_SECRET="juma2026_secret"
-BASE_URL="http://localhost:3001"
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request POST "${BASE_URL}/api/v1/app/task/execute" \
-  --header "Content-Type: application/json" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}" \
-  --data '{"task_name":"client.not-exists","task_payload":{}}'
-```
-
-### 4) 更新任务状态
-
-- **Method**: `PUT`
-- **URL**: `/api/v1/app/task/status`
-- **Body**:
-  - `task_id`: string（必填）
-  - `status`: `queued` / `running` / `error` / `completed`
-  - `status_info`: object（可选）
-
-```bash
-APP_SECRET="juma2026_secret"
-BASE_URL="http://localhost:3001"
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request PUT "${BASE_URL}/api/v1/app/task/status" \
-  --header "Content-Type: application/json" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}" \
-  --data '{"task_id":"T1709001234","status":"running","status_info":{"current_step":"2/5 处理数据","progress":40}}'
-```
-
-### 5) 查询任务状态
-
-- **Method**: `GET`
-- **URL**: `/api/v1/app/task/status`
-- **Query**: `task_id`（必填）
-- **返回增强**：包含 `task_name`、`task_type`、`task_payload`、`execution_name`、`status_info`、`execution_log`、`result_code`、执行时间等详细字段
-
-```bash
-APP_SECRET="juma2026_secret"
-BASE_URL="http://localhost:3001"
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request GET "${BASE_URL}/api/v1/app/task/status?task_id=T1709001234" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}"
-```
+- **认证**：验证码登录，30 天 JWT
+- **空间**：通过邀请码加入
+- **文章**：列表、详情、收藏、阅读进度追踪
+- **批注**：创建/编辑/删除高亮批注，支持颜色与笔记
+- **合集**：创建合集，批量管理文章
+- **AI 对话**：基于文章内容与 Gemini 2.0 Flash 对话
 
 ---
 
-## 后台任务管理（UI）
+## 环境变量
 
-“任务管理”页面支持直接管理任务：
-
-- 新建任务（任务名称、任务类型、脚本、超时、env、重试策略）
-- 新建任务（任务名称、任务类型、task_payload、execution_name、重试策略）
-- 已注册任务面板（展示所有支持 task、参数说明、示例参数、一键触发示例任务）
-- `client_task` 支持指定目标客户端/required_tags
-- 查看任务状态、详情、执行日志（日志详情弹窗含 task_payload/status_info/execution_log）
-- 更新任务状态与 `status_info`
-- 删除任务
-- 分页刷新、客户端状态刷新
-- 客户端状态表（在线/离线、最近心跳、任务统计、支持服务）
-
----
-
-## DeepRead API
-
-DeepRead 是一个深度阅读平台模块，提供空间/频道/文章管理、用户认证、批注、合集和 AI 对话功能。
-
-### 鉴权说明
-
-DeepRead 客户端 API 使用双层鉴权：
-
-1. **外层 x-sign 签名**：所有 `/api/v1/dr/*` 请求都需要（与移动端 API 相同）
-2. **内层 JWT Bearer Token**：除 `POST /sms/send` 和 `POST /login` 外，其余接口都需要
-
-JWT Token 通过登录接口获取，有效期 30 天。请求头格式：`Authorization: Bearer <token>`
-
-### 环境变量
+### 服务端（`server/.env`）
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
+| `DATABASE_URL` | `file:./prisma/dev.db` | SQLite 数据库路径 |
+| `PORT` | `3001` | 服务器监听端口 |
+| `NODE_ENV` | `development` | 运行环境 |
+| `JWT_SECRET` | `juma_jwt_secret_2026` | 管理员 JWT 密钥 |
+| `APP_SECRET` | `juma2026_secret` | 移动端签名密钥 |
 | `DR_JWT_SECRET` | `deepread_jwt_secret_2026` | DeepRead 用户 JWT 密钥 |
-| `GEMINI_API_KEY` | 无 | Google Gemini API Key（AI 对话功能必需） |
+| `EXECUTOR_SHARED_KEY` | `juma_executor_2026` | WebSocket 执行器共享密钥 |
+| `EXECUTOR_OFFLINE_TIMEOUT_MS` | `60000` | 执行器离线判定超时（毫秒） |
+| `EXECUTOR_SWEEP_INTERVAL_MS` | `10000` | 执行器状态扫描间隔 |
+| `EXECUTOR_HEARTBEAT_INTERVAL_MS` | `10000` | 心跳间隔 |
+| `EXECUTOR_DISPATCH_INTERVAL_MS` | `1500` | 任务分发轮询间隔 |
+| `LOCAL_EXECUTOR_POLL_MS` | `2000` | 本地任务轮询间隔 |
+| `LOCAL_EXECUTOR_CONCURRENCY` | `1` | 本地并发执行任务数 |
+| `REMOTE_TASK_STALE_TIMEOUT_MS` | `300000` | 远程任务超时（5分钟） |
+| `TASK_LOG_MAX_BYTES` | `65536` | 单任务日志最大字节数（64KB） |
+| `GEMINI_API_KEY` | _(无)_ | Google Gemini API Key（AI 对话必需） |
 
-### curl 示例
+### 前端（`admin-ui/.env.local`）
 
-#### 1) 发送验证码
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `VITE_API_BASE_URL` | `http://localhost:3001` | 后端 API 地址 |
+
+### 执行器客户端（环境变量）
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `SERVER_URL` | `http://localhost:3001` | 服务器地址 |
+| `EXECUTOR_KEY` | `juma_executor_2026` | 共享密钥 |
+| `CLIENT_ID` | `macmini-{hostname}-{uuid}` | 客户端唯一标识 |
+| `CLIENT_NAME` | `{hostname}` | 客户端显示名称 |
+| `CLIENT_TAGS` | `xcode,ios` | 客户端标签（逗号分隔） |
+| `CLIENT_VERSION` | `1.0.0` | 客户端版本 |
+| `WORK_DIR` | `{cwd}` | 任务工作目录 |
+| `HEARTBEAT_INTERVAL_MS` | `10000` | 心跳发送间隔 |
+| `RECONNECT_DELAY_MS` | `3000` | 断线重连延迟 |
+| `LOG_FLUSH_INTERVAL_MS` | `2000` | 日志缓冲刷新间隔 |
+| `LOG_FLUSH_SIZE` | `2048` | 日志缓冲大小（字节） |
+
+---
+
+## API 文档
+
+> 详细 API 参考请见 [docs/api-reference.md](docs/api-reference.md)
+
+### 认证方式
+
+#### 1. 管理员 JWT（管理后台 API）
+
+```
+Authorization: Bearer <token>
+```
+
+通过 `POST /api/auth/login` 获取，有效期 **24 小时**。
+
+#### 2. x-sign 签名（移动端 API / DeepRead API）
+
+所有 `/api/v1/*` 接口均需携带：
+
+| 请求头 | 说明 |
+|--------|------|
+| `x-timestamp` | 13 位毫秒时间戳 |
+| `x-sign` | `MD5(APP_SECRET + x-timestamp)` 的 32 位小写十六进制 |
+
+服务端校验：时间戳误差超过 **±5 分钟** 返回 `403`（防重放攻击）。
+
+**签名生成（Shell）：**
 
 ```bash
 APP_SECRET="juma2026_secret"
-BASE_URL="http://localhost:3001"
 TS=$(date +%s%3N)
 SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request POST "${BASE_URL}/api/v1/dr/sms/send" \
-  --header "Content-Type: application/json" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}" \
-  --data '{"phone":"13800138000"}'
 ```
 
-#### 2) 登录
+#### 3. DeepRead 用户 JWT
+
+DeepRead 保护接口还需在 `Authorization: Bearer <dr_token>` 中携带通过登录接口获取的 Token，有效期 **30 天**。
+
+---
+
+### 核心接口示例
+
+#### 管理员登录
 
 ```bash
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request POST "${BASE_URL}/api/v1/dr/login" \
-  --header "Content-Type: application/json" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}" \
-  --data '{"phone":"13800138000","code":"888888"}'
+curl -X POST http://localhost:3001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"juma","password":"juma2026"}'
 ```
 
-返回示例：
 ```json
 {
   "code": 200,
   "message": "登录成功",
   "data": {
-    "token": "eyJhbGciOi...",
-    "user": { "id": 1, "phone": "13800138000", "nickname": "用户8000", "avatar": "" }
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
   }
 }
 ```
 
-#### 3) 加入空间
+#### 触发任务执行
 
 ```bash
-TOKEN="<从登录接口获取>"
+APP_SECRET="juma2026_secret"
 TS=$(date +%s%3N)
 SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
 
-curl --request POST "${BASE_URL}/api/v1/dr/space/join" \
-  --header "Content-Type: application/json" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}" \
-  --header "Authorization: Bearer ${TOKEN}" \
-  --data '{"invite_code":"DEEP2026"}'
-```
-
-#### 4) 获取文章列表
-
-```bash
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request GET "${BASE_URL}/api/v1/dr/articles?space_id=S1000001&page=1&page_size=20" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}" \
-  --header "Authorization: Bearer ${TOKEN}"
-```
-
-#### 5) 获取文章详情
-
-```bash
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request GET "${BASE_URL}/api/v1/dr/articles/A1000001" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}" \
-  --header "Authorization: Bearer ${TOKEN}"
-```
-
-#### 6) 收藏文章
-
-```bash
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request PUT "${BASE_URL}/api/v1/dr/articles/A1000001/bookmark" \
-  --header "Content-Type: application/json" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}" \
-  --header "Authorization: Bearer ${TOKEN}" \
-  --data '{"bookmarked":true}'
-```
-
-#### 7) 创建批注
-
-```bash
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request POST "${BASE_URL}/api/v1/dr/highlights" \
-  --header "Content-Type: application/json" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}" \
-  --header "Authorization: Bearer ${TOKEN}" \
-  --data '{
-    "article_id":"A1000001",
-    "text":"AI 技术正在重新定义我们对教育的理解",
-    "color":"#FFEB3B",
-    "position_data":{"paragraph":1,"offset":10,"length":20},
-    "note":"这个观点很有启发"
+curl -X POST http://localhost:3001/api/v1/app/task/execute \
+  -H "Content-Type: application/json" \
+  -H "x-timestamp: ${TS}" \
+  -H "x-sign: ${SIGN}" \
+  -d '{
+    "task_name": "server.echo",
+    "task_payload": {
+      "message": "Hello from juma",
+      "repeat": 3,
+      "sleep_ms": 500
+    },
+    "execution_name": "my-echo-task-001"
   }'
 ```
 
-#### 8) AI 对话
-
-```bash
-TS=$(date +%s%3N)
-SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
-
-curl --request POST "${BASE_URL}/api/v1/dr/ai/chat" \
-  --header "Content-Type: application/json" \
-  --header "x-timestamp: ${TS}" \
-  --header "x-sign: ${SIGN}" \
-  --header "Authorization: Bearer ${TOKEN}" \
-  --data '{"article_id":"A1000001","message":"这篇文章的核心观点是什么？"}'
+```json
+{
+  "code": 200,
+  "message": "任务已提交",
+  "data": {
+    "task_id": "T1709001234567"
+  }
+}
 ```
 
-### 种子数据
+#### 查询任务状态
 
-运行 `npm run db:seed` 后自动创建：
+```bash
+curl -G http://localhost:3001/api/v1/app/task/status \
+  -H "x-timestamp: ${TS}" \
+  -H "x-sign: ${SIGN}" \
+  --data-urlencode "task_id=T1709001234567"
+```
 
-| 数据 | 内容 |
+```json
+{
+  "code": 200,
+  "data": {
+    "task_id": "T1709001234567",
+    "task_name": "server.echo",
+    "task_type": "server_task",
+    "status": "completed",
+    "execution_log": "[2026-03-01T12:00:00] Echo: Hello from juma\n...",
+    "result_code": 0,
+    "started_at": "2026-03-01T12:00:00.000Z",
+    "finished_at": "2026-03-01T12:00:01.500Z"
+  }
+}
+```
+
+---
+
+## 任务执行系统
+
+> 详细说明请见 [docs/architecture.md](docs/architecture.md)
+
+### 任务类型
+
+| 类型 | 命名前缀 | 执行位置 |
+|------|----------|----------|
+| 服务端任务 | `server.*` | Express 服务器本地执行 |
+| 客户端任务 | `client.*` | 通过 WebSocket 推送至远程执行器 |
+
+### 内置任务
+
+| 任务名 | 类型 | 说明 |
+|--------|------|------|
+| `server.echo` | server_task | 在服务端重复打印消息 |
+| `client.echo` | client_task | 在客户端重复打印消息 |
+| `client.mock3s` | client_task | 模拟 3 秒耗时任务 |
+| `client.fail_demo` | client_task | 模拟失败场景（故障演练） |
+
+### 任务生命周期
+
+```
+queued → running → completed
+                 → error (可重试，最多10次)
+```
+
+### 注册自定义任务
+
+在 `server/src/services/taskRegistry.ts` 中添加：
+
+```typescript
+// 服务端任务
+{
+  taskName: "server.my_task",
+  taskType: "server_task",
+  description: "我的自定义任务",
+  paramsSchema: {
+    input: { type: "string", description: "输入参数", example: "hello" }
+  },
+  examplePayload: { input: "hello" }
+}
+
+// 客户端任务
+{
+  taskName: "client.my_task",
+  taskType: "client_task",
+  description: "在 Mac Mini 上执行的任务",
+  paramsSchema: {
+    script: { type: "string", description: "脚本路径" }
+  },
+  examplePayload: { script: "/path/to/build.sh" }
+}
+```
+
+---
+
+## WebSocket 协议
+
+连接地址：`ws://<host>/ws/executor?key=<EXECUTOR_SHARED_KEY>`
+
+### 消息格式
+
+```json
+{
+  "type": "<消息类型>",
+  "payload": { }
+}
+```
+
+### 消息类型
+
+| 方向 | 类型 | 说明 |
+|------|------|------|
+| 客户端 → 服务端 | `client.hello` | 注册客户端，声明能力 |
+| 服务端 → 客户端 | `server.hello` | 确认注册成功 |
+| 客户端 → 服务端 | `client.heartbeat` | 保活心跳 |
+| 服务端 → 客户端 | `task.assign` | 推送任务 |
+| 客户端 → 服务端 | `task.update` | 回传任务状态 |
+| 客户端 → 服务端 | `task.log` | 回传执行日志 |
+
+### client.hello 示例
+
+```json
+{
+  "type": "client.hello",
+  "payload": {
+    "client_id": "macmini-build-01",
+    "client_name": "MacMini Build 01",
+    "platform": "darwin",
+    "app_version": "1.0.0",
+    "tasks": ["client.echo", "client.mock3s", "client.fail_demo"],
+    "tags": ["xcode", "ios"],
+    "capabilities": {}
+  }
+}
+```
+
+### task.assign 示例（服务端推送）
+
+```json
+{
+  "type": "task.assign",
+  "payload": {
+    "task_id": "T1709001234567",
+    "task_name": "client.mock3s",
+    "task_payload": { "payload": { "build_id": "build-20260302-001" } },
+    "execution_name": "iOS Build #42",
+    "max_retries": 3
+  }
+}
+```
+
+### task.update 示例（客户端回传）
+
+```json
+{
+  "type": "task.update",
+  "payload": {
+    "task_id": "T1709001234567",
+    "status": "completed",
+    "result_code": 0,
+    "status_info": { "output_json": { "build_url": "https://..." } }
+  }
+}
+```
+
+---
+
+## DeepRead 平台
+
+### 核心概念
+
+```
+Space（空间）
+  └── Channel（频道）
+        └── Article（文章）
+              ├── Bookmark（收藏）
+              ├── ReadStatus（阅读进度）
+              ├── Highlight（批注）
+              └── AI Chat（AI 对话）
+
+User（用户）
+  ├── Collections（合集）
+  │     └── CollectionArticle（合集文章）
+  └── SpaceMember（空间成员）
+```
+
+### 功能特性
+
+| 功能 | 说明 |
 |------|------|
-| 测试用户 | 手机号 `13800138000`，昵称"测试用户" |
-| 示例空间 | "DeepRead 精选"，邀请码 `DEEP2026` |
-| 频道 | "科技前沿"、"深度评论" |
-| 文章 | 4 篇示例文章（含完整 HTML 正文） |
+| 无密码登录 | 短信验证码，自动注册新用户 |
+| 邀请码加入 | 空间支持邀请码，可设过期时间和使用次数上限 |
+| 阅读进度 | 支持 0-100% 的精确进度追踪 |
+| 高亮批注 | 文本高亮+颜色+位置信息+笔记，完整 CRUD |
+| 合集 | 用户自定义文章合集，增删文章 |
+| AI 对话 | 基于 Gemini 2.0 Flash，以文章为上下文进行对话 |
+
+### 认证流程
+
+```
+1. POST /api/v1/dr/sms/send  →  发送验证码（开发环境固定 888888）
+2. POST /api/v1/dr/login     →  验证码登录，返回 JWT（30天有效）
+3. 携带 JWT 访问保护接口
+```
+
+---
+
+## 数据库模型
+
+使用 Prisma + SQLite，包含 **16 个数据模型**：
+
+| 模型 | 说明 |
+|------|------|
+| `AdminUser` | 管理员账号（用户名 + bcrypt 密码） |
+| `AppConfig` | 应用配置（JSON 键值对） |
+| `Task` | 任务记录（含状态、日志、重试信息） |
+| `ExecutorClient` | 注册的执行器客户端（在线状态、心跳、统计） |
+| `DrUser` | DeepRead 用户（手机号、昵称、头像） |
+| `DrSmsCode` | 短信验证码（含过期时间、使用状态） |
+| `DrSpace` | DeepRead 空间 |
+| `DrSpaceMember` | 空间成员关系 |
+| `DrInviteCode` | 邀请码（支持最大使用次数、过期时间） |
+| `DrChannel` | 频道（所属空间、排序） |
+| `DrArticle` | 文章（HTML 正文、阅读数） |
+| `DrBookmark` | 文章收藏 |
+| `DrReadStatus` | 阅读进度（百分比） |
+| `DrHighlight` | 高亮批注（文本、颜色、位置、笔记） |
+| `DrCollection` | 用户合集 |
+| `DrCollectionArticle` | 合集-文章关联 |
+
+---
+
+## 部署指南
+
+> 详细部署说明请见 [docs/deployment.md](docs/deployment.md)
+
+### Docker 部署（推荐）
+
+```bash
+# 构建镜像
+docker build -t juma-web .
+
+# 运行容器
+docker run -d \
+  -p 3001:3001 \
+  -v /data/juma:/app/data \
+  -e JWT_SECRET="your_strong_secret" \
+  -e APP_SECRET="your_app_secret" \
+  -e DR_JWT_SECRET="your_dr_secret" \
+  -e EXECUTOR_SHARED_KEY="your_executor_key" \
+  -e GEMINI_API_KEY="your_gemini_key" \
+  --name juma-web \
+  juma-web
+```
+
+### 生产部署注意事项
+
+1. **修改所有默认密钥**（JWT_SECRET、APP_SECRET、EXECUTOR_SHARED_KEY 等）
+2. **持久化 SQLite 数据库**（挂载 `/app/data` 目录）
+3. **配置 HTTPS 反向代理**（推荐 Nginx）
+4. **WebSocket 需配置代理升级**（`proxy_set_header Upgrade $http_upgrade`）
+5. **Gemini API Key**（AI 对话功能需配置 `GEMINI_API_KEY`）
+
+---
+
+## 更多文档
+
+| 文档 | 说明 |
+|------|------|
+| [docs/architecture.md](docs/architecture.md) | 系统架构详解、模块关系、数据流 |
+| [docs/api-reference.md](docs/api-reference.md) | 完整 API 参考（所有接口、参数、响应格式） |
+| [docs/development.md](docs/development.md) | 开发指南（本地调试、添加任务、测试） |
+| [docs/deployment.md](docs/deployment.md) | 生产部署（Docker、Nginx、HTTPS 配置） |
+| [PRD.md](PRD.md) | 产品需求文档 |
+| [AGENTS.md](AGENTS.md) | AI Agent 开发规范 |
