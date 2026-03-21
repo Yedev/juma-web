@@ -651,6 +651,111 @@ router.get("/dr/spaces/:spaceId/members", async (req: AuthRequest, res: Response
   }
 });
 
+// ── Invite Codes ──
+
+router.get("/dr/spaces/:spaceId/invite-codes", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const codes = await prisma.drInviteCode.findMany({
+      where: { spaceId },
+      orderBy: { createdAt: "desc" },
+    });
+
+    // For each code, fetch members who used it
+    const codeIds = codes.map((c) => c.codeId);
+    const members = await prisma.drSpaceMember.findMany({
+      where: { spaceId, inviteCodeId: { in: codeIds } },
+      orderBy: { joinedAt: "desc" },
+    });
+    const userIds = [...new Set(members.map((m) => m.userId))];
+    const users = await prisma.drUser.findMany({ where: { id: { in: userIds } } });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    const membersByCode = new Map<string, { userId: number; phone: string; nickname: string; joinedAt: Date }[]>();
+    for (const m of members) {
+      if (!m.inviteCodeId) continue;
+      if (!membersByCode.has(m.inviteCodeId)) membersByCode.set(m.inviteCodeId, []);
+      membersByCode.get(m.inviteCodeId)!.push({
+        userId: m.userId,
+        phone: userMap.get(m.userId)?.phone ?? "",
+        nickname: userMap.get(m.userId)?.nickname ?? "",
+        joinedAt: m.joinedAt,
+      });
+    }
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: codes.map((c) => ({
+        ...c,
+        users: membersByCode.get(c.codeId) ?? [],
+      })),
+    });
+  } catch (error) {
+    console.error("Admin list invite codes error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.post("/dr/spaces/:spaceId/invite-codes", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const { label, maxUses, expiresAt } = req.body as {
+      label?: string;
+      maxUses?: number | null;
+      expiresAt?: string | null;
+    };
+
+    const space = await prisma.drSpace.findUnique({ where: { spaceId } });
+    if (!space) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
+      return;
+    }
+
+    // Generate unique code
+    let code = generateInviteCode();
+    let attempts = 0;
+    while (attempts < 10) {
+      const existing = await prisma.drInviteCode.findUnique({ where: { code } });
+      if (!existing) break;
+      code = generateInviteCode();
+      attempts++;
+    }
+
+    const inviteCode = await prisma.drInviteCode.create({
+      data: {
+        codeId: generateDrId("IC"),
+        spaceId,
+        code,
+        label: label?.trim() ?? "",
+        maxUses: maxUses ?? null,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+      },
+    });
+
+    res.json({ code: 200, message: "邀请码已创建", data: inviteCode });
+  } catch (error) {
+    console.error("Admin create invite code error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/dr/invite-codes/:codeId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const codeId = req.params.codeId as string;
+    const existing = await prisma.drInviteCode.findUnique({ where: { codeId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "邀请码不存在" });
+      return;
+    }
+    await prisma.drInviteCode.delete({ where: { codeId } });
+    res.json({ code: 200, message: "邀请码已删除" });
+  } catch (error) {
+    console.error("Admin delete invite code error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
 // ── Channels ──
 
 router.get("/dr/channels", async (req: AuthRequest, res: Response): Promise<void> => {

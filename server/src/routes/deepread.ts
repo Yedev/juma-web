@@ -119,30 +119,62 @@ router.post("/space/join", async (req: DrAuthRequest, res: Response): Promise<vo
       return;
     }
 
-    const space = await prisma.drSpace.findUnique({
-      where: { inviteCode: invite_code },
+    // Look up dynamic invite code
+    const inviteCode = await prisma.drInviteCode.findUnique({
+      where: { code: invite_code },
     });
-    if (!space) {
+
+    if (!inviteCode || inviteCode.disabled) {
       res.status(404).json({ code: 404, message: "邀请码无效" });
       return;
     }
 
-    // Upsert membership
-    await prisma.drSpaceMember.upsert({
-      where: {
-        spaceId_userId: { spaceId: space.spaceId, userId: req.drUserId! },
-      },
-      update: {},
-      create: {
-        spaceId: space.spaceId,
-        userId: req.drUserId!,
-        role: "member",
-      },
+    // Check expiry
+    if (inviteCode.expiresAt && inviteCode.expiresAt < new Date()) {
+      res.status(400).json({ code: 400, message: "邀请码已过期" });
+      return;
+    }
+
+    // Check max uses
+    if (inviteCode.maxUses !== null && inviteCode.useCount >= inviteCode.maxUses) {
+      res.status(400).json({ code: 400, message: "邀请码使用次数已达上限" });
+      return;
+    }
+
+    const space = await prisma.drSpace.findUnique({
+      where: { spaceId: inviteCode.spaceId },
     });
+    if (!space) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
+      return;
+    }
+
+    // Check if already a member
+    const existing = await prisma.drSpaceMember.findUnique({
+      where: { spaceId_userId: { spaceId: space.spaceId, userId: req.drUserId! } },
+    });
+
+    if (!existing) {
+      // Create membership and increment use count atomically
+      await prisma.$transaction([
+        prisma.drSpaceMember.create({
+          data: {
+            spaceId: space.spaceId,
+            userId: req.drUserId!,
+            role: "member",
+            inviteCodeId: inviteCode.codeId,
+          },
+        }),
+        prisma.drInviteCode.update({
+          where: { codeId: inviteCode.codeId },
+          data: { useCount: { increment: 1 } },
+        }),
+      ]);
+    }
 
     res.json({
       code: 200,
-      message: "加入成功",
+      message: existing ? "您已是该空间成员" : "加入成功",
       data: {
         spaceId: space.spaceId,
         name: space.name,
