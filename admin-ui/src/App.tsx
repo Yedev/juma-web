@@ -6,6 +6,10 @@ import AdminLayout from "./layouts/AdminLayout";
 import TaskManagement from "./pages/TaskManagement";
 import ConfigManagement from "./pages/ConfigManagement";
 import ApiPlayground from "./pages/ApiPlayground";
+import DrSpaceManagement from "./pages/DrSpaceManagement";
+import DrChannelManagement from "./pages/DrChannelManagement";
+import DrArticleManagement from "./pages/DrArticleManagement";
+import DrUserManagement from "./pages/DrUserManagement";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem("juma_token");
@@ -66,6 +70,10 @@ function App() {
             <Route path="tasks" element={<TaskManagement />} />
             <Route path="config" element={<ConfigManagement />} />
             <Route path="api-playground" element={<ApiPlayground />} />
+            <Route path="dr/spaces" element={<DrSpaceManagement />} />
+            <Route path="dr/channels" element={<DrChannelManagement />} />
+            <Route path="dr/articles" element={<DrArticleManagement />} />
+            <Route path="dr/users" element={<DrUserManagement />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

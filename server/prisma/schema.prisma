@@ -67,3 +67,126 @@ model ExecutorClient {
 
   @@map("executor_clients")
 }
+
+// ── DeepRead ────────────────────────────────────────────
+
+model DrUser {
+  id        Int      @id @default(autoincrement())
+  phone     String   @unique
+  nickname  String   @default("")
+  avatar    String   @default("")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  @@map("dr_users")
+}
+
+model DrSmsCode {
+  id        Int      @id @default(autoincrement())
+  phone     String
+  code      String
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  @@map("dr_sms_codes")
+}
+
+model DrSpace {
+  id           Int      @id @default(autoincrement())
+  spaceId      String   @unique @map("space_id")
+  name         String
+  description  String   @default("")
+  inviteCode   String   @unique @map("invite_code")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  @@map("dr_spaces")
+}
+
+model DrSpaceMember {
+  id        Int      @id @default(autoincrement())
+  spaceId   String   @map("space_id")
+  userId    Int      @map("user_id")
+  role      String   @default("member")
+  joinedAt  DateTime @default(now()) @map("joined_at")
+  @@unique([spaceId, userId])
+  @@map("dr_space_members")
+}
+
+model DrChannel {
+  id        Int      @id @default(autoincrement())
+  channelId String   @unique @map("channel_id")
+  spaceId   String   @map("space_id")
+  name      String
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@map("dr_channels")
+}
+
+model DrArticle {
+  id          Int      @id @default(autoincrement())
+  articleId   String   @unique @map("article_id")
+  spaceId     String   @map("space_id")
+  channelId   String   @map("channel_id")
+  title       String
+  summary     String   @default("")
+  coverUrl    String   @default("") @map("cover_url")
+  layoutType  String   @default("default") @map("layout_type")
+  contentHtml String   @default("") @map("content_html")
+  author      String   @default("")
+  readCount   Int      @default(0) @map("read_count")
+  publishedAt DateTime @default(now()) @map("published_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  @@map("dr_articles")
+}
+
+model DrBookmark {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  articleId String   @map("article_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  @@unique([userId, articleId])
+  @@map("dr_bookmarks")
+}
+
+model DrReadStatus {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  articleId String   @map("article_id")
+  progress  Int      @default(0)
+  readAt    DateTime @default(now()) @map("read_at")
+  @@unique([userId, articleId])
+  @@map("dr_read_status")
+}
+
+model DrHighlight {
+  id           Int      @id @default(autoincrement())
+  highlightId  String   @unique @map("highlight_id")
+  userId       Int      @map("user_id")
+  articleId    String   @map("article_id")
+  text         String
+  color        String   @default("#FFEB3B")
+  positionData String   @default("{}") @map("position_data")
+  note         String   @default("")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  @@map("dr_highlights")
+}
+
+model DrCollection {
+  id           Int      @id @default(autoincrement())
+  collectionId String   @unique @map("collection_id")
+  userId       Int      @map("user_id")
+  name         String
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  @@map("dr_collections")
+}
+
+model DrCollectionArticle {
+  id           Int      @id @default(autoincrement())
+  collectionId String   @map("collection_id")
+  articleId    String   @map("article_id")
+  addedAt      DateTime @default(now()) @map("added_at")
+  @@unique([collectionId, articleId])
+  @@map("dr_collection_articles")
+}

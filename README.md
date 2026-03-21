@@ -2,6 +2,106 @@
 
 移动端应用后台管理系统（Express + TypeScript + Prisma + SQLite，前端为 Vite + React + TypeScript + Ant Design）。
 
+## 功能概览
+
+### 认证与安全
+- **后台登录**：用户名/密码认证，JWT 令牌（24小时有效期），bcrypt 密码加密
+- **移动端 API 鉴权**：MD5 签名 + 13位毫秒时间戳，防重放（±5分钟容差）
+- **WebSocket 鉴权**：共享密钥（`EXECUTOR_SHARED_KEY`）认证
+
+### 任务管理系统
+- **两种任务类型**：
+  - `server_task` — 后端服务器本地执行
+  - `client_task` — 通过 WebSocket 分发至远程执行器
+- **任务生命周期**：`queued → running → completed / error`
+- **任务能力**：创建、查看、编辑状态、删除、进度追踪、执行日志（64KB上限）、可配置重试（0-10次）
+- **任务分发**：支持 `target_client_id` 指定客户端、`required_tags` 标签筛选
+- **已注册任务**：`server.echo`、`client.echo`、`client.mock3s`、`client.fail_demo`
+
+### 远程执行器系统（WebSocket）
+- WebSocket 长连接网关（`/ws/executor`），客户端主动连接（无需公网 IP）
+- 心跳检测与离线自动标记（默认60秒超时）
+- 基于能力声明的任务推送（`client.hello` 上报 tasks/tags/capabilities）
+- 执行状态与日志实时回传（`task.update` / `task.log`）
+- Mac Mini 客户端（`mac-mini-client/`）：自动重连、标签配置、日志缓冲
+
+### Web 管理后台（7个页面）
+| 页面 | 路径 | 功能 |
+|------|------|------|
+| 任务管理 | `/tasks` | 任务 CRUD、一键触发示例任务、执行日志弹窗、客户端状态面板 |
+| 配置管理 | `/config` | 多键 JSON 配置、Monaco 编辑器（语法高亮/格式化/校验） |
+| API 接口说明 | `/api-playground` | 交互式 API 文档、在线测试、自动签名注入 |
+| 空间管理 | `/dr/spaces` | DeepRead 空间 CRUD、邀请码复制、成员查看 |
+| 频道管理 | `/dr/channels` | DeepRead 频道 CRUD、空间筛选 |
+| 文章管理 | `/dr/articles` | DeepRead 文章 CRUD、Monaco HTML 编辑器、空间/频道联动筛选 |
+| 用户管理 | `/dr/users` | DeepRead 用户列表（只读）、展开查看加入的空间 |
+
+### 移动端 API（`/api/v1/app/`）
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/config` | 获取 JSON 配置（默认 key: `global_json`） |
+| GET | `/task/catalog` | 查询已注册任务目录（含参数说明与示例） |
+| POST | `/task/execute` | 提交任务执行 |
+| PUT | `/task/status` | 更新任务状态 |
+| GET | `/task/status` | 查询任务详情（含日志/结果/耗时） |
+
+### DeepRead 客户端 API（`/api/v1/dr/`）
+
+鉴权方式：外层 x-sign 签名 + 内层 Bearer JWT（部分接口免登录）。
+
+| 方法 | 路径 | 鉴权 | 说明 |
+|------|------|------|------|
+| POST | `/sms/send` | sign | 发送短信验证码（开发模式固定 `888888`） |
+| POST | `/login` | sign | 验证码登录（自动注册新用户），返回 JWT |
+| POST | `/space/join` | sign + JWT | 通过邀请码加入空间 |
+| GET | `/articles` | sign + JWT | 文章列表（`space_id` 必填，`channel_id`/分页可选） |
+| GET | `/articles/:articleId` | sign + JWT | 文章详情（含 HTML 正文，阅读数 +1） |
+| PUT | `/articles/:articleId/bookmark` | sign + JWT | 收藏/取消收藏 |
+| PUT | `/articles/:articleId/read` | sign + JWT | 标记已读（支持进度百分比） |
+| POST | `/highlights` | sign + JWT | 创建高亮批注 |
+| PUT | `/highlights/:highlightId` | sign + JWT | 更新批注（颜色/笔记） |
+| DELETE | `/highlights/:highlightId` | sign + JWT | 删除批注（仅自己的） |
+| GET | `/highlights` | sign + JWT | 获取文章批注列表 |
+| POST | `/collections` | sign + JWT | 创建合集 |
+| PUT | `/collections/:collectionId/articles` | sign + JWT | 合集添加/移除文章 |
+| GET | `/collections` | sign + JWT | 获取合集列表（含文章数） |
+| POST | `/ai/chat` | sign + JWT | AI 对话（基于文章内容，Gemini 2.0 Flash） |
+
+### 后台管理 API（`/api/admin/`）
+
+通用管理（JWT 后台鉴权）：
+- 任务管理：列表（分页）、创建、按名称执行、更新状态、删除
+- 执行器客户端：列表、删除
+- 配置管理：列表、读取、创建/更新、删除
+
+DeepRead 管理（`/api/admin/dr/`）：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/dr/spaces` | 空间列表（含成员数/频道数/文章数统计） |
+| POST | `/dr/spaces` | 创建空间（自动生成 spaceId + 6位邀请码） |
+| PUT | `/dr/spaces/:spaceId` | 编辑空间 |
+| DELETE | `/dr/spaces/:spaceId` | 删除空间（级联删除成员/频道/文章） |
+| GET | `/dr/spaces/:spaceId/members` | 空间成员列表 |
+| GET | `/dr/channels` | 频道列表（`space_id` 可选筛选，含文章数统计） |
+| POST | `/dr/channels` | 创建频道 |
+| PUT | `/dr/channels/:channelId` | 编辑频道 |
+| DELETE | `/dr/channels/:channelId` | 删除频道 |
+| GET | `/dr/articles` | 文章列表（分页，`space_id`/`channel_id` 可选筛选） |
+| POST | `/dr/articles` | 创建文章 |
+| PUT | `/dr/articles/:articleId` | 编辑文章 |
+| DELETE | `/dr/articles/:articleId` | 删除文章（级联删除收藏/已读/批注） |
+| GET | `/dr/users` | 用户列表（分页，含空间数/批注数统计） |
+| GET | `/dr/users/:userId` | 用户详情（含加入的空间列表） |
+
+### 开发与部署
+- **前端**：Vite + React + TypeScript + Ant Design（端口 5173）
+- **后端**：Express + TypeScript + Prisma + SQLite（端口 3001）
+- **开发体验**：热重载（tsx watch + Vite HMR）、数据库自动种子数据
+- **部署**：Docker 支持、丰富的环境变量配置
+
+---
+
 ## 快速启动
 
 ```bash
@@ -303,3 +403,165 @@ curl --request GET "${BASE_URL}/api/v1/app/task/status?task_id=T1709001234" \
 - 删除任务
 - 分页刷新、客户端状态刷新
 - 客户端状态表（在线/离线、最近心跳、任务统计、支持服务）
+
+---
+
+## DeepRead API
+
+DeepRead 是一个深度阅读平台模块，提供空间/频道/文章管理、用户认证、批注、合集和 AI 对话功能。
+
+### 鉴权说明
+
+DeepRead 客户端 API 使用双层鉴权：
+
+1. **外层 x-sign 签名**：所有 `/api/v1/dr/*` 请求都需要（与移动端 API 相同）
+2. **内层 JWT Bearer Token**：除 `POST /sms/send` 和 `POST /login` 外，其余接口都需要
+
+JWT Token 通过登录接口获取，有效期 30 天。请求头格式：`Authorization: Bearer <token>`
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `DR_JWT_SECRET` | `deepread_jwt_secret_2026` | DeepRead 用户 JWT 密钥 |
+| `GEMINI_API_KEY` | 无 | Google Gemini API Key（AI 对话功能必需） |
+
+### curl 示例
+
+#### 1) 发送验证码
+
+```bash
+APP_SECRET="juma2026_secret"
+BASE_URL="http://localhost:3001"
+TS=$(date +%s%3N)
+SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
+
+curl --request POST "${BASE_URL}/api/v1/dr/sms/send" \
+  --header "Content-Type: application/json" \
+  --header "x-timestamp: ${TS}" \
+  --header "x-sign: ${SIGN}" \
+  --data '{"phone":"13800138000"}'
+```
+
+#### 2) 登录
+
+```bash
+TS=$(date +%s%3N)
+SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
+
+curl --request POST "${BASE_URL}/api/v1/dr/login" \
+  --header "Content-Type: application/json" \
+  --header "x-timestamp: ${TS}" \
+  --header "x-sign: ${SIGN}" \
+  --data '{"phone":"13800138000","code":"888888"}'
+```
+
+返回示例：
+```json
+{
+  "code": 200,
+  "message": "登录成功",
+  "data": {
+    "token": "eyJhbGciOi...",
+    "user": { "id": 1, "phone": "13800138000", "nickname": "用户8000", "avatar": "" }
+  }
+}
+```
+
+#### 3) 加入空间
+
+```bash
+TOKEN="<从登录接口获取>"
+TS=$(date +%s%3N)
+SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
+
+curl --request POST "${BASE_URL}/api/v1/dr/space/join" \
+  --header "Content-Type: application/json" \
+  --header "x-timestamp: ${TS}" \
+  --header "x-sign: ${SIGN}" \
+  --header "Authorization: Bearer ${TOKEN}" \
+  --data '{"invite_code":"DEEP2026"}'
+```
+
+#### 4) 获取文章列表
+
+```bash
+TS=$(date +%s%3N)
+SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
+
+curl --request GET "${BASE_URL}/api/v1/dr/articles?space_id=S1000001&page=1&page_size=20" \
+  --header "x-timestamp: ${TS}" \
+  --header "x-sign: ${SIGN}" \
+  --header "Authorization: Bearer ${TOKEN}"
+```
+
+#### 5) 获取文章详情
+
+```bash
+TS=$(date +%s%3N)
+SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
+
+curl --request GET "${BASE_URL}/api/v1/dr/articles/A1000001" \
+  --header "x-timestamp: ${TS}" \
+  --header "x-sign: ${SIGN}" \
+  --header "Authorization: Bearer ${TOKEN}"
+```
+
+#### 6) 收藏文章
+
+```bash
+TS=$(date +%s%3N)
+SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
+
+curl --request PUT "${BASE_URL}/api/v1/dr/articles/A1000001/bookmark" \
+  --header "Content-Type: application/json" \
+  --header "x-timestamp: ${TS}" \
+  --header "x-sign: ${SIGN}" \
+  --header "Authorization: Bearer ${TOKEN}" \
+  --data '{"bookmarked":true}'
+```
+
+#### 7) 创建批注
+
+```bash
+TS=$(date +%s%3N)
+SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
+
+curl --request POST "${BASE_URL}/api/v1/dr/highlights" \
+  --header "Content-Type: application/json" \
+  --header "x-timestamp: ${TS}" \
+  --header "x-sign: ${SIGN}" \
+  --header "Authorization: Bearer ${TOKEN}" \
+  --data '{
+    "article_id":"A1000001",
+    "text":"AI 技术正在重新定义我们对教育的理解",
+    "color":"#FFEB3B",
+    "position_data":{"paragraph":1,"offset":10,"length":20},
+    "note":"这个观点很有启发"
+  }'
+```
+
+#### 8) AI 对话
+
+```bash
+TS=$(date +%s%3N)
+SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
+
+curl --request POST "${BASE_URL}/api/v1/dr/ai/chat" \
+  --header "Content-Type: application/json" \
+  --header "x-timestamp: ${TS}" \
+  --header "x-sign: ${SIGN}" \
+  --header "Authorization: Bearer ${TOKEN}" \
+  --data '{"article_id":"A1000001","message":"这篇文章的核心观点是什么？"}'
+```
+
+### 种子数据
+
+运行 `npm run db:seed` 后自动创建：
+
+| 数据 | 内容 |
+|------|------|
+| 测试用户 | 手机号 `13800138000`，昵称"测试用户" |
+| 示例空间 | "DeepRead 精选"，邀请码 `DEEP2026` |
+| 频道 | "科技前沿"、"深度评论" |
+| 文章 | 4 篇示例文章（含完整 HTML 正文） |

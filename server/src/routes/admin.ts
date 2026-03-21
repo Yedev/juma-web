@@ -505,4 +505,497 @@ router.delete("/config/:key", async (req: AuthRequest, res: Response): Promise<v
   }
 });
 
+// ── DeepRead Admin ──────────────────────────────────────
+
+function generateDrId(prefix: string): string {
+  return `${prefix}${Date.now()}${Math.floor(Math.random() * 1000).toString().padStart(3, "0")}`;
+}
+
+function generateInviteCode(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
+
+// ── Spaces ──
+
+router.get("/dr/spaces", async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaces = await prisma.drSpace.findMany({ orderBy: { createdAt: "desc" } });
+
+    const spaceIds = spaces.map((s) => s.spaceId);
+    const [memberCounts, channelCounts, articleCounts] = await Promise.all([
+      prisma.drSpaceMember.groupBy({ by: ["spaceId"], where: { spaceId: { in: spaceIds } }, _count: { userId: true } }),
+      prisma.drChannel.groupBy({ by: ["spaceId"], where: { spaceId: { in: spaceIds } }, _count: { id: true } }),
+      prisma.drArticle.groupBy({ by: ["spaceId"], where: { spaceId: { in: spaceIds } }, _count: { id: true } }),
+    ]);
+
+    const memberMap = new Map(memberCounts.map((m) => [m.spaceId, m._count.userId]));
+    const channelMap = new Map(channelCounts.map((c) => [c.spaceId, c._count.id]));
+    const articleMap = new Map(articleCounts.map((a) => [a.spaceId, a._count.id]));
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: spaces.map((s) => ({
+        ...s,
+        memberCount: memberMap.get(s.spaceId) ?? 0,
+        channelCount: channelMap.get(s.spaceId) ?? 0,
+        articleCount: articleMap.get(s.spaceId) ?? 0,
+      })),
+    });
+  } catch (error) {
+    console.error("Admin list spaces error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.post("/dr/spaces", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { name, description } = req.body as { name?: string; description?: string };
+    if (!name || !name.trim()) {
+      res.status(400).json({ code: 400, message: "空间名称不能为空" });
+      return;
+    }
+
+    const space = await prisma.drSpace.create({
+      data: {
+        spaceId: generateDrId("S"),
+        name: name.trim(),
+        description: description?.trim() || "",
+        inviteCode: generateInviteCode(),
+      },
+    });
+
+    res.json({ code: 200, message: "空间已创建", data: space });
+  } catch (error) {
+    console.error("Admin create space error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.put("/dr/spaces/:spaceId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const { name, description } = req.body as { name?: string; description?: string };
+
+    const existing = await prisma.drSpace.findUnique({ where: { spaceId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (name !== undefined) updateData.name = name.trim();
+    if (description !== undefined) updateData.description = description.trim();
+
+    const updated = await prisma.drSpace.update({ where: { spaceId }, data: updateData });
+    res.json({ code: 200, message: "空间已更新", data: updated });
+  } catch (error) {
+    console.error("Admin update space error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/dr/spaces/:spaceId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const existing = await prisma.drSpace.findUnique({ where: { spaceId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
+      return;
+    }
+
+    // Cascade delete members, channels, articles
+    await prisma.drSpaceMember.deleteMany({ where: { spaceId } });
+    await prisma.drArticle.deleteMany({ where: { spaceId } });
+    await prisma.drChannel.deleteMany({ where: { spaceId } });
+    await prisma.drSpace.delete({ where: { spaceId } });
+
+    res.json({ code: 200, message: "空间已删除" });
+  } catch (error) {
+    console.error("Admin delete space error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.get("/dr/spaces/:spaceId/members", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const members = await prisma.drSpaceMember.findMany({
+      where: { spaceId },
+      orderBy: { joinedAt: "desc" },
+    });
+
+    const userIds = members.map((m) => m.userId);
+    const users = await prisma.drUser.findMany({ where: { id: { in: userIds } } });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: members.map((m) => ({
+        userId: m.userId,
+        role: m.role,
+        joinedAt: m.joinedAt,
+        phone: userMap.get(m.userId)?.phone ?? "",
+        nickname: userMap.get(m.userId)?.nickname ?? "",
+      })),
+    });
+  } catch (error) {
+    console.error("Admin list space members error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── Channels ──
+
+router.get("/dr/channels", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.query.space_id as string | undefined;
+    const where: Record<string, unknown> = {};
+    if (spaceId) where.spaceId = spaceId;
+
+    const channels = await prisma.drChannel.findMany({
+      where,
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+    });
+
+    const channelIds = channels.map((c) => c.channelId);
+    const articleCounts = await prisma.drArticle.groupBy({
+      by: ["channelId"],
+      where: { channelId: { in: channelIds } },
+      _count: { id: true },
+    });
+    const countMap = new Map(articleCounts.map((a) => [a.channelId, a._count.id]));
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: channels.map((c) => ({
+        ...c,
+        articleCount: countMap.get(c.channelId) ?? 0,
+      })),
+    });
+  } catch (error) {
+    console.error("Admin list channels error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.post("/dr/channels", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { name, spaceId, sortOrder } = req.body as { name?: string; spaceId?: string; sortOrder?: number };
+
+    if (!name?.trim() || !spaceId) {
+      res.status(400).json({ code: 400, message: "频道名称和所属空间不能为空" });
+      return;
+    }
+
+    const space = await prisma.drSpace.findUnique({ where: { spaceId } });
+    if (!space) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
+      return;
+    }
+
+    const channel = await prisma.drChannel.create({
+      data: {
+        channelId: generateDrId("CH"),
+        spaceId,
+        name: name.trim(),
+        sortOrder: sortOrder ?? 0,
+      },
+    });
+
+    res.json({ code: 200, message: "频道已创建", data: channel });
+  } catch (error) {
+    console.error("Admin create channel error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.put("/dr/channels/:channelId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const channelId = req.params.channelId as string;
+    const { name, sortOrder } = req.body as { name?: string; sortOrder?: number };
+
+    const existing = await prisma.drChannel.findUnique({ where: { channelId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "频道不存在" });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (name !== undefined) updateData.name = name.trim();
+    if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
+
+    const updated = await prisma.drChannel.update({ where: { channelId }, data: updateData });
+    res.json({ code: 200, message: "频道已更新", data: updated });
+  } catch (error) {
+    console.error("Admin update channel error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/dr/channels/:channelId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const channelId = req.params.channelId as string;
+    const existing = await prisma.drChannel.findUnique({ where: { channelId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "频道不存在" });
+      return;
+    }
+
+    await prisma.drChannel.delete({ where: { channelId } });
+    res.json({ code: 200, message: "频道已删除" });
+  } catch (error) {
+    console.error("Admin delete channel error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── Articles ──
+
+router.get("/dr/articles", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.query.space_id as string | undefined;
+    const channelId = req.query.channel_id as string | undefined;
+    const page = parseInt(req.query.page as string) || 1;
+    const pageSize = parseInt(req.query.page_size as string) || 20;
+
+    const where: Record<string, unknown> = {};
+    if (spaceId) where.spaceId = spaceId;
+    if (channelId) where.channelId = channelId;
+
+    const [articles, total] = await Promise.all([
+      prisma.drArticle.findMany({
+        where,
+        select: {
+          id: true,
+          articleId: true,
+          spaceId: true,
+          channelId: true,
+          title: true,
+          summary: true,
+          coverUrl: true,
+          layoutType: true,
+          author: true,
+          readCount: true,
+          publishedAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { publishedAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.drArticle.count({ where }),
+    ]);
+
+    // Get bookmark counts
+    const articleIds = articles.map((a) => a.articleId);
+    const bookmarkCounts = await prisma.drBookmark.groupBy({
+      by: ["articleId"],
+      where: { articleId: { in: articleIds } },
+      _count: { userId: true },
+    });
+    const bmMap = new Map(bookmarkCounts.map((b) => [b.articleId, b._count.userId]));
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        list: articles.map((a) => ({
+          ...a,
+          bookmarkCount: bmMap.get(a.articleId) ?? 0,
+        })),
+        total,
+        page,
+        pageSize,
+      },
+    });
+  } catch (error) {
+    console.error("Admin list articles error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.post("/dr/articles", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { title, summary, coverUrl, contentHtml, spaceId, channelId, author, layoutType } =
+      req.body as {
+        title?: string;
+        summary?: string;
+        coverUrl?: string;
+        contentHtml?: string;
+        spaceId?: string;
+        channelId?: string;
+        author?: string;
+        layoutType?: string;
+      };
+
+    if (!title?.trim() || !spaceId || !channelId) {
+      res.status(400).json({ code: 400, message: "标题、空间和频道不能为空" });
+      return;
+    }
+
+    const article = await prisma.drArticle.create({
+      data: {
+        articleId: generateDrId("A"),
+        spaceId,
+        channelId,
+        title: title.trim(),
+        summary: summary?.trim() || "",
+        coverUrl: coverUrl?.trim() || "",
+        layoutType: layoutType || "default",
+        contentHtml: contentHtml || "",
+        author: author?.trim() || "",
+      },
+    });
+
+    res.json({ code: 200, message: "文章已创建", data: article });
+  } catch (error) {
+    console.error("Admin create article error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.put("/dr/articles/:articleId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const articleId = req.params.articleId as string;
+    const { title, summary, coverUrl, contentHtml, channelId, author, layoutType } =
+      req.body as Record<string, string | undefined>;
+
+    const existing = await prisma.drArticle.findUnique({ where: { articleId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "文章不存在" });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (title !== undefined) updateData.title = title.trim();
+    if (summary !== undefined) updateData.summary = summary.trim();
+    if (coverUrl !== undefined) updateData.coverUrl = coverUrl.trim();
+    if (contentHtml !== undefined) updateData.contentHtml = contentHtml;
+    if (channelId !== undefined) updateData.channelId = channelId;
+    if (author !== undefined) updateData.author = author.trim();
+    if (layoutType !== undefined) updateData.layoutType = layoutType;
+
+    const updated = await prisma.drArticle.update({ where: { articleId }, data: updateData });
+    res.json({ code: 200, message: "文章已更新", data: updated });
+  } catch (error) {
+    console.error("Admin update article error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/dr/articles/:articleId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const articleId = req.params.articleId as string;
+    const existing = await prisma.drArticle.findUnique({ where: { articleId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "文章不存在" });
+      return;
+    }
+
+    // Cascade delete bookmarks, read status, highlights
+    await prisma.drBookmark.deleteMany({ where: { articleId } });
+    await prisma.drReadStatus.deleteMany({ where: { articleId } });
+    await prisma.drHighlight.deleteMany({ where: { articleId } });
+    await prisma.drCollectionArticle.deleteMany({ where: { articleId } });
+    await prisma.drArticle.delete({ where: { articleId } });
+
+    res.json({ code: 200, message: "文章已删除" });
+  } catch (error) {
+    console.error("Admin delete article error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── Users ──
+
+router.get("/dr/users", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const pageSize = parseInt(req.query.page_size as string) || 20;
+
+    const [users, total] = await Promise.all([
+      prisma.drUser.findMany({
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.drUser.count(),
+    ]);
+
+    const userIds = users.map((u) => u.id);
+    const [spaceCounts, highlightCounts] = await Promise.all([
+      prisma.drSpaceMember.groupBy({ by: ["userId"], where: { userId: { in: userIds } }, _count: { spaceId: true } }),
+      prisma.drHighlight.groupBy({ by: ["userId"], where: { userId: { in: userIds } }, _count: { id: true } }),
+    ]);
+
+    const spaceMap = new Map(spaceCounts.map((s) => [s.userId, s._count.spaceId]));
+    const hlMap = new Map(highlightCounts.map((h) => [h.userId, h._count.id]));
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        list: users.map((u) => ({
+          ...u,
+          spaceCount: spaceMap.get(u.id) ?? 0,
+          highlightCount: hlMap.get(u.id) ?? 0,
+        })),
+        total,
+        page,
+        pageSize,
+      },
+    });
+  } catch (error) {
+    console.error("Admin list users error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.get("/dr/users/:userId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = parseInt(req.params.userId as string);
+    if (isNaN(userId)) {
+      res.status(400).json({ code: 400, message: "无效的用户ID" });
+      return;
+    }
+
+    const user = await prisma.drUser.findUnique({ where: { id: userId } });
+    if (!user) {
+      res.status(404).json({ code: 404, message: "用户不存在" });
+      return;
+    }
+
+    const memberships = await prisma.drSpaceMember.findMany({ where: { userId } });
+    const spaceIds = memberships.map((m) => m.spaceId);
+    const spaces = await prisma.drSpace.findMany({ where: { spaceId: { in: spaceIds } } });
+    const spaceMap = new Map(spaces.map((s) => [s.spaceId, s]));
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        ...user,
+        spaces: memberships.map((m) => ({
+          spaceId: m.spaceId,
+          spaceName: spaceMap.get(m.spaceId)?.name ?? "",
+          role: m.role,
+          joinedAt: m.joinedAt,
+        })),
+      },
+    });
+  } catch (error) {
+    console.error("Admin get user error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
 export default router;
