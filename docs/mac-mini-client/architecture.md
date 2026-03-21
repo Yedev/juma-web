@@ -1,16 +1,15 @@
-# mac-mini-client 架构说明
+# mac-mini-client 架构概览
 
 ## 模块职责概述
 
-`mac-mini-client` 是 juma-web 系统的**远程任务执行器客户端**。它运行在 Mac Mini（或任意具备 Node.js 环境的机器）上，通过 WebSocket 长连接主动连接到 juma-web 服务端，接收服务端下发的任务指令，在本地执行后将状态和日志实时回传。
+`mac-mini-client` 是 juma-web 系统中的**远程任务执行器客户端**。它运行在构建机器（如 Mac Mini）上，通过 WebSocket 长连接主动连接服务端，接收服务端推送的任务指令，在本地执行任务，并将执行状态和日志实时回传给服务端。
 
-核心职责：
+该客户端的核心设计目标是：
 
-1. **建立并维护 WebSocket 长连接**：主动连接服务端，断线后自动重连。
-2. **身份注册与能力声明**：连接建立后发送 `client.hello`，向服务端声明自身标识、平台信息、标签和支持的任务类型。
-3. **定期心跳**：周期性发送 `client.heartbeat`，让服务端感知客户端存活状态。
-4. **任务调度与执行**：接收服务端的 `task.assign` 消息，路由到对应任务模块并执行。
-5. **状态与日志回传**：执行过程中通过 `task.update` 上报任务状态，通过 `task.log` 分批上报执行日志。
+- **无需公网 IP**：构建机器无需暴露任何端口，只需能访问服务端地址即可
+- **主动发起连接**：由客户端主动连接服务端，服务端不需要反向 SSH 或端口转发
+- **任务驱动**：客户端声明自己能执行哪些任务，服务端据此分配对应任务
+- **自动恢复**：网络断开后自动重连，无需人工干预
 
 ---
 
@@ -18,17 +17,19 @@
 
 ### 典型场景：Mac Mini iOS 构建机
 
-Mac Mini 通常部署在内网环境，无公网 IP，无法被服务端主动访问。`mac-mini-client` 采用**客户端主动发起连接**的架构，彻底解决了这一问题：
+在 iOS 开发团队中，编译 iOS 应用必须在 macOS 上运行 Xcode，而构建机（Mac Mini）通常位于内网，没有公网 IP。juma-web 的解决方案是：
 
-- Mac Mini 启动后运行 `npm start`，主动连接公网（或内网）服务端的 WebSocket 端点。
-- 服务端收到连接后记录该执行器，可以向其下发 iOS 构建、测试、签名等任务。
-- Mac Mini 执行完任务后将结果和日志回传，服务端展示在管理面板中。
+```
+┌─────────────────────┐            ┌──────────────────────┐
+│   Mac Mini 构建机     │            │   juma-web 服务端      │
+│   (内网，无公网IP)     │  WebSocket │   (有公网IP)           │
+│                     │  ────────> │                      │
+│  mac-mini-client    │  主动连接    │  ws/executor 端点     │
+│  node client.js     │            │  任务分发、状态管理      │
+└─────────────────────┘            └──────────────────────┘
+```
 
-### 其他适用场景
-
-- **多平台构建节点**：不同操作系统的构建机（Linux/Windows/macOS）同时连接同一服务端，按 `tags` 分配对应平台的构建任务。
-- **边缘计算节点**：在受限网络环境中运行数据处理任务，无需开放防火墙端口。
-- **持续集成代理**：作为 CI 系统的执行节点，替代传统需要服务端主动 SSH 连接的方式。
+客户端主动连到服务端，告知自己支持哪些任务（如 `client.echo`、`client.mock3s` 等）。当用户在管理界面触发一个 `client_task` 类型的任务时，服务端将任务推送给连接中的客户端执行。
 
 ---
 
@@ -36,230 +37,214 @@ Mac Mini 通常部署在内网环境，无公网 IP，无法被服务端主动�
 
 ```
 mac-mini-client/
-├── client.js           # 主程序入口。WebSocket 连接管理、消息收发、任务调度
-├── package.json        # 项目配置（main: client.js, scripts.start: node client.js）
-└── tasks/              # 任务实现目录
-    ├── index.js        # 任务注册入口，对外暴露 getRegisteredTaskDefinitions / getRegisteredTask
-    ├── registry.js     # ClientTaskRegistry：任务注册表，管理任务名称到实例的映射
-    ├── base.js         # ClientTaskBase：所有任务的基类，定义 taskName/version/description/run()
-    ├── clientEchoTask.js      # 内置任务：client.echo（回显消息，支持重复次数与延迟）
-    ├── clientMock3sTask.js    # 内置任务：client.mock3s（模拟耗时约3秒的任务）
-    └── clientFailDemoTask.js  # 内置任务：client.fail_demo（人工触发异常，用于测试错误处理）
+├── client.js          # 主程序入口：WebSocket连接管理、消息收发、任务调度
+├── package.json       # 项目描述，入口为 client.js，启动命令 npm start
+├── README.md          # 快速上手文档
+└── tasks/
+    ├── base.js             # 任务基类 ClientTaskBase，定义任务接口规范
+    ├── registry.js         # 任务注册表 ClientTaskRegistry
+    ├── index.js            # 注册所有内置任务，导出 getRegisteredTask / getRegisteredTaskDefinitions
+    ├── clientEchoTask.js   # 内置任务：client.echo（回显示例）
+    ├── clientMock3sTask.js # 内置任务：client.mock3s（3秒模拟任务）
+    └── clientFailDemoTask.js # 内置任务：client.fail_demo（异常演练）
 ```
 
-各文件职责说明：
+**职责划分：**
 
 | 文件 | 职责 |
 |------|------|
-| `client.js` | 程序主逻辑：WebSocket 连接、心跳、重连、消息路由、任务执行调度、日志缓冲 |
-| `tasks/index.js` | 统一注册所有内置任务，提供查询接口给 `client.js` 使用 |
-| `tasks/registry.js` | `ClientTaskRegistry` 类：用 Map 维护任务名称到实例的映射，防止重复注册 |
-| `tasks/base.js` | `ClientTaskBase` 类：定义任务接口规范，校验任务名格式（必须为 `client.xxx`） |
-| `tasks/clientEchoTask.js` | `client.echo` 任务实现 |
-| `tasks/clientMock3sTask.js` | `client.mock3s` 任务实现（延迟可通过 `DEMO_TASK_DELAY_MS` 环境变量配置） |
-| `tasks/clientFailDemoTask.js` | `client.fail_demo` 任务实现 |
+| `client.js` | 程序主入口，管理 WebSocket 连接生命周期，收发所有协议消息，调用任务执行逻辑 |
+| `tasks/base.js` | 定义 `ClientTaskBase` 抽象基类，规范 `taskName`、`getDefinition()`、`run()` 接口 |
+| `tasks/registry.js` | 维护 `taskName → taskInstance` 的 Map，防止重名注册，提供查询接口 |
+| `tasks/index.js` | 初始化注册表，将所有内置任务注册进去，对外暴露查询函数 |
+| `tasks/client*.js` | 各任务的具体实现，继承 `ClientTaskBase`，实现 `run()` 方法 |
 
 ---
 
 ## 连接与任务执行整体流程图
 
 ```
-Mac Mini (client.js)                         juma-web 服务端
-       │                                            │
-       │  启动，读取环境变量                          │
-       │  构造 WS_URL + EXECUTOR_KEY                │
-       │                                            │
-       │──── WebSocket 连接请求 ──────────────────→ │
-       │     ws://SERVER_URL/ws/executor            │
-       │     ?key=EXECUTOR_KEY                      │
-       │                                            │
-       │ ←──── 连接建立（HTTP 101 Upgrade）────────  │
-       │                                            │
-       │──── client.hello ──────────────────────→  │  服务端验证 key，注册执行器
-       │     {client_id, name, platform,           │
-       │      app_version, tags,                   │
-       │      capabilities, tasks}                 │
-       │                                            │
-       │ ←──── server.hello ────────────────────── │  返回 heartbeat_interval_ms
-       │       {heartbeat_interval_ms,             │  和 accepted_tasks 列表
-       │        accepted_tasks}                    │
-       │                                            │
-       │  ┌─────────────────────────────┐          │
-       │  │  每隔 heartbeat_interval_ms  │          │
-       │  │──── client.heartbeat ──────→│          │  服务端更新执行器在线状态
-       │  │     {client_id,             │          │
-       │  │      capabilities,          │          │
-       │  │      tasks,                 │          │
-       │  │      running_task_id}       │          │
-       │  └─────────────────────────────┘          │
-       │                                            │
-       │                          (服务端收到任务请求)│
-       │ ←──── task.assign ─────────────────────── │
-       │       {task_id, task_name,                │
-       │        task_payload,                      │
-       │        execution_name}                    │
-       │                                            │
-       │  查找任务实现（registry.get）               │
-       │  找到 → 执行                                │
-       │──── task.update (running) ──────────────→ │  服务端更新任务状态为运行中
-       │     {task_id, status:"running",           │
-       │      status_info:{progress:5,...}}        │
-       │                                            │
-       │  ┌─────────────────────────────┐          │
-       │  │  任务执行过程中（异步）       │          │
-       │  │  context.log("...")         │          │
-       │  │  → logBuffer 积累           │          │
-       │  │  → 满足大小或时间阈值时刷新  │          │
-       │  │──── task.log ─────────────→│          │  服务端存储日志
-       │  │     {task_id, append_log}  │          │
-       │  └─────────────────────────────┘          │
-       │                                            │
-       │  任务完成（run() resolve）                  │
-       │  flushLogs(force=true) 强制刷新            │
-       │──── task.log (最后一批) ────────────────→ │
-       │──── task.update (completed) ───────────→ │  服务端标记任务完成
-       │     {task_id, status:"completed",        │
-       │      status_info:{progress:100,          │
-       │                   output_json,...}}       │
-       │                                            │
-       │  任务抛出异常时：                           │
-       │──── task.log (错误堆栈) ────────────────→ │
-       │──── task.update (error) ───────────────→ │  服务端标记任务失败
-       │     {task_id, status:"error",            │
-       │      result_code:-1, ...}                │
-       │                                            │
-       │  连接断开时：                              │
-       │  clearTimers()                            │
-       │  setTimeout(connect, RECONNECT_DELAY_MS)  │
-       │──── 重新执行连接流程 ──────────────────→   │
+客户端启动
+    │
+    ▼
+读取环境变量配置
+(SERVER_URL, EXECUTOR_KEY, CLIENT_ID, CLIENT_TAGS, ...)
+    │
+    ▼
+构造 WebSocket URL
+ws(s)://<host>/ws/executor?key=<EXECUTOR_KEY>
+    │
+    ▼
+new WebSocket(WS_URL)
+    │
+    ├─── 连接失败/断开 ──────────────────────────────────────┐
+    │                                                        │
+    ▼                                                        │
+ws.open 事件触发                                              │
+    │                                                        │
+    ▼                                                        │
+发送 client.hello                                            │
+(client_id, name, platform, app_version,                     │
+ tags, capabilities, tasks)                                  │
+    │                                                        │
+    ▼                                                        │
+接收 server.hello                                            │
+(可能含 heartbeat_interval_ms)                                │
+    │                                                        │
+    ▼                                                        │
+启动心跳定时器                                                 │
+每隔 HEARTBEAT_INTERVAL_MS 发送 client.heartbeat             │
+    │                                                        │
+    │◄─────────── 等待服务端推送 task.assign ─────────────────│
+    │                                                        │
+    ▼  (收到 task.assign)                                    │
+检查是否有正在运行的任务                                         │
+    │                                                        │
+    ├── 有运行中任务 → 丢弃本次 task.assign（打印警告）          │
+    │                                                        │
+    └── 无运行中任务                                           │
+            │                                                │
+            ▼                                                │
+        根据 task_name 查找注册的任务实现                       │
+            │                                                │
+            ├── 未找到 → 发送 task.update(error)             │
+            │                                                │
+            └── 找到任务实现                                  │
+                    │                                        │
+                    ▼                                        │
+                发送 task.update(running)                    │
+                    │                                        │
+                    ▼                                        │
+                调用 taskInstance.run(payload, context)      │
+                    │                                        │
+                    │ (context.log() 收集日志)               │
+                    │ (日志缓冲达到阈值时批量发送 task.log)    │
+                    │                                        │
+                    ├── 正常完成 → 发送 task.update(completed)│
+                    │                                        │
+                    └── 抛出异常 → 发送 task.log(错误堆栈)   │
+                                    发送 task.update(error)  │
+                                                             │
+ws.close / ws.error 事件                                     │
+    │                                                        │
+    ▼                                                        │
+清除所有定时器                                                 │
+    │                                                        │
+    ▼                                                        │
+等待 RECONNECT_DELAY_MS 毫秒 ────────────────────────────────┘
+重新执行 connect()
 ```
 
 ---
 
 ## 环境变量完整说明
 
-所有环境变量均为可选，程序内置默认值，开箱即用。
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `SERVER_URL` | `http://localhost:3001` | 服务端 HTTP 地址。客户端会自动将协议转换为 WebSocket（`http` → `ws`，`https` → `wss`） |
+| `EXECUTOR_KEY` | `juma_executor_2026` | 执行器鉴权密钥。通过 URL 参数 `?key=` 传递，服务端用于验证连接合法性。生产环境务必修改 |
+| `CLIENT_ID` | `macmini-<hostname>-<uuid前8位>` | 客户端唯一标识符。同一台机器重启后 uuid 部分会变化，如需固定 ID 应通过此变量显式设置 |
+| `CLIENT_NAME` | 系统主机名（`os.hostname()`） | 客户端的显示名称，在管理界面中展示 |
+| `CLIENT_TAGS` | `""` (空) | 客户端标签，逗号分隔字符串，如 `xcode,ios,arm64`。用于任务分发筛选，详见下方说明 |
+| `CLIENT_VERSION` | `1.0.0` | 客户端应用版本号，上报到服务端供运维参考 |
+| `WORK_DIR` | `process.cwd()` | 任务的工作目录，上报到服务端作为 `capabilities.work_dir`。任务脚本可参考此路径 |
+| `HEARTBEAT_INTERVAL_MS` | `10000` (10秒) | 心跳发送间隔。服务端在收到 `server.hello` 时可下发覆盖此值 |
+| `RECONNECT_DELAY_MS` | `3000` (3秒) | 断线后等待多久重连。固定延迟，不含指数退避（当前实现） |
+| `LOG_FLUSH_INTERVAL_MS` | `2000` (2秒) | 日志缓冲的最大时间窗口。即使日志量少，超时也会强制上报 |
+| `LOG_FLUSH_SIZE` | `2048` (字节) | 日志缓冲的字节阈值。缓冲区达到此大小时立即上报，不等超时 |
+| `DEMO_TASK_DELAY_MS` | `3000` (3秒) | 内置示例任务 `client.mock3s` 的模拟处理时长，便于测试调整 |
 
-| 环境变量 | 默认值 | 类型 | 说明 |
-|----------|--------|------|------|
-| `SERVER_URL` | `http://localhost:3001` | string | 服务端 HTTP/HTTPS 地址，程序会自动将其转换为对应的 `ws://` 或 `wss://` 地址 |
-| `EXECUTOR_KEY` | `juma_executor_2026` | string | 执行器鉴权密钥，附加在 WebSocket URL 的 `key` 查询参数中 |
-| `CLIENT_ID` | `macmini-{hostname}-{uuid8}` | string | 执行器唯一标识符。若不设置，每次启动会自动生成（含8位随机UUID），建议在生产环境显式设置以保持稳定 |
-| `CLIENT_NAME` | `os.hostname()` | string | 执行器显示名称，在服务端管理面板中展示 |
-| `CLIENT_TAGS` | `""` | string | 逗号分隔的标签列表，如 `xcode,ios,arm64`，用于服务端任务分发筛选 |
-| `CLIENT_VERSION` | `1.0.0` | string | 客户端应用版本号，随 `client.hello` 上报 |
-| `WORK_DIR` | `process.cwd()` | string | 任务执行的工作目录，随 `capabilities` 上报，任务实现可读取此值 |
-| `HEARTBEAT_INTERVAL_MS` | `10000` | number | 心跳发送间隔（毫秒）。实际间隔以 `server.hello` 返回值为准，此处为初始默认值 |
-| `RECONNECT_DELAY_MS` | `3000` | number | 断线后等待重连的时间（毫秒） |
-| `LOG_FLUSH_INTERVAL_MS` | `2000` | number | 日志缓冲刷新的最大时间间隔（毫秒）。日志积累超过此时间会被强制发送 |
-| `LOG_FLUSH_SIZE` | `2048` | number | 日志缓冲触发刷新的大小阈值（字节）。缓冲区超过此大小会立即发送 |
-| `DEMO_TASK_DELAY_MS` | `3000` | number | 仅用于 `client.mock3s` 任务，控制模拟延迟时长（毫秒） |
-
-### 生产环境推荐配置示例（`.env` 或 LaunchAgent plist）
-
-```bash
-SERVER_URL=https://juma.example.com
-EXECUTOR_KEY=your_secret_executor_key
-CLIENT_ID=macmini-build-01
-CLIENT_NAME=Mac Mini Build 01
-CLIENT_TAGS=xcode,ios,arm64,macos
-CLIENT_VERSION=1.0.0
-WORK_DIR=/Users/builder/workspace
-HEARTBEAT_INTERVAL_MS=10000
-RECONNECT_DELAY_MS=3000
-```
+> **注意：** `HEARTBEAT_INTERVAL_MS` 的最终生效值以服务端 `server.hello` 响应中的 `heartbeat_interval_ms` 字段为准（需大于 3000ms 才会生效覆盖）。若服务端未下发，则使用本地环境变量值。
 
 ---
 
 ## 客户端标签（tags）机制
 
-### 标签的作用
+### 什么是 tags
 
-`CLIENT_TAGS` 是一个逗号分隔的字符串，在程序启动时被解析为字符串数组：
+`CLIENT_TAGS` 是一个逗号分隔的字符串，启动时被解析为字符串数组：
 
-```javascript
-const CLIENT_TAGS = (process.env.CLIENT_TAGS || "")
-  .split(",")
-  .map((x) => x.trim())
-  .filter(Boolean);
+```
+CLIENT_TAGS=xcode,ios,arm64
+→ ["xcode", "ios", "arm64"]
 ```
 
-标签随 `client.hello` 和 `client.heartbeat` 消息上报给服务端。服务端可以根据标签将特定任务路由到满足条件的执行器。
+这个数组会在以下消息中上报给服务端：
 
-### 常见标签约定
+- `client.hello`（建立连接时）
+- `client.heartbeat`（每次心跳时，通过 `capabilities` 字段）
 
-| 标签 | 含义 |
-|------|------|
-| `xcode` | 该机器安装了 Xcode，可执行 iOS/macOS 构建 |
-| `ios` | 专用于 iOS 构建任务 |
-| `arm64` | Apple Silicon 架构（M1/M2/M3 芯片） |
-| `x86_64` | Intel 架构 |
-| `macos` | macOS 平台 |
-| `linux` | Linux 平台 |
-| `fast` | 高性能机器，优先分配耗时任务 |
-| `staging` | 预发布环境专用节点 |
+### tags 如何用于任务分发筛选
 
-### 标签在任务分发中的应用
+服务端在收到 `task.assign` 请求时，可以根据执行器的 tags 过滤目标客户端。例如：
 
-服务端的任务定义可以声明 `required_tags`，只有当执行器的标签集合包含所有必需标签时，才会将任务分配给该执行器。例如：
+- 标记了 `xcode` 的客户端才能接收 iOS 编译任务
+- 标记了 `android` 的客户端才能接收 Android 打包任务
+- 多台 Mac Mini 同时在线时，服务端可以按 tag 选择具备所需能力的机器
 
-- 执行器标签：`["xcode", "ios", "arm64"]`
-- 任务 `ios.build` 要求：`required_tags: ["xcode", "ios"]`
-- 匹配成功 → 任务被分配到此执行器
+### 配置建议
 
-### 多执行器标签规划建议
+```bash
+# iOS 构建机
+CLIENT_TAGS=xcode,ios,arm64
 
-在同一台机器上运行多个客户端实例时（不同 `CLIENT_ID`），可以为每个实例设置不同的标签，实现精细化分工。详见[开发进度与部署说明](./development-progress.md)中的多执行器部署章节。
+# Android 构建机
+CLIENT_TAGS=android,gradle
+
+# 通用任务机（无特殊限制）
+CLIENT_TAGS=general
+```
+
+tags 应当描述机器的**能力特征**，而非机器的物理位置（位置信息应放在 `CLIENT_NAME` 中）。
 
 ---
 
 ## 与服务端的通信架构
 
-### 整体架构特点
+### 核心原则：客户端主动发起，服务端被动接受
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        内网 / 无公网IP                        │
-│                                                             │
-│   Mac Mini A          Mac Mini B          Linux Builder     │
-│   [client.js]         [client.js]         [client.js]       │
-│   tags: xcode,ios     tags: xcode,ios     tags: linux       │
-│        │                   │                   │            │
-└────────┼───────────────────┼───────────────────┼────────────┘
-         │                   │                   │
-         │ WebSocket (主动发起) │ WebSocket         │ WebSocket
-         │                   │                   │
-         ▼                   ▼                   ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   juma-web 服务端（公网）                     │
-│                                                             │
-│   WebSocket Endpoint: /ws/executor?key=...                  │
-│   ┌─────────────────────────────────────────────────┐       │
-│   │  ExecutorRegistry（内存）                        │       │
-│   │  ├── macmini-build-01  [ONLINE]  ws: conn1      │       │
-│   │  ├── macmini-build-02  [ONLINE]  ws: conn2      │       │
-│   │  └── linux-builder-01  [ONLINE]  ws: conn3      │       │
-│   └─────────────────────────────────────────────────┘       │
-│                          │                                  │
-│   任务调度器 → 选择执行器 → 发送 task.assign                  │
-└─────────────────────────────────────────────────────────────┘
+传统模式（SSH / 主动推送）：
+  服务端 ──SSH/HTTP──► 构建机     ← 需要构建机有公网IP或做端口转发
+
+juma-web 模式（WebSocket 长连接）：
+  构建机 ──WebSocket──► 服务端    ← 构建机只需能访问服务端，无需暴露自身
 ```
 
-### 关键架构决策
+### 连接特点
 
-1. **客户端主动连接，服务端无需主动访问客户端**
-   - 客户端穿透 NAT/防火墙，无需在路由器上做端口转发
-   - 服务端只需开放一个 WebSocket 端口（通常复用 HTTP 443 或 3001）
+| 特性 | 说明 |
+|------|------|
+| 协议 | WebSocket（基于 TCP，全双工） |
+| 连接方向 | 客户端主动发起，服务端被动监听 |
+| 连接持久性 | 长连接，通过心跳保活 |
+| 鉴权方式 | URL 参数 `?key=<EXECUTOR_KEY>`，连接时服务端验证 |
+| 断线处理 | 客户端自动重连，服务端通过 `OFFLINE_TIMEOUT_MS` 判断客户端离线 |
+| 消息格式 | JSON，统一封装为 `{ type, payload, ts }` |
 
-2. **WebSocket 长连接，状态实时同步**
-   - 任务状态和日志通过已建立的连接推送，低延迟
-   - 无需轮询，服务端主动推送 `task.assign`
+### 消息流向汇总
 
-3. **单连接单任务（当前实现）**
-   - 每个客户端进程同时只处理一个任务（`runningTaskId` 变量保护）
-   - 新任务到达时若有正在运行的任务，会被丢弃并打印警告
-   - 需要并行处理任务时，可在同一台机器启动多个客户端进程（不同 `CLIENT_ID`）
+```
+客户端 → 服务端：
+  client.hello       连接建立后握手
+  client.heartbeat   定期心跳保活
+  task.update        任务状态回报（running / completed / error）
+  task.log           任务日志上报（批量缓冲后发送）
 
-4. **无状态重连**
-   - 断线重连后不会恢复中断的任务状态（当前实现）
-   - 服务端可设置任务超时或重试策略来应对客户端掉线场景
+服务端 → 客户端：
+  server.hello       握手响应，可含心跳间隔配置
+  task.assign        任务分配指令
+  server.error       服务端错误通知
+```
+
+### 为什么使用 WebSocket 而非 HTTP 轮询
+
+| 对比维度 | HTTP 轮询 | WebSocket 长连接 |
+|----------|-----------|------------------|
+| 任务推送延迟 | 取决于轮询间隔（秒级） | 实时（毫秒级） |
+| 服务端资源 | 每次轮询建立新连接 | 单连接持续复用 |
+| 客户端网络要求 | 仅需出站 HTTP | 仅需出站 TCP（同样无需公网IP） |
+| 日志实时性 | 较差（批量拉取） | 良好（流式推送） |
+| 实现复杂度 | 低 | 中等 |
+
+WebSocket 长连接在任务推送实时性和资源利用率上均优于轮询方案，是构建任务调度系统的理想选择。

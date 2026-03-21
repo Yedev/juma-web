@@ -2,14 +2,14 @@
 
 ## 1. 模块职责概述
 
-`server/` 是 juma-web 项目的后端核心，基于 **Node.js 22 + Express 4.21.2 + TypeScript 5.7.3** 构建。其主要职责包括：
+`server/` 是 juma-web 项目的后端核心，基于 **Node.js 22 + Express 4.21.2 + TypeScript 5.7.3** 构建，承担以下职责：
 
-- **Admin API**：提供管理后台所需的全套 REST 接口，含任务管理、配置管理、Executor 客户端管理、DeepRead 内容管理等。
-- **App API**：面向移动端客户端，提供配置读取、任务下发、任务状态查询等接口，采用签名鉴权。
-- **DeepRead API**：面向 DeepRead 阅读器客户端，提供 SMS 登录、空间/频道/文章浏览、批注、合集、AI 对话等完整功能。
-- **任务执行引擎**：轮询数据库中待执行的 `server_task` 类型任务，在本地并发执行，同时负责周期性清理过期 Executor 状态和恢复超时的远程任务。
-- **WebSocket 执行网关**：基于 RFC 6455 手动实现的 WebSocket 服务，管理远程 Executor 客户端（Mac Mini 等）的连接，将 `client_task` 分发给合适的客户端执行，接收并持久化执行结果和日志。
-- **静态资源服务**：将 Admin UI 的构建产物（`public/`）托管为 SPA，兜底路由返回 `index.html`。
+- **HTTP API 服务**：为管理后台、移动 App、DeepRead 客户端分别提供独立的 REST API 路由
+- **身份认证**：管理员使用 JWT（24 小时有效期），DeepRead 用户使用 SMS + JWT（30 天），移动 App 使用 MD5 签名
+- **任务调度系统**：支持服务端任务（本地执行）和客户端任务（分发到远程执行器），包含完整的入队、调度、重试、日志机制
+- **WebSocket 执行器网关**：自行实现 RFC 6455 协议，接受远程执行器客户端连接，分发 `client_task` 并接收执行结果
+- **静态文件托管**：将 admin-ui 构建产物作为 SPA 托管，所有未匹配路由回退到 `index.html`
+- **数据持久化**：通过 Prisma 6.19.2 + SQLite 管理 16 个数据模型
 
 ---
 
@@ -17,31 +17,31 @@
 
 ```
 server/
-├── package.json                  # 项目依赖与脚本
-├── tsconfig.json                 # TypeScript 配置
 ├── prisma/
-│   └── schema.prisma             # 数据库模型定义（16 个模型）
-└── src/
-    ├── index.ts                  # 应用入口，挂载路由、启动引擎
-    ├── middleware/
-    │   ├── auth.ts               # Admin JWT 鉴权中间件
-    │   ├── sign.ts               # x-sign MD5 签名验证中间件
-    │   └── drAuth.ts             # DeepRead JWT 鉴权中间件
-    ├── routes/
-    │   ├── auth.ts               # POST /api/auth/login（管理员登录）
-    │   ├── admin.ts              # /api/admin/* 全套管理接口（JWT 保护）
-    │   ├── app.ts                # /api/v1/app/* 移动端接口（签名保护）
-    │   └── deepread.ts           # /api/v1/dr/* DeepRead 接口（签名+JWT）
-    ├── services/
-    │   ├── taskRegistry.ts       # 任务注册表，定义全部已知任务
-    │   ├── taskEnqueue.ts        # 任务入队逻辑，生成 taskId，写入数据库
-    │   ├── taskNaming.ts         # 任务命名规则（server.* / client.*）
-    │   ├── serverTaskRuntime.ts  # 内置服务端任务实现（server.echo 等）
-    │   └── executionEngine.ts    # 任务轮询引擎，本地并发执行与状态维护
-    ├── ws/
-    │   └── executorWsGateway.ts  # WebSocket 网关（RFC 6455 手动实现）
-    └── prisma/
-        └── seed.ts               # 数据库种子脚本
+│   └── schema.prisma              # Prisma 数据库 Schema（16 个模型）
+├── src/
+│   ├── index.ts                   # 应用入口：Express 初始化、路由挂载、WS 网关、执行引擎启动
+│   ├── middleware/
+│   │   ├── auth.ts                # 管理员 JWT 验证中间件（扩展 AuthRequest）
+│   │   ├── drAuth.ts              # DeepRead 用户 JWT 验证中间件（扩展 DrAuthRequest）
+│   │   └── sign.ts                # x-sign MD5 签名验证中间件（防重放攻击）
+│   ├── routes/
+│   │   ├── auth.ts                # POST /api/auth/login（bcrypt + JWT）
+│   │   ├── admin.ts               # /api/admin/* 全部管理接口（JWT 保护，约 1100 行）
+│   │   ├── app.ts                 # /api/v1/app/* 移动 App 接口（x-sign 保护）
+│   │   └── deepread.ts            # /api/v1/dr/* DeepRead 接口（x-sign + JWT）
+│   ├── services/
+│   │   ├── taskRegistry.ts        # 注册任务定义，提供 listRegisteredTasks / prepareRegisteredTask
+│   │   ├── taskEnqueue.ts         # 封装任务入队逻辑，生成 taskId，写入数据库
+│   │   ├── taskNaming.ts          # 任务命名规则校验（server.* / client.*）
+│   │   ├── serverTaskRuntime.ts   # 服务端任务实现（ServerTaskBase 抽象类，server.echo）
+│   │   └── executionEngine.ts     # 执行引擎：轮询、并发控制、重试、客户端状态刷新
+│   ├── ws/
+│   │   └── executorWsGateway.ts   # WebSocket 网关：RFC 6455 手动实现，任务分发协议
+│   └── prisma/
+│       └── seed.ts                # 数据库种子：默认管理员、配置、DeepRead 测试数据
+├── package.json
+└── tsconfig.json
 ```
 
 ---
@@ -51,184 +51,175 @@ server/
 `src/index.ts` 按以下顺序完成初始化：
 
 ```
-1. 创建 Express 实例，读取 PORT 环境变量（默认 3001）
-2. 初始化 PrismaClient
-3. 注册全局中间件
-   ├── cors()               ← 允许跨域
-   └── express.json()       ← 解析 JSON 请求体
-4. 注册路由
-   ├── GET  /api/health     ← 健康检查（无鉴权）
-   ├── /api/auth            ← 管理员登录
-   ├── /api/admin           ← 管理后台 API（JWT 保护）
-   ├── /api/v1/app          ← 移动端 API（签名保护）
-   ├── /api/v1/dr           ← DeepRead API（签名+JWT）
-   └── express.static()     ← 托管 public/ 目录（Admin UI）
-       └── GET *            ← SPA 兜底，返回 index.html
-5. 创建 HTTP Server（封装 Express app）
-6. createExecutorWsGateway(server, prisma)
-   └── 监听 server 的 'upgrade' 事件，处理 /ws/executor 路径的 WS 握手
-7. startExecutionEngine(prisma)
-   ├── 立即执行：failLegacyQueuedTasks、scheduleLocalTasks、refreshExecutorStatus、recoverStaleRemoteTasks
-   ├── setInterval(scheduleLocalTasks, LOCAL_EXECUTOR_POLL_MS)   ← 默认 2000ms
-   └── setInterval(refreshExecutorStatus + recoverStaleRemoteTasks, EXECUTOR_SWEEP_INTERVAL_MS) ← 默认 10000ms
-8. server.listen(PORT) ← 开始监听端口
+Step 1: 创建 Express 应用
+  └─ const app = express()
+  └─ const prisma = new PrismaClient()
+
+Step 2: 注册全局中间件
+  ├─ app.use(cors())         — 允许跨域（开发阶段无限制）
+  └─ app.use(express.json()) — 解析 JSON 请求体
+
+Step 3: 挂载路由
+  ├─ GET  /api/health                   — 健康检查（无鉴权）
+  ├─ /api/auth        → authRoutes
+  ├─ /api/admin       → adminRoutes    （router 内部 router.use(authMiddleware)）
+  ├─ /api/v1/app      → appRoutes      （router 内部 router.use(signMiddleware)）
+  ├─ /api/v1/dr       → deepreadRoutes （router 内部双层中间件）
+  └─ express.static(public/) + SPA 回退 *
+
+Step 4: 创建 HTTP Server
+  └─ const server = createServer(app)
+
+Step 5: 创建 WebSocket 网关
+  └─ createExecutorWsGateway(server, prisma)
+     — 监听 server 的 'upgrade' 事件
+     — 仅处理路径 /ws/executor 且通过密钥验证的连接
+     — 启动分发定时器（DISPATCH_INTERVAL_MS = 1500ms）
+
+Step 6: 启动执行引擎
+  └─ startExecutionEngine(prisma)
+     — 立即执行一次任务调度和状态刷新
+     — 本地任务轮询：setInterval(scheduleLocalTasks, LOCAL_POLL_MS)
+     — 状态扫描：setInterval(refreshExecutorStatus + recoverStaleRemoteTasks, SWEEP_INTERVAL_MS)
+
+Step 7: 开始监听
+  └─ server.listen(PORT)
 ```
+
+> `*` SPA 回退：`app.get("*", ...)` 将所有未匹配路由指向 `public/index.html`，需确保静态资源已构建到 `public/` 目录。
 
 ---
 
 ## 4. 请求处理流程
 
-### 4.1 管理员 API（/api/admin/*）
+### 4.1 各路由的中间件链
 
-```
-HTTP Request
-    → cors()
-    → express.json()
-    → authMiddleware (验证 Authorization: Bearer <JWT>)
-    → 路由处理函数
-    → Prisma 操作数据库
-    → JSON 响应
-```
+| 路由前缀 | 中间件链 | 说明 |
+|----------|----------|------|
+| `GET /api/health` | 无 | 公开健康检查 |
+| `POST /api/auth/login` | `express.json()` | 不需要预认证 |
+| `/api/admin/*` | `express.json()` → `authMiddleware` | 需要 Admin JWT |
+| `/api/v1/app/*` | `express.json()` → `signMiddleware` | 需要 x-sign 签名 |
+| `POST /api/v1/dr/sms/send` | `express.json()` → `signMiddleware` | 仅需签名，无需登录 |
+| `POST /api/v1/dr/login` | `express.json()` → `signMiddleware` | 仅需签名，无需登录 |
+| `/api/v1/dr/*`（其余） | `express.json()` → `signMiddleware` → `drAuthMiddleware` | 签名 + DR JWT |
 
-### 4.2 移动端 API（/api/v1/app/*）
+### 4.2 响应格式规范
 
-```
-HTTP Request
-    → cors()
-    → express.json()
-    → signMiddleware (验证 x-timestamp + x-sign)
-    → 路由处理函数
-    → JSON 响应
-```
+所有接口统一使用以下 JSON 格式：
 
-### 4.3 DeepRead API（/api/v1/dr/*）
+```json
+// 成功响应
+{
+  "code": 200,
+  "message": "success",
+  "data": { ... }
+}
 
-```
-HTTP Request
-    → cors()
-    → express.json()
-    → signMiddleware (全路由统一签名验证)
-    ├── [公开接口] POST /sms/send, POST /login
-    │       → 路由处理函数（无 JWT 要求）
-    └── [受保护接口]
-            → drAuthMiddleware (验证 Authorization: Bearer <DR JWT>)
-            → 路由处理函数
-            → JSON 响应
+// 错误响应
+{
+  "code": 400,
+  "message": "具体错误描述"
+}
 ```
 
-### 4.4 WebSocket 执行网关（ws://host/ws/executor）
-
-```
-HTTP Upgrade Request
-    → server 'upgrade' 事件
-    → 路径检查（必须是 /ws/executor）
-    → validateExecutorKey（检查 x-executor-key header 或 ?key= 参数）
-    → upgradeToWs（RFC 6455 握手，计算 Sec-WebSocket-Accept）
-    → WsConnection 实例（帧解析循环）
-    → 消息分发：client.hello / client.heartbeat / task.update / task.log
-```
+`code` 字段与 HTTP 状态码保持一致。分页响应的 `data` 对象包含 `list`、`total`、`page`、`pageSize` 字段。
 
 ---
 
 ## 5. 模块依赖关系图
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                      src/index.ts                        │
-│  Express App + HTTP Server + Prisma 初始化               │
-└──────┬──────────────┬─────────────────┬─────────────────┘
-       │              │                 │
-       ▼              ▼                 ▼
-┌──────────┐  ┌──────────────┐  ┌──────────────────────┐
-│ routes/  │  │ ws/executor  │  │ services/execution   │
-│ auth.ts  │  │ WsGateway.ts │  │ Engine.ts            │
-│ admin.ts │  └──────┬───────┘  └──────────┬───────────┘
-│ app.ts   │         │                     │
-│ deepread │         │                     │
-└────┬─────┘         │                     │
-     │               │                     │
-     ▼               ▼                     ▼
-┌──────────────────────────────────────────────────────┐
-│                  middleware/                          │
-│   auth.ts     sign.ts     drAuth.ts                  │
-└──────────────────────────────────────────────────────┘
-     │               │                     │
-     ▼               ▼                     ▼
-┌──────────────────────────────────────────────────────┐
-│                  services/                           │
-│  taskRegistry.ts   taskEnqueue.ts   taskNaming.ts    │
-│  serverTaskRuntime.ts                                │
-└──────────────────────────────┬───────────────────────┘
-                               │
-                               ▼
-┌──────────────────────────────────────────────────────┐
-│              PrismaClient (@prisma/client)            │
-│              SQLite 数据库（DATABASE_URL）             │
-└──────────────────────────────────────────────────────┘
-```
+┌─────────────────────────────────────────────────────────────┐
+│                       index.ts                              │
+│          Express App + HTTP Server (Node.js)                │
+└──┬─────────────┬──────────────┬────────────┬───────────────┘
+   │             │              │            │
+   ▼             ▼              ▼            ▼
+routes/       routes/        routes/      routes/
+auth.ts       admin.ts       app.ts       deepread.ts
+   │             │              │            │
+   │       ┌─────┤         ┌────┤       ┌────┤
+   ▼       ▼     ▼         ▼    ▼       ▼    ▼
+middleware/     services/                middleware/
+auth.ts         taskRegistry.ts          sign.ts
+drAuth.ts       ├─ serverTaskRuntime.ts  drAuth.ts
+sign.ts         └─ taskNaming.ts
+                taskEnqueue.ts
+                └─ taskRegistry.ts
 
-> 注意：每个路由文件各自实例化一个 `PrismaClient`，`executionEngine` 和 `executorWsGateway` 共用 `index.ts` 传入的同一个实例。
+┌──────────────────────────┐    ┌──────────────────────────┐
+│  ws/executorWsGateway.ts │    │ services/executionEngine  │
+│  (RFC 6455 手动实现)     │    │ (本地 server_task 调度)  │
+│  ├─ taskNaming.ts        │    │ ├─ serverTaskRuntime.ts   │
+│  └─ PrismaClient         │    │ └─ PrismaClient           │
+└──────────────────────────┘    └──────────────────────────┘
+              │                              │
+              └──────────────┬───────────────┘
+                             ▼
+                   prisma/schema.prisma
+                   SQLite (DATABASE_URL)
+```
 
 ---
 
-## 6. 环境变量一览
+## 6. 环境变量一览表
 
-| 变量名 | 默认值 | 说明 |
-|--------|--------|------|
-| `PORT` | `3001` | HTTP 服务监听端口 |
-| `DATABASE_URL` | 无默认（必填） | Prisma SQLite 数据库路径，如 `file:./dev.db` |
-| `JWT_SECRET` | `juma_jwt_secret_2026` | Admin JWT 签名密钥（auth.ts、admin.ts） |
-| `APP_SECRET` | `juma2026_secret` | x-sign MD5 签名密钥（app.ts、deepread.ts） |
-| `DR_JWT_SECRET` | `deepread_jwt_secret_2026` | DeepRead JWT 签名密钥，token 有效期 30 天 |
-| `EXECUTOR_SHARED_KEY` | `juma_executor_2026` | WebSocket 执行器客户端接入密钥（header 或 query） |
-| `EXECUTOR_OFFLINE_TIMEOUT_MS` | `60000` | Executor 心跳超时时间（毫秒），超时后标记为 offline |
-| `EXECUTOR_SWEEP_INTERVAL_MS` | `10000` | 执行引擎巡检周期（毫秒），用于刷新在线状态和恢复超时任务 |
-| `EXECUTOR_DISPATCH_INTERVAL_MS` | `1500` | WS 网关轮询分发 client_task 的间隔（毫秒） |
-| `EXECUTOR_HEARTBEAT_INTERVAL_MS` | `10000` | 通知客户端的推荐心跳间隔（毫秒，写入 server.hello 响应） |
-| `LOCAL_EXECUTOR_CONCURRENCY` | `1` | 本地 server_task 最大并发数（最小值为 1） |
-| `LOCAL_EXECUTOR_POLL_MS` | `2000` | 本地执行引擎轮询数据库的间隔（毫秒） |
-| `REMOTE_TASK_STALE_TIMEOUT_MS` | `300000` | client_task 超时判定时长（毫秒），超时且客户端离线则触发重试或失败 |
-| `TASK_LOG_MAX_BYTES` | `65536` | 任务日志最大字节数（64KB），超出则截断保留尾部 |
-| `GEMINI_API_KEY` | 无默认（可选） | Google Gemini API 密钥，用于 DeepRead AI 对话功能；未配置时 `/ai/chat` 返回 500 |
+| 变量名 | 默认值 | 来源文件 | 说明 |
+|--------|--------|----------|------|
+| `PORT` | `3001` | `index.ts` | HTTP 服务监听端口，同时也是 WebSocket 升级端口 |
+| `DATABASE_URL` | 无（必须配置） | Prisma | SQLite 连接字符串，例如 `file:./dev.db` |
+| `JWT_SECRET` | `juma_jwt_secret_2026` | `middleware/auth.ts` | 管理员 JWT 签名密钥 |
+| `APP_SECRET` | `juma2026_secret` | `middleware/sign.ts` | x-sign 签名密钥，MD5(APP_SECRET + timestamp) |
+| `DR_JWT_SECRET` | `deepread_jwt_secret_2026` | `middleware/drAuth.ts` | DeepRead 用户 JWT 签名密钥 |
+| `EXECUTOR_SHARED_KEY` | `juma_executor_2026` | `ws/executorWsGateway.ts` | WebSocket 执行器连接认证密钥 |
+| `EXECUTOR_OFFLINE_TIMEOUT_MS` | `60000` | `services/executionEngine.ts` | 执行器心跳超时阈值（60 秒） |
+| `LOCAL_EXECUTOR_CONCURRENCY` | `1` | `services/executionEngine.ts` | 本地服务端任务最大并发数 |
+| `LOCAL_EXECUTOR_POLL_MS` | `2000` | `services/executionEngine.ts` | 本地执行引擎轮询间隔 |
+| `EXECUTOR_SWEEP_INTERVAL_MS` | `10000` | `services/executionEngine.ts` | 客户端状态扫描间隔 |
+| `REMOTE_TASK_STALE_TIMEOUT_MS` | `300000` | `services/executionEngine.ts` | 远程任务超时（5 分钟），超时后重试或报错 |
+| `TASK_LOG_MAX_BYTES` | `65536` | `services/executionEngine.ts` / `ws/executorWsGateway.ts` | 任务日志最大字节数（64KB） |
+| `EXECUTOR_HEARTBEAT_INTERVAL_MS` | `10000` | `ws/executorWsGateway.ts` | 向客户端建议的心跳间隔，随 server.hello 下发 |
+| `EXECUTOR_DISPATCH_INTERVAL_MS` | `1500` | `ws/executorWsGateway.ts` | WebSocket 任务分发轮询间隔 |
+| `GEMINI_API_KEY` | 无 | `routes/deepread.ts` | Google Gemini API 密钥，不配置则 AI 对话返回 500 |
 
-### 生产环境配置建议
-
-所有带有 `_SECRET` / `_KEY` 后缀的变量在生产环境中**必须**替换为强随机值。推荐通过 `.env` 文件或部署平台的 Secret 管理机制注入，不要提交到版本库。
+### 生产环境推荐配置
 
 ```bash
-# 最小生产环境配置示例
-DATABASE_URL="file:/data/juma.db"
-JWT_SECRET="<随机64字符>"
-APP_SECRET="<随机64字符>"
-DR_JWT_SECRET="<随机64字符>"
-EXECUTOR_SHARED_KEY="<随机64字符>"
-GEMINI_API_KEY="AIza..."
 PORT=3001
+DATABASE_URL="file:/data/juma.db"
+JWT_SECRET="your-strong-random-secret-64chars"
+APP_SECRET="your-app-secret-32chars"
+DR_JWT_SECRET="your-dr-jwt-secret-64chars"
+EXECUTOR_SHARED_KEY="your-executor-key-32chars"
+GEMINI_API_KEY="AIzaSy..."
+LOCAL_EXECUTOR_CONCURRENCY=2
 ```
+
+> **安全提示**：所有带 `_SECRET` 和 `_KEY` 后缀的变量在生产环境必须替换为强随机字符串，默认值仅用于本地开发。
 
 ---
 
-## 7. 脚本命令
+## 7. 开发与构建命令
 
 ```bash
+# 安装依赖
+npm install
+
 # 开发模式（tsx watch 热重载）
 npm run dev
 
-# 编译 TypeScript
+# 编译 TypeScript 到 dist/
 npm run build
 
-# 生产启动（编译后）
+# 生产模式启动（需先执行 build）
 npm run start
 
-# 数据库结构同步（开发用，不生成 migration）
-npm run db:push
+# 数据库操作
+npm run db:generate   # 重新生成 Prisma Client（修改 schema 后执行）
+npm run db:push       # 同步 schema 到数据库（开发用，无迁移历史）
+npm run db:seed       # 运行种子脚本（初始化默认数据）
 
-# 生成 Prisma Client
-npm run db:generate
-
-# 初始化种子数据
-npm run db:seed
-
-# ESLint 检查
+# 代码检查
 npm run lint
 ```
