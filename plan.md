@@ -309,20 +309,121 @@ Body: { article_id: "xxx", message: "这篇文章的核心观点是什么？" }
 
 ---
 
-## Phase 7：管理后台 API（可选，供运营使用）
+## Phase 7：管理后台 API
 
-在 `server/src/routes/admin.ts` 中新增 DeepRead 管理路由：
+在 `server/src/routes/admin.ts` 中新增 DeepRead 管理路由（复用现有 JWT authMiddleware）：
 
-- `GET /api/admin/dr/spaces` — 空间列表
-- `POST /api/admin/dr/spaces` — 创建空间（自动生成 inviteCode）
-- `POST /api/admin/dr/channels` — 创建频道
-- `POST /api/admin/dr/articles` — 创建/发布文章
+### 空间管理
+- `GET /api/admin/dr/spaces` — 空间列表（含成员数、文章数、频道数统计）
+- `POST /api/admin/dr/spaces` — 创建空间（自动生成 spaceId + 6位随机 inviteCode）
+- `PUT /api/admin/dr/spaces/:spaceId` — 编辑空间（名称、描述）
+- `DELETE /api/admin/dr/spaces/:spaceId` — 删除空间
+- `GET /api/admin/dr/spaces/:spaceId/members` — 空间成员列表
+
+### 频道管理
+- `GET /api/admin/dr/channels?space_id=xxx` — 频道列表（含文章数统计）
+- `POST /api/admin/dr/channels` — 创建频道（指定所属空间）
+- `PUT /api/admin/dr/channels/:channelId` — 编辑频道（名称、排序）
+- `DELETE /api/admin/dr/channels/:channelId` — 删除频道
+
+### 文章管理
+- `GET /api/admin/dr/articles?space_id=xxx&channel_id=xxx&page=1&page_size=20` — 文章列表（分页，含阅读数/收藏数统计）
+- `POST /api/admin/dr/articles` — 创建文章（标题、摘要、封面、正文HTML、所属空间+频道、作者、布局类型）
 - `PUT /api/admin/dr/articles/:articleId` — 编辑文章
-- `GET /api/admin/dr/users` — 用户列表
+- `DELETE /api/admin/dr/articles/:articleId` — 删除文章
+
+### 用户管理
+- `GET /api/admin/dr/users?page=1&page_size=20` — 用户列表（分页，含加入空间数、批注数统计）
+- `GET /api/admin/dr/users/:userId` — 用户详情（含加入的空间列表）
 
 ---
 
-## Phase 8：种子数据
+## Phase 8：管理后台 UI 页面
+
+遵循现有 admin-ui 模式：React + Ant Design + 内联样式 + adminClient API 调用。
+
+### 8.1 路由与导航变更
+
+**修改 `admin-ui/src/App.tsx`**，新增路由：
+```tsx
+<Route path="dr/spaces" element={<DrSpaceManagement />} />
+<Route path="dr/channels" element={<DrChannelManagement />} />
+<Route path="dr/articles" element={<DrArticleManagement />} />
+<Route path="dr/users" element={<DrUserManagement />} />
+```
+
+**修改 `admin-ui/src/layouts/AdminLayout.tsx`**，在 menuItems 中添加 DeepRead 分组：
+```tsx
+// 分隔线（视觉上区分 JUMA 与 DeepRead）
+{ type: "divider", label: "DeepRead" },
+{ key: "/dr/spaces", icon: <AppstoreOutlined />, label: "空间管理" },
+{ key: "/dr/channels", icon: <BranchesOutlined />, label: "频道管理" },
+{ key: "/dr/articles", icon: <ReadOutlined />, label: "文章管理" },
+{ key: "/dr/users", icon: <TeamOutlined />, label: "用户管理" },
+```
+
+同步更新 `pageTitle` 映射。
+
+### 8.2 空间管理页面
+
+**新建 `admin-ui/src/pages/DrSpaceManagement.tsx`**
+
+布局：顶部操作栏 + Ant Design Table
+
+| 功能 | 说明 |
+|------|------|
+| 空间列表 | Table 展示：空间名称、spaceId、邀请码（可复制）、成员数、频道数、文章数、创建时间 |
+| 新建空间 | Modal 表单：空间名称（必填）、描述（选填） |
+| 编辑空间 | Modal 表单：修改名称和描述 |
+| 删除空间 | Modal.confirm 二次确认 |
+| 查看成员 | 点击展开或弹窗，展示成员手机号、昵称、角色、加入时间 |
+
+### 8.3 频道管理页面
+
+**新建 `admin-ui/src/pages/DrChannelManagement.tsx`**
+
+布局：顶部空间选择器（Select）+ 操作栏 + Table
+
+| 功能 | 说明 |
+|------|------|
+| 空间筛选 | 顶部 Select 组件，加载所有空间列表，切换后刷新频道列表 |
+| 频道列表 | Table：频道名称、channelId、所属空间、文章数、排序值、创建时间 |
+| 新建频道 | Modal 表单：频道名称（必填）、所属空间（Select，必填）、排序值（InputNumber） |
+| 编辑频道 | Modal 表单：修改名称和排序 |
+| 删除频道 | Modal.confirm 二次确认 |
+
+### 8.4 文章管理页面
+
+**新建 `admin-ui/src/pages/DrArticleManagement.tsx`**
+
+布局：顶部筛选区（空间 + 频道联动选择器）+ 操作栏 + Table，创建/编辑用抽屉（Drawer）
+
+| 功能 | 说明 |
+|------|------|
+| 筛选 | 空间 Select → 联动加载频道 Select，支持分页 |
+| 文章列表 | Table：标题、作者、频道、布局类型、阅读数、发布时间、操作列 |
+| 新建文章 | Drawer（宽度 720px）：标题、摘要、作者、封面URL、空间+频道选择、布局类型（Select: default/card/wide）、正文编辑（Monaco Editor，language=html） |
+| 编辑文章 | 同新建 Drawer，预填充数据 |
+| 删除文章 | Modal.confirm 二次确认 |
+| 预览正文 | 弹窗中用 `dangerouslySetInnerHTML` 渲染 HTML 正文 |
+
+### 8.5 用户管理页面
+
+**新建 `admin-ui/src/pages/DrUserManagement.tsx`**
+
+布局：Table + 分页
+
+| 功能 | 说明 |
+|------|------|
+| 用户列表 | Table：用户ID、手机号、昵称、头像、加入空间数、批注数、注册时间 |
+| 查看详情 | 点击展开，显示用户加入的空间列表（空间名称 + 角色 + 加入时间） |
+| 分页 | 20条/页 |
+
+> 注：用户管理为只读页面，不提供编辑/删除功能（用户通过手机端自行注册）。
+
+---
+
+## Phase 9：种子数据
 
 更新 `server/src/prisma/seed.ts`，插入：
 - 1 个示例空间（邀请码 `DEEP2026`）
@@ -332,7 +433,7 @@ Body: { article_id: "xxx", message: "这篇文章的核心观点是什么？" }
 
 ---
 
-## Phase 9：路由注册与集成
+## Phase 10：路由注册与集成
 
 1. 在 `server/src/index.ts` 中注册新路由：
    ```typescript
@@ -340,24 +441,30 @@ Body: { article_id: "xxx", message: "这篇文章的核心观点是什么？" }
    app.use("/api/v1/dr", deepreadRoutes);
    ```
 
-2. 更新 README.md 补充 DeepRead API 文档
+2. 更新 README.md 补充 DeepRead API 文档与管理页面说明
 
 ---
 
 ## 文件变更清单
 
-| 操作 | 文件路径 |
-|------|----------|
-| 修改 | `server/prisma/schema.prisma` |
-| 新建 | `server/src/middleware/drAuth.ts` |
-| 新建 | `server/src/routes/deepread.ts` |
-| 新建 | `server/src/services/deepread/smsService.ts` |
-| 新建 | `server/src/services/deepread/aiService.ts` |
-| 修改 | `server/src/routes/admin.ts`（追加 DR 管理路由） |
-| 修改 | `server/src/index.ts`（注册路由） |
-| 修改 | `server/src/prisma/seed.ts`（追加种子数据） |
-| 修改 | `server/package.json`（追加 @google/genai 依赖） |
-| 修改 | `README.md`（补充文档） |
+| 操作 | 文件路径 | 说明 |
+|------|----------|------|
+| 修改 | `server/prisma/schema.prisma` | 新增 12 个 DR 表 |
+| 新建 | `server/src/middleware/drAuth.ts` | DeepRead 用户 JWT 鉴权 |
+| 新建 | `server/src/routes/deepread.ts` | 客户端 API 路由 |
+| 新建 | `server/src/services/deepread/smsService.ts` | 短信验证码服务 |
+| 新建 | `server/src/services/deepread/aiService.ts` | Gemini AI 对话服务 |
+| 修改 | `server/src/routes/admin.ts` | 追加 DR 管理 API 路由 |
+| 修改 | `server/src/index.ts` | 注册 deepread 路由 |
+| 修改 | `server/src/prisma/seed.ts` | 追加 DR 种子数据 |
+| 修改 | `server/package.json` | 追加 @google/genai 依赖 |
+| 新建 | `admin-ui/src/pages/DrSpaceManagement.tsx` | 空间管理页面 |
+| 新建 | `admin-ui/src/pages/DrChannelManagement.tsx` | 频道管理页面 |
+| 新建 | `admin-ui/src/pages/DrArticleManagement.tsx` | 文章管理页面 |
+| 新建 | `admin-ui/src/pages/DrUserManagement.tsx` | 用户管理页面 |
+| 修改 | `admin-ui/src/App.tsx` | 新增 4 条 DR 页面路由 |
+| 修改 | `admin-ui/src/layouts/AdminLayout.tsx` | 侧边栏添加 DR 菜单分组 |
+| 修改 | `README.md` | 补充文档 |
 
 ## 实现顺序
 
@@ -367,6 +474,7 @@ Body: { article_id: "xxx", message: "这篇文章的核心观点是什么？" }
 4. Phase 4 → 批注（核心交互功能）
 5. Phase 5 → 合集
 6. Phase 6 → AI 对话
-7. Phase 7 → 管理后台
-8. Phase 8 → 种子数据
-9. Phase 9 → 集成 & 文档
+7. Phase 7 → 管理后台 API
+8. Phase 8 → 管理后台 UI（空间/频道/文章/用户 4 个页面）
+9. Phase 9 → 种子数据
+10. Phase 10 → 集成 & 文档
