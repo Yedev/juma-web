@@ -102,13 +102,29 @@ model DrSpace {
 }
 
 model DrSpaceMember {
-  id        Int      @id @default(autoincrement())
-  spaceId   String   @map("space_id")
-  userId    Int      @map("user_id")
-  role      String   @default("member")
-  joinedAt  DateTime @default(now()) @map("joined_at")
+  id           Int      @id @default(autoincrement())
+  spaceId      String   @map("space_id")
+  userId       Int      @map("user_id")
+  role         String   @default("member")
+  inviteCodeId String?  @map("invite_code_id")
+  joinedAt     DateTime @default(now()) @map("joined_at")
   @@unique([spaceId, userId])
   @@map("dr_space_members")
+}
+
+model DrInviteCode {
+  id        Int       @id @default(autoincrement())
+  codeId    String    @unique @map("code_id")
+  spaceId   String    @map("space_id")
+  code      String    @unique
+  label     String    @default("")
+  maxUses   Int?      @map("max_uses")
+  useCount  Int       @default(0) @map("use_count")
+  expiresAt DateTime? @map("expires_at")
+  disabled  Boolean   @default(false)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at")
+  @@map("dr_invite_codes")
 }
 
 model DrChannel {
