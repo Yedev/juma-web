@@ -16,10 +16,11 @@ export default function Login() {
         localStorage.setItem("juma_username", res.data.data.username);
         message.success("登录成功");
         navigate("/tasks");
+      } else {
+        message.error(res.data.message || "登录失败");
       }
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { message?: string } } };
-      message.error(error.response?.data?.message || "登录失败");
+    } catch {
+      // interceptor already shows error message
     } finally {
       setLoading(false);
     }

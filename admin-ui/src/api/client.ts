@@ -1,4 +1,5 @@
 import axios from "axios";
+import { message } from "antd";
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -18,10 +19,17 @@ adminClient.interceptors.request.use((config) => {
 adminClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+    const msg = error.response?.data?.message || error.message || "请求失败";
+
+    if (status === 401) {
       localStorage.removeItem("juma_token");
       localStorage.removeItem("juma_username");
-      window.location.href = "/login";
+      message.error("登录已过期，请重新登录");
+    } else if (status) {
+      message.error(`请求失败 (${status}): ${msg}`);
+    } else {
+      message.error(`网络错误: ${msg}`);
     }
     return Promise.reject(error);
   }

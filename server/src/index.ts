@@ -9,6 +9,7 @@ import deepreadRoutes from "./routes/deepread";
 import { createServer } from "http";
 import { startExecutionEngine } from "./services/executionEngine";
 import { createExecutorWsGateway } from "./ws/executorWsGateway";
+import { startInviteCodeCleanupTask } from "./services/inviteCodeCleaner";
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3001", 10);
@@ -38,6 +39,7 @@ startExecutionEngine(prisma);
 server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
   console.log(`Executor WS listening at ws://localhost:${PORT}/ws/executor`);
+  startInviteCodeCleanupTask();
 });
 
 export default app;
