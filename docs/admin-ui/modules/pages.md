@@ -251,25 +251,37 @@ SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
 
 ### 功能描述
 
-管理 DeepRead 应用的"空间"（Space）实体，空间是 DeepRead 内容组织的顶层单位，下属频道和文章。
+管理 DeepRead 应用的"空间"（Space）实体，空间是 DeepRead 内容组织的顶层单位，下属频道和文章。操作列提供"首页"、"邀请码"、"成员"、"编辑"、"删除"五个快捷入口。
 
 ### 功能列表
 
 **空间 CRUD**：
 - 列表展示：spaceId、名称、描述、成员数、频道数、文章数、创建时间
 - 新建/编辑：Modal 表单，字段包括名称（必填）和描述
-- 删除：`Popconfirm` 二次确认后删除
+- 删除：`Modal.confirm` 二次确认后删除
+
+**首页模块配置**（点击"首页"按钮，`AppstoreOutlined` 图标）：
+- 打开右侧 **Drawer**（宽度 680px），展示该空间的所有首页模块
+- 每个模块以 **Card** 形式渲染，Card 头部显示：排序拖拽图标、模块标题、副标题（小字）、排列方式 Tag、序号
+- 支持**添加模块**（右上角按钮）、**编辑模块**（Card 头部编辑图标）、**删除模块**（Card 头部带 `Popconfirm` 的删除按钮）
+- 每个模块 Card body 展示已绑定的资源列表，每条资源显示类型 Tag（频道/文章）、名称/标题、resourceId、移除按钮
+- 支持**绑定资源**：点击"绑定资源"打开嵌套 Modal，选择资源类型（频道/文章），再从对应空间下的列表中搜索选择
+- 支持**移除资源**：每条资源右侧 `Popconfirm` 确认后移除
+
+**创建/编辑模块表单**（嵌套 Modal）：
+- 模块标题（必填）
+- 副标题（可选，显示为小字说明）
+- 排列方式（Select，选项：大图卡、横向卡、纵向卡、瀑布流）
 
 **邀请码管理**（点击"邀请码"按钮）：
 - 打开邀请码列表 Modal，展示该空间的所有邀请码
-- 每条邀请码信息：码值（可一键复制）、标签、最大使用次数、已使用次数、过期时间、是否禁用、通过该码加入的用户列表（展开查看）
+- 每条邀请码信息：码值（可一键复制）、标签、最大使用次数、已使用次数、过期时间、通过该码加入的用户列表
 - 创建新邀请码：嵌套 Modal，填写标签、最大使用次数（可为空=无限制）、过期时间（DatePicker，可为空=永不过期）
-- 禁用/启用邀请码：切换 `disabled` 状态
-- 复制邀请码：使用 `navigator.clipboard.writeText` 复制到剪贴板，显示 success 提示
+- 复制邀请码：使用 `navigator.clipboard.writeText` 复制到剪贴板
 
 **成员查看**（点击"成员"按钮）：
 - 打开成员列表 Modal，展示该空间的所有成员
-- 信息：用户 ID、手机号、昵称、角色（owner/member 等）、加入时间
+- 信息：手机号、昵称、角色、加入时间
 
 ### 使用的 API
 
@@ -282,7 +294,15 @@ SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
 | GET | `/api/admin/dr/spaces/:spaceId/members` | 获取空间成员列表 |
 | GET | `/api/admin/dr/spaces/:spaceId/invite-codes` | 获取空间邀请码列表 |
 | POST | `/api/admin/dr/spaces/:spaceId/invite-codes` | 创建邀请码 |
-| PUT | `/api/admin/dr/invite-codes/:codeId` | 更新邀请码（禁用/启用） |
+| DELETE | `/api/admin/dr/invite-codes/:codeId` | 删除邀请码 |
+| GET | `/api/admin/dr/spaces/:spaceId/homepage-modules` | 获取空间首页模块列表（含资源详情） |
+| POST | `/api/admin/dr/spaces/:spaceId/homepage-modules` | 创建首页模块 |
+| PUT | `/api/admin/dr/homepage-modules/:moduleId` | 更新首页模块 |
+| DELETE | `/api/admin/dr/homepage-modules/:moduleId` | 删除首页模块 |
+| POST | `/api/admin/dr/homepage-modules/:moduleId/resources` | 绑定资源到模块 |
+| DELETE | `/api/admin/dr/homepage-modules/:moduleId/resources/:resourceId` | 移除模块资源绑定 |
+| GET | `/api/admin/dr/channels` | 加载频道选项（绑定资源时） |
+| GET | `/api/admin/dr/articles` | 加载文章选项（绑定资源时） |
 
 ---
 
@@ -343,7 +363,7 @@ SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
 **文章 CRUD**（使用 Drawer 侧抽屉而非 Modal，因为编辑内容较多）：
 - 新建/编辑时打开右侧 Drawer
 - 表单字段：标题、摘要、作者、封面 URL、所属空间（必填，Select）、所属频道（必填，Select，联动空间）、布局类型（`default` 等）
-- **HTML 内容编辑器**：Drawer 下方嵌入 Monaco Editor，语言模式为 `html`，高度 400px，用于编辑 `contentHtml` 字段
+- **正文内容编辑器**：Drawer 下方嵌入 Monaco Editor，动态切换语言模式（`html` 或 `markdown`），高度 400px，用于编辑 `content` 字段
 
 **Monaco HTML 编辑器配置**：
 ```ts
@@ -371,7 +391,7 @@ SIGN=$(printf "%s" "${APP_SECRET}${TS}" | md5sum | awk '{print $1}')
 | GET | `/api/admin/dr/spaces` | 获取空间列表 |
 | GET | `/api/admin/dr/channels` | 获取频道列表（含 `space_id` 参数） |
 | GET | `/api/admin/dr/articles` | 获取文章列表（可选 `space_id`、`channel_id`、`page`、`page_size`） |
-| GET | `/api/admin/dr/articles/:articleId` | 获取文章详情（含 `contentHtml`） |
+| GET | `/api/admin/dr/articles/:articleId` | 获取文章详情（含 `content` 和 `contentType`） |
 | POST | `/api/admin/dr/articles` | 创建文章 |
 | PUT | `/api/admin/dr/articles/:articleId` | 更新文章 |
 | DELETE | `/api/admin/dr/articles/:articleId` | 删除文章 |

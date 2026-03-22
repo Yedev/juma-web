@@ -1,8 +1,70 @@
 import { useState, useEffect, useCallback } from "react";
 import { message, Table, Modal, Input, Select, Spin, Button, Drawer } from "antd";
-import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined } from "@ant-design/icons";
+import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, ThunderboltOutlined, MobileOutlined } from "@ant-design/icons";
 import Editor from "@monaco-editor/react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { adminClient } from "../api/client";
+
+// ── 通用手机预览弹窗 ────────────────────────────────────────
+function MobilePreviewModal({
+  open,
+  onClose,
+  title,
+  content,
+  contentType = "html",
+}: {
+  open: boolean;
+  onClose: () => void;
+  title?: string;
+  content: string;
+  contentType?: string;
+}) {
+  return (
+    <Modal
+      title={
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <MobileOutlined />
+          <span>{title || "手机预览"}</span>
+        </div>
+      }
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      width={400}
+      styles={{ body: { display: "flex", justifyContent: "center", padding: "16px 0 24px" } }}
+    >
+      <div
+        style={{
+          width: 320,
+          height: 640,
+          border: "2px solid #e0e0e0",
+          borderRadius: 16,
+          overflow: "hidden",
+          background: "#fff",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+        }}
+      >
+        <div
+          style={{
+            height: "100%",
+            overflowY: "auto",
+            padding: "16px 14px",
+            fontSize: 14,
+            lineHeight: 1.8,
+            color: "#333",
+          }}
+        >
+          {contentType === "markdown" ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          ) : (
+            <div dangerouslySetInnerHTML={{ __html: content }} />
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 interface SpaceOption {
   spaceId: string;
@@ -31,7 +93,8 @@ interface ArticleRecord {
 }
 
 interface ArticleDetail extends ArticleRecord {
-  contentHtml: string;
+  content: string;
+  contentType: string;
 }
 
 export default function DrArticleManagement() {
@@ -56,13 +119,24 @@ export default function DrArticleManagement() {
   const [formSpaceId, setFormSpaceId] = useState<string | undefined>(undefined);
   const [formChannelId, setFormChannelId] = useState<string | undefined>(undefined);
   const [formLayoutType, setFormLayoutType] = useState("default");
-  const [formContentHtml, setFormContentHtml] = useState("");
+  const [formContent, setFormContent] = useState("");
+  const [formContentType, setFormContentType] = useState("html");
   const [formChannels, setFormChannels] = useState<ChannelOption[]>([]);
 
   // Preview
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewContent, setPreviewContent] = useState("");
+  const [previewType, setPreviewType] = useState("html");
   const [previewTitle, setPreviewTitle] = useState("");
+
+  // AI 格式美化
+  const [aiBeautifyOpen, setAiBeautifyOpen] = useState(false);
+  const [aiInputContent, setAiInputContent] = useState("");
+  const [aiOutputHtml, setAiOutputHtml] = useState("");
+  const [aiBeautifying, setAiBeautifying] = useState(false);
+
+  // 通用手机预览
+  const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false);
 
   const fetchSpaces = useCallback(async () => {
     try {
@@ -135,7 +209,8 @@ export default function DrArticleManagement() {
     setFormSpaceId(filterSpaceId);
     setFormChannelId(filterChannelId);
     setFormLayoutType("default");
-    setFormContentHtml("");
+    setFormContent("");
+    setFormContentType("html");
     if (filterSpaceId) {
       fetchChannelsForSpace(filterSpaceId).then(setFormChannels);
     } else {
@@ -157,18 +232,23 @@ export default function DrArticleManagement() {
     const chs = await fetchChannelsForSpace(record.spaceId);
     setFormChannels(chs);
 
-    // Fetch full article to get contentHtml
+    // Fetch full article to get content
     try {
-      const res = await adminClient.get(`/api/admin/dr/articles`, {
-        params: { space_id: record.spaceId, page: 1, page_size: 1 },
-      });
-      // We need the full article, but admin list doesn't include contentHtml.
-      // Use a workaround: re-fetch and find by ID. For now, set empty and let user fill.
-      setFormContentHtml("");
-      setEditing({ ...record, contentHtml: "" });
+      const res = await adminClient.get(`/api/admin/dr/articles/${record.articleId}`);
+      if (res.data.code === 200) {
+        const detail = res.data.data;
+        setFormContent(detail.content || "");
+        setFormContentType(detail.contentType || "html");
+        setEditing(detail);
+      } else {
+        setFormContent("");
+        setFormContentType("html");
+        setEditing({ ...record, content: "", contentType: "html" });
+      }
     } catch {
-      setFormContentHtml("");
-      setEditing({ ...record, contentHtml: "" });
+      setFormContent("");
+      setFormContentType("html");
+      setEditing({ ...record, content: "", contentType: "html" });
     }
   };
 
@@ -191,7 +271,8 @@ export default function DrArticleManagement() {
         spaceId: formSpaceId,
         channelId: formChannelId,
         layoutType: formLayoutType,
-        contentHtml: formContentHtml,
+        content: formContent,
+        contentType: formContentType,
       };
 
       if (editing) {
@@ -238,11 +319,68 @@ export default function DrArticleManagement() {
     });
   };
 
-  const handlePreview = (record: ArticleRecord) => {
+  const handlePreview = async (record: ArticleRecord) => {
     setPreviewTitle(record.title);
-    // We don't have contentHtml in list, show summary
-    setPreviewHtml(`<h1>${record.title}</h1><p>${record.summary || "暂无预览内容"}</p>`);
+    setPreviewContent("<p>正在加载内容...</p>");
+    setPreviewType("html");
     setPreviewOpen(true);
+
+    try {
+      const res = await adminClient.get(`/api/admin/dr/articles/${record.articleId}`);
+      if (res.data.code === 200) {
+        const detail = res.data.data;
+        if (detail.content) {
+          setPreviewContent(detail.content);
+          setPreviewType(detail.contentType || "html");
+        } else {
+          setPreviewContent(`<p><b>摘要：</b>${record.summary || "暂无内容"}</p>`);
+          setPreviewType("html");
+        }
+      } else {
+        setPreviewContent(`<p><b>摘要：</b>${record.summary || "暂无内容"}</p>`);
+        setPreviewType("html");
+      }
+    } catch {
+      setPreviewContent(`<p><b>摘要：</b>${record.summary || "加载内容失败"}</p>`);
+      setPreviewType("html");
+    }
+  };
+
+  const openAiBeautify = () => {
+    setAiInputContent(formContent);
+    setAiOutputHtml("");
+    setAiBeautifyOpen(true);
+  };
+
+  const handleAiBeautify = async () => {
+    if (!aiInputContent.trim()) {
+      message.warning("请先输入需要格式化的内容");
+      return;
+    }
+    setAiBeautifying(true);
+    try {
+      const res = await adminClient.post("/api/admin/ai/beautify", { content: aiInputContent }, { timeout: 180_000 });
+      if (res.data.code === 200) {
+        setAiOutputHtml(res.data.data.html);
+      } else {
+        message.error(res.data.message || "格式化失败");
+      }
+    } catch {
+      message.error("AI 服务暂不可用，请稍后重试");
+    } finally {
+      setAiBeautifying(false);
+    }
+  };
+
+  const handleApplyAiResult = () => {
+    if (!aiOutputHtml) {
+      message.warning("暂无格式化结果");
+      return;
+    }
+    setFormContent(aiOutputHtml);
+    setFormContentType("html");
+    setAiBeautifyOpen(false);
+    message.success("已回填到正文编辑框");
   };
 
   const handleFormSpaceChange = async (spaceId: string) => {
@@ -445,13 +583,42 @@ export default function DrArticleManagement() {
             <Input value={formCoverUrl} onChange={(e) => setFormCoverUrl(e.target.value)} placeholder="https://..." />
           </div>
           <div>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>正文 HTML</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <div style={{ fontSize: 13, color: "#666" }}>正文内容</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <Button
+                  size="small"
+                  icon={<MobileOutlined />}
+                  onClick={() => setMobilePreviewOpen(true)}
+                  style={{ borderRadius: 4, color: "#111", borderColor: "#d9d9d9", background: "#fff" }}
+                >
+                  手机预览
+                </Button>
+                <Button
+                  size="small"
+                  icon={<ThunderboltOutlined />}
+                  onClick={openAiBeautify}
+                  style={{ borderRadius: 4, color: "#111", borderColor: "#d9d9d9", background: "#fff" }}
+                >
+                  AI 格式美化
+                </Button>
+                <Select
+                  value={formContentType}
+                  onChange={setFormContentType}
+                  size="small"
+                  options={[
+                    { value: "html", label: "HTML" },
+                    { value: "markdown", label: "Markdown" },
+                  ]}
+                />
+              </div>
+            </div>
             <div style={{ border: "1px solid #e8e8e8", borderRadius: 4, overflow: "hidden" }}>
               <Editor
                 height="400px"
-                defaultLanguage="html"
-                value={formContentHtml}
-                onChange={(v) => setFormContentHtml(v || "")}
+                language={formContentType === "markdown" ? "markdown" : "html"}
+                value={formContent}
+                onChange={(v) => setFormContent(v || "")}
                 options={{
                   minimap: { enabled: false },
                   fontSize: 13,
@@ -476,13 +643,111 @@ export default function DrArticleManagement() {
         open={previewOpen}
         onCancel={() => setPreviewOpen(false)}
         footer={null}
-        width={640}
+        width={800}
+        styles={{ body: { padding: "20px 0" } }}
       >
-        <div
-          dangerouslySetInnerHTML={{ __html: previewHtml }}
-          style={{ padding: 16, fontSize: 15, lineHeight: 1.8, color: "#333" }}
-        />
+        <div style={{ padding: "0 24px", fontSize: 15, lineHeight: 1.8, color: "#333", maxHeight: "70vh", overflowY: "auto" }}>
+          {previewType === "markdown" ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {previewContent}
+            </ReactMarkdown>
+          ) : (
+            <div dangerouslySetInnerHTML={{ __html: previewContent }} />
+          )}
+        </div>
       </Modal>
+
+      <Modal
+        title={
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <ThunderboltOutlined style={{ color: "#111" }} />
+            <span>AI 格式美化</span>
+          </div>
+        }
+        open={aiBeautifyOpen}
+        onCancel={() => setAiBeautifyOpen(false)}
+        footer={null}
+        width={960}
+        styles={{ body: { padding: "16px 24px 24px" } }}
+      >
+        <div style={{ display: "flex", gap: 16, height: 680 }}>
+          {/* 左侧输入区 */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 13, color: "#666", fontWeight: 500 }}>输入内容</div>
+            <Input.TextArea
+              value={aiInputContent}
+              onChange={(e) => setAiInputContent(e.target.value)}
+              placeholder="粘贴需要格式化的原始文本内容..."
+              style={{ flex: 1, resize: "none", fontSize: 13, lineHeight: 1.7, borderRadius: 6 }}
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button
+                type="primary"
+                icon={<ThunderboltOutlined />}
+                loading={aiBeautifying}
+                onClick={handleAiBeautify}
+                style={{ flex: 1, borderRadius: 6, background: "#111", borderColor: "#111", color: "#fff", height: 38 }}
+              >
+                {aiBeautifying ? "格式化中..." : "开始格式美化"}
+              </Button>
+              <Button
+                onClick={handleApplyAiResult}
+                disabled={!aiOutputHtml}
+                style={{ flex: 1, borderRadius: 6, height: 38, borderColor: "#111", color: "#111", background: "#fff" }}
+              >
+                使用此结果
+              </Button>
+            </div>
+          </div>
+
+          {/* 分隔线 */}
+          <div style={{ width: 1, background: "#f0f0f0", flexShrink: 0 }} />
+
+          {/* 右侧预览区 */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
+            <div style={{ fontSize: 13, color: "#666", fontWeight: 500, alignSelf: "flex-start" }}>手机预览</div>
+            <div
+              style={{
+                width: 320,
+                height: 640,
+                border: "2px solid #e0e0e0",
+                borderRadius: 16,
+                overflow: "hidden",
+                background: "#fff",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
+                flexShrink: 0,
+              }}
+            >
+              <div
+                style={{
+                  height: "100%",
+                  overflowY: "auto",
+                  padding: "16px 14px",
+                  fontSize: 14,
+                  lineHeight: 1.8,
+                  color: "#333",
+                }}
+              >
+                {aiOutputHtml ? (
+                  <div dangerouslySetInnerHTML={{ __html: aiOutputHtml }} />
+                ) : (
+                  <div style={{ color: "#bbb", fontSize: 13, textAlign: "center", paddingTop: 80 }}>
+                    格式化结果将在此预览
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <MobilePreviewModal
+        open={mobilePreviewOpen}
+        onClose={() => setMobilePreviewOpen(false)}
+        title={formTitle || "手机预览"}
+        content={formContent}
+        contentType={formContentType}
+      />
     </div>
   );
 }

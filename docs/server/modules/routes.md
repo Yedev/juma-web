@@ -116,10 +116,74 @@
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | `GET` | `/api/admin/dr/articles` | 分页获取文章列表（可按 space_id / channel_id 过滤） |
-| `GET` | `/api/admin/dr/articles/:articleId` | 获取文章详情（含 contentHtml） |
+| `GET` | `/api/admin/dr/articles/:articleId` | 获取文章详情（含 content） |
 | `POST` | `/api/admin/dr/articles` | 创建文章 |
 | `PUT` | `/api/admin/dr/articles/:articleId` | 更新文章（支持部分更新） |
 | `DELETE` | `/api/admin/dr/articles/:articleId` | 删除文章 |
+
+#### DeepRead 空间首页模块管理
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/api/admin/dr/spaces/:spaceId/homepage-modules` | 获取空间的所有首页模块（含资源绑定详情） |
+| `POST` | `/api/admin/dr/spaces/:spaceId/homepage-modules` | 创建首页模块 |
+| `PUT` | `/api/admin/dr/homepage-modules/:moduleId` | 更新模块（标题、副标题、排列方式） |
+| `DELETE` | `/api/admin/dr/homepage-modules/:moduleId` | 删除模块（级联删除资源绑定） |
+| `PUT` | `/api/admin/dr/spaces/:spaceId/homepage-modules/reorder` | 批量更新模块排序 |
+| `POST` | `/api/admin/dr/homepage-modules/:moduleId/resources` | 向模块绑定资源（频道或文章） |
+| `DELETE` | `/api/admin/dr/homepage-modules/:moduleId/resources/:resourceId` | 移除模块资源绑定 |
+
+**排列方式（layoutType）枚举值**：
+
+| 值 | 含义 |
+|----|------|
+| `large_card` | 大图卡 |
+| `horizontal_card` | 横向卡 |
+| `vertical_card` | 纵向卡 |
+| `waterfall` | 瀑布流 |
+
+**GET /api/admin/dr/spaces/:spaceId/homepage-modules 响应示例**：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": 1,
+      "moduleId": "HM17111234567890001",
+      "spaceId": "S17111234567890001",
+      "title": "推荐阅读",
+      "subtitle": "精选内容每日更新",
+      "layoutType": "large_card",
+      "sortOrder": 0,
+      "createdAt": "2026-03-22T00:00:00.000Z",
+      "updatedAt": "2026-03-22T00:00:00.000Z",
+      "resources": [
+        {
+          "id": 1,
+          "moduleId": "HM17111234567890001",
+          "resourceType": "channel",
+          "resourceId": "CH17111234567890001",
+          "sortOrder": 0,
+          "detail": { "channelId": "CH...", "name": "技术专栏", "spaceId": "S...", "sortOrder": 0 }
+        }
+      ]
+    }
+  ]
+}
+```
+
+**POST /api/admin/dr/homepage-modules/:moduleId/resources 请求体**：
+
+```json
+{
+  "resourceType": "channel",
+  "resourceId": "CH17111234567890001"
+}
+```
+
+`resourceType` 只接受 `"channel"` 或 `"article"`，接口会校验对应资源是否存在。
 
 ### 关键接口详解
 

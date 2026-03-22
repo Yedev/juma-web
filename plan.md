@@ -83,7 +83,7 @@ model DrArticle {
   summary     String   @default("")
   coverUrl    String   @default("") @map("cover_url")
   layoutType  String   @default("default") @map("layout_type")
-  contentHtml String   @default("") @map("content_html")
+  content String   @default("") @map("content_html")
   author      String   @default("")
   readCount   Int      @default(0) @map("read_count")
   publishedAt DateTime @default(now()) @map("published_at")
@@ -205,14 +205,14 @@ GET /api/v1/dr/articles?space_id=xxx&channel_id=xxx&page=1&page_size=20
 ```
 - 校验用户是否为该空间成员
 - 按 `publishedAt` 降序分页
-- 返回列表（不含 `contentHtml`），附带收藏/已读状态
+- 返回列表（不含 `content`），附带收藏/已读状态
 
 #### 3.2 获取文章详情
 ```
 GET /api/v1/dr/articles/:articleId
 ```
 - 校验空间成员权限
-- 返回完整文章（含 `contentHtml`）
+- 返回完整文章（含 `content`）
 - 阅读数 +1
 
 #### 3.3 收藏/取消收藏
@@ -298,7 +298,7 @@ GET /api/v1/dr/collections
 POST /api/v1/dr/ai/chat   [需要 drAuth]
 Body: { article_id: "xxx", message: "这篇文章的核心观点是什么？" }
 ```
-- 从数据库取出文章 `contentHtml`，剥离 HTML 标签提取纯文本
+- 从数据库取出文章 `content`，剥离 HTML 标签提取纯文本
 - 构造 system prompt：你是 DeepRead 阅读助手，基于以下文章内容回答用户问题
 - 调用 Volcengine Doubao API
 - 流式返回 → 本期先做非流式，返回完整回复

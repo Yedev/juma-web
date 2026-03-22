@@ -42,8 +42,12 @@ body {
   font-size: 13px !important;
 }
 
+.ant-table-tbody > tr:nth-child(even) > td {
+  background: #f7f7f7 !important;
+}
+
 .ant-table-tbody > tr:hover > td {
-  background: #f9f9f9 !important;
+  background: #efefef !important;
 }
 
 .ant-collapse > .ant-collapse-item > .ant-collapse-header {

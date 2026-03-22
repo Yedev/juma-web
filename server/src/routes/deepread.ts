@@ -2,6 +2,7 @@ import { Router, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { signMiddleware } from "../middleware/sign";
 import { drAuthMiddleware, DrAuthRequest, signDrToken } from "../middleware/drAuth";
+import { chatWithArticle } from "../services/ai";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -316,7 +317,8 @@ router.get("/articles/:articleId", async (req: DrAuthRequest, res: Response): Pr
         summary: article.summary,
         coverUrl: article.coverUrl,
         layoutType: article.layoutType,
-        contentHtml: article.contentHtml,
+        content: article.content,
+        contentType: article.contentType,
         author: article.author,
         readCount: article.readCount + 1,
         publishedAt: article.publishedAt,
@@ -652,54 +654,14 @@ router.post("/ai/chat", async (req: DrAuthRequest, res: Response): Promise<void>
     }
 
     // Strip HTML tags to get plain text
-    const plainText = article.contentHtml.replace(/<[^>]*>/g, "").trim();
+    const plainText = article.content.replace(/<[^>]*>/g, "").replace(/[#*`]/g, "").trim();
 
-    const apiKey = process.env.ARK_API_KEY;
-    if (!apiKey) {
-      res.status(500).json({ code: 500, message: "AI 服务未配置" });
-      return;
-    }
-
-    // Use Volcengine Doubao API via REST (OpenAI compatible endpoint)
-    const doubaoRes = await fetch(
-      "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: "doubao-seed-2-0-pro-260215",
-          messages: [
-            {
-              role: "system",
-              content: "你是 DeepRead 阅读助手。基于以下文章内容回答用户的问题。",
-            },
-            {
-              role: "user",
-              content: `文章标题：${article.title}\n\n文章内容：\n${plainText.slice(0, 8000)}\n\n用户问题：${userMessage}`,
-            },
-          ],
-        }),
-      }
-    );
-
-    if (!doubaoRes.ok) {
-      console.error("Doubao API error:", doubaoRes.status, await doubaoRes.text());
-      res.status(500).json({ code: 500, message: "AI 服务暂不可用" });
-      return;
-    }
-
-    const doubaoData = (await doubaoRes.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const reply = doubaoData.choices?.[0]?.message?.content || "抱歉，无法生成回复";
+    const reply = await chatWithArticle(article.title, plainText, userMessage);
 
     res.json({
       code: 200,
       message: "success",
-      data: { reply },
+      data: { reply: reply || "抱歉，无法生成回复" },
     });
   } catch (error) {
     console.error("AI chat error:", error);

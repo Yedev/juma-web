@@ -1,6 +1,7 @@
 import { Router, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware, AuthRequest } from "../middleware/auth";
+import { beautifyToHtml } from "../services/ai";
 import { listRegisteredTasks } from "../services/taskRegistry";
 import { enqueueTaskByRegisteredName } from "../services/taskEnqueue";
 import { inferTaskTypeFromName, taskNameRuleText } from "../services/taskNaming";
@@ -928,14 +929,30 @@ router.get("/dr/articles", async (req: AuthRequest, res: Response): Promise<void
   }
 });
 
+router.get("/dr/articles/:articleId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const articleId = req.params.articleId as string;
+    const article = await prisma.drArticle.findUnique({ where: { articleId } });
+    if (!article) {
+      res.status(404).json({ code: 404, message: "文章不存在" });
+      return;
+    }
+    res.json({ code: 200, message: "success", data: article });
+  } catch (error) {
+    console.error("Admin get article detail error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
 router.post("/dr/articles", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { title, summary, coverUrl, contentHtml, spaceId, channelId, author, layoutType } =
+    const { title, summary, coverUrl, content, contentType, spaceId, channelId, author, layoutType } =
       req.body as {
         title?: string;
         summary?: string;
         coverUrl?: string;
-        contentHtml?: string;
+        content?: string;
+        contentType?: string;
         spaceId?: string;
         channelId?: string;
         author?: string;
@@ -956,7 +973,8 @@ router.post("/dr/articles", async (req: AuthRequest, res: Response): Promise<voi
         summary: summary?.trim() || "",
         coverUrl: coverUrl?.trim() || "",
         layoutType: layoutType || "default",
-        contentHtml: contentHtml || "",
+        content: content || "",
+        contentType: contentType || "html",
         author: author?.trim() || "",
       },
     });
@@ -971,7 +989,7 @@ router.post("/dr/articles", async (req: AuthRequest, res: Response): Promise<voi
 router.put("/dr/articles/:articleId", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const articleId = req.params.articleId as string;
-    const { title, summary, coverUrl, contentHtml, channelId, author, layoutType } =
+    const { title, summary, coverUrl, content, contentType, channelId, author, layoutType } =
       req.body as Record<string, string | undefined>;
 
     const existing = await prisma.drArticle.findUnique({ where: { articleId } });
@@ -984,7 +1002,8 @@ router.put("/dr/articles/:articleId", async (req: AuthRequest, res: Response): P
     if (title !== undefined) updateData.title = title.trim();
     if (summary !== undefined) updateData.summary = summary.trim();
     if (coverUrl !== undefined) updateData.coverUrl = coverUrl.trim();
-    if (contentHtml !== undefined) updateData.contentHtml = contentHtml;
+    if (content !== undefined) updateData.content = content;
+    if (contentType !== undefined) updateData.contentType = contentType;
     if (channelId !== undefined) updateData.channelId = channelId;
     if (author !== undefined) updateData.author = author.trim();
     if (layoutType !== undefined) updateData.layoutType = layoutType;
@@ -1100,6 +1119,300 @@ router.get("/dr/users/:userId", async (req: AuthRequest, res: Response): Promise
   } catch (error) {
     console.error("Admin get user error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── Space Homepage Modules ──────────────────────────────────
+
+const VALID_LAYOUT_TYPES = ["large_card", "horizontal_card", "vertical_card", "waterfall"] as const;
+type LayoutType = (typeof VALID_LAYOUT_TYPES)[number];
+
+router.get("/dr/spaces/:spaceId/homepage-modules", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const space = await prisma.drSpace.findUnique({ where: { spaceId } });
+    if (!space) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
+      return;
+    }
+
+    const modules = await prisma.drSpaceHomepageModule.findMany({
+      where: { spaceId },
+      orderBy: { sortOrder: "asc" },
+    });
+
+    const moduleIds = modules.map((m) => m.moduleId);
+    const resources = await prisma.drSpaceHomepageModuleResource.findMany({
+      where: { moduleId: { in: moduleIds } },
+      orderBy: { sortOrder: "asc" },
+    });
+
+    // Fetch resource details
+    const channelIds = resources.filter((r) => r.resourceType === "channel").map((r) => r.resourceId);
+    const articleIds = resources.filter((r) => r.resourceType === "article").map((r) => r.resourceId);
+
+    const [channels, articles] = await Promise.all([
+      channelIds.length > 0 ? prisma.drChannel.findMany({ where: { channelId: { in: channelIds } } }) : [],
+      articleIds.length > 0 ? prisma.drArticle.findMany({ where: { articleId: { in: articleIds } } }) : [],
+    ]);
+
+    const channelMap = new Map(channels.map((c) => [c.channelId, c]));
+    const articleMap = new Map(articles.map((a) => [a.articleId, a]));
+
+    const resourcesByModule = new Map<string, unknown[]>();
+    for (const r of resources) {
+      if (!resourcesByModule.has(r.moduleId)) resourcesByModule.set(r.moduleId, []);
+      let detail: unknown = null;
+      if (r.resourceType === "channel") detail = channelMap.get(r.resourceId) ?? null;
+      else if (r.resourceType === "article") detail = articleMap.get(r.resourceId) ?? null;
+      resourcesByModule.get(r.moduleId)!.push({ ...r, detail });
+    }
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: modules.map((m) => ({ ...m, resources: resourcesByModule.get(m.moduleId) ?? [] })),
+    });
+  } catch (error) {
+    console.error("Admin list homepage modules error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.post("/dr/spaces/:spaceId/homepage-modules", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const { title, subtitle, layoutType } = req.body as {
+      title?: string;
+      subtitle?: string;
+      layoutType?: string;
+    };
+
+    if (!title || !title.trim()) {
+      res.status(400).json({ code: 400, message: "模块标题不能为空" });
+      return;
+    }
+
+    if (layoutType && !VALID_LAYOUT_TYPES.includes(layoutType as LayoutType)) {
+      res.status(400).json({ code: 400, message: "无效的布局类型" });
+      return;
+    }
+
+    const space = await prisma.drSpace.findUnique({ where: { spaceId } });
+    if (!space) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
+      return;
+    }
+
+    const maxOrder = await prisma.drSpaceHomepageModule.findFirst({
+      where: { spaceId },
+      orderBy: { sortOrder: "desc" },
+      select: { sortOrder: true },
+    });
+
+    const module = await prisma.drSpaceHomepageModule.create({
+      data: {
+        moduleId: generateDrId("HM"),
+        spaceId,
+        title: title.trim(),
+        subtitle: subtitle?.trim() || "",
+        layoutType: (layoutType as LayoutType) || "large_card",
+        sortOrder: (maxOrder?.sortOrder ?? -1) + 1,
+      },
+    });
+
+    res.json({ code: 200, message: "模块已创建", data: module });
+  } catch (error) {
+    console.error("Admin create homepage module error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.put("/dr/homepage-modules/:moduleId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const moduleId = req.params.moduleId as string;
+    const { title, subtitle, layoutType } = req.body as {
+      title?: string;
+      subtitle?: string;
+      layoutType?: string;
+    };
+
+    const existing = await prisma.drSpaceHomepageModule.findUnique({ where: { moduleId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "模块不存在" });
+      return;
+    }
+
+    if (layoutType && !VALID_LAYOUT_TYPES.includes(layoutType as LayoutType)) {
+      res.status(400).json({ code: 400, message: "无效的布局类型" });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (title !== undefined) updateData.title = title.trim();
+    if (subtitle !== undefined) updateData.subtitle = subtitle.trim();
+    if (layoutType !== undefined) updateData.layoutType = layoutType;
+
+    const updated = await prisma.drSpaceHomepageModule.update({ where: { moduleId }, data: updateData });
+    res.json({ code: 200, message: "模块已更新", data: updated });
+  } catch (error) {
+    console.error("Admin update homepage module error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/dr/homepage-modules/:moduleId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const moduleId = req.params.moduleId as string;
+    const existing = await prisma.drSpaceHomepageModule.findUnique({ where: { moduleId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "模块不存在" });
+      return;
+    }
+
+    await prisma.drSpaceHomepageModuleResource.deleteMany({ where: { moduleId } });
+    await prisma.drSpaceHomepageModule.delete({ where: { moduleId } });
+    res.json({ code: 200, message: "模块已删除" });
+  } catch (error) {
+    console.error("Admin delete homepage module error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.put("/dr/spaces/:spaceId/homepage-modules/reorder", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const { moduleIds } = req.body as { moduleIds?: string[] };
+
+    if (!Array.isArray(moduleIds)) {
+      res.status(400).json({ code: 400, message: "moduleIds 必须是数组" });
+      return;
+    }
+
+    await Promise.all(
+      moduleIds.map((moduleId, index) =>
+        prisma.drSpaceHomepageModule.updateMany({
+          where: { moduleId, spaceId },
+          data: { sortOrder: index },
+        })
+      )
+    );
+
+    res.json({ code: 200, message: "排序已更新" });
+  } catch (error) {
+    console.error("Admin reorder homepage modules error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.post("/dr/homepage-modules/:moduleId/resources", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const moduleId = req.params.moduleId as string;
+    const { resourceType, resourceId } = req.body as { resourceType?: string; resourceId?: string };
+
+    if (!resourceType || !["channel", "article"].includes(resourceType)) {
+      res.status(400).json({ code: 400, message: "resourceType 必须是 channel 或 article" });
+      return;
+    }
+    if (!resourceId || !resourceId.trim()) {
+      res.status(400).json({ code: 400, message: "resourceId 不能为空" });
+      return;
+    }
+
+    const module = await prisma.drSpaceHomepageModule.findUnique({ where: { moduleId } });
+    if (!module) {
+      res.status(404).json({ code: 404, message: "模块不存在" });
+      return;
+    }
+
+    // Validate resource exists
+    if (resourceType === "channel") {
+      const ch = await prisma.drChannel.findUnique({ where: { channelId: resourceId } });
+      if (!ch) {
+        res.status(404).json({ code: 404, message: "频道不存在" });
+        return;
+      }
+    } else {
+      const art = await prisma.drArticle.findUnique({ where: { articleId: resourceId } });
+      if (!art) {
+        res.status(404).json({ code: 404, message: "文章不存在" });
+        return;
+      }
+    }
+
+    const maxOrder = await prisma.drSpaceHomepageModuleResource.findFirst({
+      where: { moduleId },
+      orderBy: { sortOrder: "desc" },
+      select: { sortOrder: true },
+    });
+
+    const resource = await prisma.drSpaceHomepageModuleResource.upsert({
+      where: { moduleId_resourceId: { moduleId, resourceId } },
+      create: {
+        moduleId,
+        resourceType,
+        resourceId,
+        sortOrder: (maxOrder?.sortOrder ?? -1) + 1,
+      },
+      update: { resourceType },
+    });
+
+    res.json({ code: 200, message: "资源已添加", data: resource });
+  } catch (error) {
+    console.error("Admin add module resource error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/dr/homepage-modules/:moduleId/resources/:resourceId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { moduleId, resourceId } = req.params as { moduleId: string; resourceId: string };
+
+    const existing = await prisma.drSpaceHomepageModuleResource.findUnique({
+      where: { moduleId_resourceId: { moduleId, resourceId } },
+    });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "资源不存在" });
+      return;
+    }
+
+    await prisma.drSpaceHomepageModuleResource.delete({
+      where: { moduleId_resourceId: { moduleId, resourceId } },
+    });
+    res.json({ code: 200, message: "资源已移除" });
+  } catch (error) {
+    console.error("Admin remove module resource error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── AI 工具 ──────────────────────────────────────────────────
+
+// AI 格式美化：将原始文本内容格式化为适合手机阅读的 HTML
+router.post("/ai/beautify", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { content } = req.body as { content?: string };
+
+    if (!content || !content.trim()) {
+      res.status(400).json({ code: 400, message: "内容不能为空" });
+      return;
+    }
+
+    if (content.length > 20000) {
+      res.status(400).json({ code: 400, message: "内容过长，请控制在 20000 字以内" });
+      return;
+    }
+
+    const html = await beautifyToHtml(content.trim());
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: { html },
+    });
+  } catch (error) {
+    console.error("AI beautify error:", error);
+    res.status(500).json({ code: 500, message: "AI 服务暂不可用，请稍后重试" });
   }
 });
 

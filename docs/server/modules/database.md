@@ -238,7 +238,8 @@ error/running → queued（重试时重置）
 | `summary` | String | — | `""` | 摘要 |
 | `coverUrl` | String | — | `""` | 封面图 URL |
 | `layoutType` | String | — | `"default"` | 布局类型 |
-| `contentHtml` | String | — | `""` | HTML 格式正文 |
+| `content` | String | — | `""` | 正文内容 |
+| `contentType` | String | — | `"html"` | 正文格式（html/markdown） |
 | `author` | String | — | `""` | 作者名称 |
 | `readCount` | Int | — | `0` | 累计阅读次数 |
 | `publishedAt` | DateTime | 默认 now() | — | 发布时间 |
@@ -249,7 +250,44 @@ error/running → queued（重试时重置）
 
 ---
 
-### 2.12 DrBookmark（收藏）
+### 2.12 DrSpaceHomepageModule（空间首页模块）
+
+**表名**：`dr_space_homepage_modules`
+
+| 字段 | 类型 | 约束 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `id` | Int | PK, 自增 | — | 内部 ID |
+| `moduleId` | String | 唯一 | — | 业务 ID（格式：HM + 时间戳 + 随机数） |
+| `spaceId` | String | — | — | 所属空间 ID |
+| `title` | String | — | — | 模块标题 |
+| `subtitle` | String | — | `""` | 副标题（小字说明） |
+| `layoutType` | String | — | `"large_card"` | 资源排列方式，支持：`large_card`（大图卡）、`horizontal_card`（横向卡）、`vertical_card`（纵向卡）、`waterfall`（瀑布流） |
+| `sortOrder` | Int | — | `0` | 排序权重（升序） |
+| `createdAt` | DateTime | 默认 now() | — | 创建时间 |
+| `updatedAt` | DateTime | 自动更新 | — | 最后更新时间 |
+
+**唯一约束**：`moduleId`
+
+---
+
+### 2.13 DrSpaceHomepageModuleResource（首页模块资源绑定）
+
+**表名**：`dr_space_homepage_module_resources`
+
+| 字段 | 类型 | 约束 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `id` | Int | PK, 自增 | — | 内部 ID |
+| `moduleId` | String | 联合唯一 | — | 所属模块 ID（DrSpaceHomepageModule.moduleId） |
+| `resourceType` | String | — | — | 资源类型：`channel`（频道）或 `article`（文章） |
+| `resourceId` | String | 联合唯一 | — | 资源 ID（channelId 或 articleId） |
+| `sortOrder` | Int | — | `0` | 资源在模块内的排序权重（升序） |
+| `createdAt` | DateTime | 默认 now() | — | 绑定时间 |
+
+**唯一约束**：`(moduleId, resourceId)` — 同一资源不能重复绑定到同一模块
+
+---
+
+### 2.14 DrBookmark（收藏）
 
 **表名**：`dr_bookmarks`
 
@@ -264,7 +302,7 @@ error/running → queued（重试时重置）
 
 ---
 
-### 2.13 DrReadStatus（阅读进度）
+### 2.16 DrReadStatus（阅读进度）
 
 **表名**：`dr_read_status`
 
@@ -280,7 +318,7 @@ error/running → queued（重试时重置）
 
 ---
 
-### 2.14 DrHighlight（批注）
+### 2.17 DrHighlight（批注）
 
 **表名**：`dr_highlights`
 
@@ -301,7 +339,7 @@ error/running → queued（重试时重置）
 
 ---
 
-### 2.15 DrCollection（合集）
+### 2.18 DrCollection（合集）
 
 **表名**：`dr_collections`
 
@@ -318,7 +356,7 @@ error/running → queued（重试时重置）
 
 ---
 
-### 2.16 DrCollectionArticle（合集文章关联）
+### 2.19 DrCollectionArticle（合集文章关联）
 
 **表名**：`dr_collection_articles`
 
@@ -349,7 +387,12 @@ DrUser ────────────────────────�
   ├──< DrSpaceMember >──── DrSpace                  │
   │     (spaceId+userId, unique)   │                 │
   │     role: admin/member         │                 │
-  │     inviteCodeId → DrInviteCode                 │
+  │     inviteCodeId → DrInviteCode│                 │
+  │                                │                 │
+  │                      DrSpaceHomepageModule       │
+  │                           │                      │
+  │                      DrSpaceHomepageModuleResource│
+  │                        (channel/article ref)     │
   │                                │                 │
   │                         DrChannel               │
   │                           │                      │
@@ -387,6 +430,8 @@ DrUser ────────────────────────�
 | DrInviteCode | `codeId`, `code` |
 | DrChannel | `channelId` |
 | DrArticle | `articleId` |
+| DrSpaceHomepageModule | `moduleId` |
+| DrSpaceHomepageModuleResource | `(moduleId, resourceId)` |
 | DrBookmark | `(userId, articleId)` |
 | DrReadStatus | `(userId, articleId)` |
 | DrHighlight | `highlightId` |

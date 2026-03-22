@@ -146,13 +146,38 @@ model DrArticle {
   summary     String   @default("")
   coverUrl    String   @default("") @map("cover_url")
   layoutType  String   @default("default") @map("layout_type")
-  contentHtml String   @default("") @map("content_html")
+  contentType String   @default("html") @map("content_type")
+  content     String   @default("") @map("content_html")
   author      String   @default("")
   readCount   Int      @default(0) @map("read_count")
   publishedAt DateTime @default(now()) @map("published_at")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
   @@map("dr_articles")
+}
+
+model DrSpaceHomepageModule {
+  id           Int      @id @default(autoincrement())
+  moduleId     String   @unique @map("module_id")
+  spaceId      String   @map("space_id")
+  title        String
+  subtitle     String   @default("")
+  layoutType   String   @default("large_card") @map("layout_type")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  @@map("dr_space_homepage_modules")
+}
+
+model DrSpaceHomepageModuleResource {
+  id           Int      @id @default(autoincrement())
+  moduleId     String   @map("module_id")
+  resourceType String   @map("resource_type")
+  resourceId   String   @map("resource_id")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  @@unique([moduleId, resourceId])
+  @@map("dr_space_homepage_module_resources")
 }
 
 model DrBookmark {

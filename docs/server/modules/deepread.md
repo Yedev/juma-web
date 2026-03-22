@@ -180,7 +180,7 @@ user = await prisma.drUser.create({
 | `summary` | string | 摘要 |
 | `coverUrl` | string | 封面图 URL |
 | `layoutType` | string | 布局类型（默认 "default"） |
-| `contentHtml` | string | HTML 格式的文章正文 |
+| `content` | string | HTML 或 Markdown 格式的文章正文 |
 | `author` | string | 作者名称 |
 | `readCount` | number | 总阅读次数（自动递增） |
 | `publishedAt` | DateTime | 发布时间 |
@@ -318,8 +318,8 @@ POST /api/v1/dr/ai/chat
 1. **模型**：`gemini-2.0-flash`（通过 REST API 调用）
 2. **API 端点**：`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}`
 3. **上下文处理**：
-   - 从数据库读取文章 `contentHtml`
-   - 去除所有 HTML 标签：`contentHtml.replace(/<[^>]*>/g, "").trim()`
+   - 从数据库读取文章 `content`
+   - 去除所有 HTML 标签：`content.replace(/<[^>]*>/g, "").trim()`
    - 截取前 8000 个字符（防止超出模型 token 限制）
 4. **Prompt 结构**：
    ```
