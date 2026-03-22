@@ -654,43 +654,47 @@ router.post("/ai/chat", async (req: DrAuthRequest, res: Response): Promise<void>
     // Strip HTML tags to get plain text
     const plainText = article.contentHtml.replace(/<[^>]*>/g, "").trim();
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = process.env.ARK_API_KEY;
     if (!apiKey) {
       res.status(500).json({ code: 500, message: "AI 服务未配置" });
       return;
     }
 
-    // Use Google Gemini API via REST
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(apiKey)}`,
+    // Use Volcengine Doubao API via REST (OpenAI compatible endpoint)
+    const doubaoRes = await fetch(
+      "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
         body: JSON.stringify({
-          contents: [
+          model: "doubao-seed-2-0-pro-260215",
+          messages: [
+            {
+              role: "system",
+              content: "你是 DeepRead 阅读助手。基于以下文章内容回答用户的问题。",
+            },
             {
               role: "user",
-              parts: [
-                {
-                  text: `你是 DeepRead 阅读助手。基于以下文章内容回答用户的问题。\n\n文章标题：${article.title}\n\n文章内容：\n${plainText.slice(0, 8000)}\n\n用户问题：${userMessage}`,
-                },
-              ],
+              content: `文章标题：${article.title}\n\n文章内容：\n${plainText.slice(0, 8000)}\n\n用户问题：${userMessage}`,
             },
           ],
         }),
       }
     );
 
-    if (!geminiRes.ok) {
-      console.error("Gemini API error:", geminiRes.status, await geminiRes.text());
+    if (!doubaoRes.ok) {
+      console.error("Doubao API error:", doubaoRes.status, await doubaoRes.text());
       res.status(500).json({ code: 500, message: "AI 服务暂不可用" });
       return;
     }
 
-    const geminiData = (await geminiRes.json()) as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    const doubaoData = (await doubaoRes.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
     };
-    const reply = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "抱歉，无法生成回复";
+    const reply = doubaoData.choices?.[0]?.message?.content || "抱歉，无法生成回复";
 
     res.json({
       code: 200,

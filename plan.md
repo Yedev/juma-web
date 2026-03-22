@@ -291,7 +291,7 @@ GET /api/v1/dr/collections
 
 ---
 
-## Phase 6：AI 对话接口（Gemini）
+## Phase 6：AI 对话接口（Doubao）
 
 #### 6.1 AI 对话
 ```
@@ -300,12 +300,11 @@ Body: { article_id: "xxx", message: "这篇文章的核心观点是什么？" }
 ```
 - 从数据库取出文章 `contentHtml`，剥离 HTML 标签提取纯文本
 - 构造 system prompt：你是 DeepRead 阅读助手，基于以下文章内容回答用户问题
-- 调用 Google Gemini API（`@google/genai`）
+- 调用 Volcengine Doubao API
 - 流式返回 → 本期先做非流式，返回完整回复
 
 **依赖**：
-- 安装 `@google/genai`
-- 环境变量：`GEMINI_API_KEY`
+- 环境变量：`ARK_API_KEY`
 
 ---
 

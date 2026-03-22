@@ -45,15 +45,27 @@ echo "🔨 构建镜像 (首次较慢，后续有缓存)..."
 echo ""
 docker build -t "$APP_NAME" .
 
+# 构建启动参数
+DOCKER_RUN_ARGS=(
+  -d
+  --name "$APP_NAME"
+  --restart unless-stopped
+  -p "${PORT}:3001"
+  -v "${DATA_DIR}:/app/data"
+)
+
+# 如果存在 .env 文件，则挂载环境变量
+if [ -f .env ]; then
+  echo "📄 发现 .env 文件，已加载环境变量..."
+  DOCKER_RUN_ARGS+=(--env-file .env)
+else
+  echo "⚠️ 未发现 .env 文件，将使用系统默认配置..."
+fi
+
 # 启动容器
 echo ""
 echo "🚀 启动容器..."
-docker run -d \
-  --name "$APP_NAME" \
-  --restart unless-stopped \
-  -p "${PORT}:3001" \
-  -v "${DATA_DIR}:/app/data" \
-  "$APP_NAME"
+docker run "${DOCKER_RUN_ARGS[@]}" "$APP_NAME"
 
 # 等待启动
 echo ""
