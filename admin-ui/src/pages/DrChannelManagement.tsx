@@ -13,6 +13,7 @@ interface ChannelRecord {
   channelId: string;
   spaceId: string;
   name: string;
+  coverUrl: string;
   sortOrder: number;
   articleCount: number;
   createdAt: string;
@@ -26,6 +27,7 @@ export default function DrChannelManagement() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<ChannelRecord | null>(null);
   const [formName, setFormName] = useState("");
+  const [formCoverUrl, setFormCoverUrl] = useState("");
   const [formSpaceId, setFormSpaceId] = useState<string | undefined>(undefined);
   const [formSort, setFormSort] = useState<number>(0);
   const [saving, setSaving] = useState(false);
@@ -70,6 +72,7 @@ export default function DrChannelManagement() {
   const openCreate = () => {
     setEditing(null);
     setFormName("");
+    setFormCoverUrl("");
     setFormSpaceId(selectedSpaceId);
     setFormSort(0);
     setModalOpen(true);
@@ -78,6 +81,7 @@ export default function DrChannelManagement() {
   const openEdit = (record: ChannelRecord) => {
     setEditing(record);
     setFormName(record.name);
+    setFormCoverUrl(record.coverUrl || "");
     setFormSpaceId(record.spaceId);
     setFormSort(record.sortOrder);
     setModalOpen(true);
@@ -93,6 +97,7 @@ export default function DrChannelManagement() {
       if (editing) {
         const res = await adminClient.put(`/api/admin/dr/channels/${editing.channelId}`, {
           name: formName.trim(),
+          coverUrl: formCoverUrl.trim(),
           sortOrder: formSort,
         });
         if (res.data.code === 200) {
@@ -108,6 +113,7 @@ export default function DrChannelManagement() {
         }
         const res = await adminClient.post("/api/admin/dr/channels", {
           name: formName.trim(),
+          coverUrl: formCoverUrl.trim(),
           spaceId: formSpaceId,
           sortOrder: formSort,
         });
@@ -165,6 +171,19 @@ export default function DrChannelManagement() {
       key: "spaceId",
       width: 140,
       render: (v: string) => spaceNameMap.get(v) || v,
+    },
+    {
+      title: "封面",
+      dataIndex: "coverUrl",
+      key: "coverUrl",
+      width: 60,
+      align: "center" as const,
+      render: (v: string) =>
+        v ? (
+          <img src={v} alt="cover" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 4 }} />
+        ) : (
+          <span style={{ color: "#ddd", fontSize: 11 }}>无</span>
+        ),
     },
     {
       title: "文章数",
@@ -254,6 +273,14 @@ export default function DrChannelManagement() {
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
               placeholder="请输入频道名称"
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>封面图片 URL</div>
+            <Input
+              value={formCoverUrl}
+              onChange={(e) => setFormCoverUrl(e.target.value)}
+              placeholder="https://example.com/cover.jpg"
             />
           </div>
           {!editing && (

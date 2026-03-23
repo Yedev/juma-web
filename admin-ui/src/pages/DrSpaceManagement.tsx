@@ -109,13 +109,20 @@ interface ArticleDetail {
   summary: string;
 }
 
+interface CollectionDetail {
+  collectionId: string;
+  name: string;
+  coverUrl: string;
+  description: string;
+}
+
 interface ModuleResource {
   id: number;
   moduleId: string;
-  resourceType: "channel" | "article";
+  resourceType: "channel" | "article" | "collection";
   resourceId: string;
   sortOrder: number;
-  detail: ChannelDetail | ArticleDetail | null;
+  detail: ChannelDetail | ArticleDetail | CollectionDetail | null;
 }
 
 interface HomepageModule {
@@ -138,6 +145,11 @@ interface ChannelOption {
 interface ArticleOption {
   articleId: string;
   title: string;
+}
+
+interface CollectionOption {
+  collectionId: string;
+  name: string;
 }
 
 export default function DrSpaceManagement() {
@@ -185,10 +197,11 @@ export default function DrSpaceManagement() {
   // Resource binding state
   const [resourceModalOpen, setResourceModalOpen] = useState(false);
   const [resourceTargetModule, setResourceTargetModule] = useState<HomepageModule | null>(null);
-  const [resourceType, setResourceType] = useState<"channel" | "article">("channel");
+  const [resourceType, setResourceType] = useState<"channel" | "article" | "collection">("channel");
   const [resourceId, setResourceId] = useState<string>("");
   const [channelOptions, setChannelOptions] = useState<ChannelOption[]>([]);
   const [articleOptions, setArticleOptions] = useState<ArticleOption[]>([]);
+  const [collectionOptions, setCollectionOptions] = useState<CollectionOption[]>([]);
   const [loadingOptions, setLoadingOptions] = useState(false);
   const [addingResource, setAddingResource] = useState(false);
 
@@ -478,12 +491,14 @@ export default function DrSpaceManagement() {
     setResourceModalOpen(true);
     setLoadingOptions(true);
     try {
-      const [chRes, artRes] = await Promise.all([
+      const [chRes, artRes, colRes] = await Promise.all([
         adminClient.get(`/api/admin/dr/channels?space_id=${homepageSpace.spaceId}`),
         adminClient.get(`/api/admin/dr/articles?space_id=${homepageSpace.spaceId}&page_size=200`),
+        adminClient.get(`/api/admin/dr/spaces/${homepageSpace.spaceId}/collections`),
       ]);
       if (chRes.data.code === 200) setChannelOptions(chRes.data.data ?? []);
       if (artRes.data.code === 200) setArticleOptions(artRes.data.data?.list ?? []);
+      if (colRes.data.code === 200) setCollectionOptions(colRes.data.data ?? []);
     } catch {
       message.error("加载资源选项失败");
     } finally {
@@ -952,8 +967,16 @@ export default function DrSpaceManagement() {
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     {mod.resources.map((r) => {
-                      const isChannel = r.resourceType === "channel";
-                      const detail = r.detail as (ChannelDetail & ArticleDetail) | null;
+                      const tagColor = r.resourceType === "channel" ? "geekblue" : r.resourceType === "collection" ? "purple" : "orange";
+                      const tagLabel = r.resourceType === "channel" ? "频道" : r.resourceType === "collection" ? "集合" : "文章";
+                      const detail = r.detail as (ChannelDetail & ArticleDetail & CollectionDetail) | null;
+                      const displayName = detail
+                        ? r.resourceType === "channel"
+                          ? detail.name
+                          : r.resourceType === "collection"
+                          ? detail.name
+                          : detail.title
+                        : r.resourceId;
                       return (
                         <div
                           key={r.resourceId}
@@ -967,11 +990,11 @@ export default function DrSpaceManagement() {
                             border: "1px solid #f0f0f0",
                           }}
                         >
-                          <Tag color={isChannel ? "geekblue" : "orange"} style={{ fontSize: 11, margin: 0 }}>
-                            {isChannel ? "频道" : "文章"}
+                          <Tag color={tagColor} style={{ fontSize: 11, margin: 0 }}>
+                            {tagLabel}
                           </Tag>
                           <span style={{ flex: 1, fontSize: 13, color: "#333" }}>
-                            {detail ? (isChannel ? detail.name : detail.title) : r.resourceId}
+                            {displayName}
                           </span>
                           <span style={{ fontFamily: "monospace", fontSize: 11, color: "#bbb" }}>
                             {r.resourceId}
@@ -1058,12 +1081,13 @@ export default function DrSpaceManagement() {
               options={[
                 { value: "channel", label: "频道" },
                 { value: "article", label: "文章" },
+                { value: "collection", label: "集合" },
               ]}
             />
           </div>
           <div>
             <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>
-              选择{resourceType === "channel" ? "频道" : "文章"}
+              选择{resourceType === "channel" ? "频道" : resourceType === "collection" ? "集合" : "文章"}
             </div>
             {loadingOptions ? (
               <div style={{ display: "flex", justifyContent: "center", padding: 12 }}>
@@ -1074,12 +1098,14 @@ export default function DrSpaceManagement() {
                 value={resourceId || undefined}
                 onChange={(v) => setResourceId(v)}
                 style={{ width: "100%" }}
-                placeholder={`请选择${resourceType === "channel" ? "频道" : "文章"}`}
+                placeholder={`请选择${resourceType === "channel" ? "频道" : resourceType === "collection" ? "集合" : "文章"}`}
                 showSearch
                 optionFilterProp="label"
                 options={
                   resourceType === "channel"
                     ? channelOptions.map((c) => ({ value: c.channelId, label: c.name }))
+                    : resourceType === "collection"
+                    ? collectionOptions.map((c) => ({ value: c.collectionId, label: c.name }))
                     : articleOptions.map((a) => ({ value: a.articleId, label: a.title }))
                 }
               />

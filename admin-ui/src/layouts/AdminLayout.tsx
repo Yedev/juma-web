@@ -8,6 +8,7 @@ import {
   BranchesOutlined,
   ReadOutlined,
   TeamOutlined,
+  FolderOutlined,
 } from "@ant-design/icons";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 
@@ -20,6 +21,7 @@ const menuItems: MenuItem[] = [
   { type: "divider", label: "DeepRead" },
   { key: "/dr/spaces", icon: <AppstoreOutlined />, label: "空间管理" },
   { key: "/dr/channels", icon: <BranchesOutlined />, label: "频道管理" },
+  { key: "/dr/collections", icon: <FolderOutlined />, label: "集合管理" },
   { key: "/dr/articles", icon: <ReadOutlined />, label: "文章管理" },
   { key: "/dr/users", icon: <TeamOutlined />, label: "用户管理" },
 ];
@@ -30,6 +32,7 @@ const pageTitle: Record<string, string> = {
   "/api-playground": "API接口说明",
   "/dr/spaces": "空间管理",
   "/dr/channels": "频道管理",
+  "/dr/collections": "集合管理",
   "/dr/articles": "文章管理",
   "/dr/users": "用户管理",
 };

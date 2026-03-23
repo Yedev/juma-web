@@ -283,13 +283,94 @@ curl -X POST "http://localhost:3001/api/admin/dr/spaces/S1000002/invite-codes" \
 | PUT | `/api/admin/dr/channels/:channelId` | 编辑频道 |
 | DELETE | `/api/admin/dr/channels/:channelId` | 删除频道 |
 
-**创建频道示例：**
+**频道数据字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `channelId` | string | 频道 ID |
+| `spaceId` | string | 所属空间 ID |
+| `name` | string | 频道名称 |
+| `coverUrl` | string | 封面图片 URL |
+| `sortOrder` | number | 排序值 |
+| `articleCount` | number | 文章数量 |
+| `createdAt` | string | 创建时间 |
+
+**创建/编辑频道请求体：**
 ```json
 {
   "space_id": "S1000002",
   "name": "AI 前沿",
+  "cover_url": "https://example.com/cover.jpg",
   "sort_order": 1
 }
+```
+
+---
+
+#### 空间集合（Space Collections）
+
+集合是空间内对文章的分组聚合，可作为首页资源展示。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/admin/dr/spaces/:spaceId/collections` | 集合列表（含文章数统计） |
+| POST | `/api/admin/dr/spaces/:spaceId/collections` | 创建集合 |
+| PUT | `/api/admin/dr/collections/:collectionId` | 编辑集合 |
+| DELETE | `/api/admin/dr/collections/:collectionId` | 删除集合（级联移除文章关联） |
+| GET | `/api/admin/dr/collections/:collectionId/articles` | 集合内文章列表 |
+| POST | `/api/admin/dr/collections/:collectionId/articles` | 向集合添加文章 |
+| DELETE | `/api/admin/dr/collections/:collectionId/articles/:articleId` | 从集合移除文章 |
+
+**集合数据字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `collectionId` | string | 集合 ID（SC 开头） |
+| `spaceId` | string | 所属空间 ID |
+| `name` | string | 集合名称 |
+| `description` | string | 集合描述 |
+| `coverUrl` | string | 封面图片 URL |
+| `sortOrder` | number | 排序值 |
+| `articleCount` | number | 文章数量（列表接口返回） |
+| `createdAt` | string | 创建时间 |
+| `updatedAt` | string | 更新时间 |
+
+**创建集合示例：**
+```bash
+curl -X POST "http://localhost:3001/api/admin/dr/spaces/S1000002/collections" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "入门必读",
+    "description": "适合新手的基础文章合集",
+    "coverUrl": "https://example.com/collection-cover.jpg"
+  }'
+```
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "集合已创建",
+  "data": {
+    "collectionId": "SC1709001234567",
+    "spaceId": "S1000002",
+    "name": "入门必读",
+    "description": "适合新手的基础文章合集",
+    "coverUrl": "https://example.com/collection-cover.jpg",
+    "sortOrder": 0,
+    "createdAt": "2026-03-01T12:00:00.000Z",
+    "updatedAt": "2026-03-01T12:00:00.000Z"
+  }
+}
+```
+
+**向集合添加文章：**
+```bash
+curl -X POST "http://localhost:3001/api/admin/dr/collections/SC1709001234567/articles" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{ "articleId": "A1000001" }'
 ```
 
 ---
@@ -316,6 +397,65 @@ curl -X POST "http://localhost:3001/api/admin/dr/spaces/S1000002/invite-codes" \
   "author": "张三",
   "published_at": "2026-03-01T08:00:00Z"
 }
+```
+
+---
+
+#### 首页模块（Homepage Modules）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/admin/dr/spaces/:spaceId/homepage-modules` | 模块列表（含资源详情） |
+| POST | `/api/admin/dr/spaces/:spaceId/homepage-modules` | 创建模块 |
+| PUT | `/api/admin/dr/homepage-modules/:moduleId` | 编辑模块 |
+| DELETE | `/api/admin/dr/homepage-modules/:moduleId` | 删除模块（级联删除资源绑定） |
+| PUT | `/api/admin/dr/spaces/:spaceId/homepage-modules/reorder` | 模块排序 |
+| POST | `/api/admin/dr/homepage-modules/:moduleId/resources` | 绑定资源到模块 |
+| DELETE | `/api/admin/dr/homepage-modules/:moduleId/resources/:resourceId` | 移除模块资源 |
+
+**模块数据字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `moduleId` | string | 模块 ID（HM 开头） |
+| `spaceId` | string | 所属空间 ID |
+| `title` | string | 模块标题 |
+| `subtitle` | string | 模块副标题 |
+| `layoutType` | string | 布局类型（见下） |
+| `sortOrder` | number | 排序值 |
+| `resources` | array | 绑定的资源列表 |
+
+**布局类型（layoutType）：**
+
+| 值 | 说明 |
+|----|------|
+| `large_card` | 大图卡（默认） |
+| `horizontal_card` | 横向卡 |
+| `vertical_card` | 纵向卡 |
+| `waterfall` | 瀑布流 |
+
+**资源类型（resourceType）：**
+
+| 值 | detail 字段说明 |
+|----|----------------|
+| `channel` | 返回 DrChannel 对象（含 coverUrl） |
+| `article` | 返回 DrArticle 概要（含 coverUrl、author、readCount 等） |
+| `collection` | 返回 DrSpaceCollection 对象（含 coverUrl、description） |
+
+**绑定资源示例：**
+```bash
+curl -X POST "http://localhost:3001/api/admin/dr/homepage-modules/HM1709001234567/resources" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{ "resourceType": "collection", "resourceId": "SC1709001234567" }'
+```
+
+**模块排序示例：**
+```bash
+curl -X PUT "http://localhost:3001/api/admin/dr/spaces/S1000002/homepage-modules/reorder" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{ "moduleIds": ["HM001", "HM003", "HM002"] }'
 ```
 
 ---

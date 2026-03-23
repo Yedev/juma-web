@@ -10,6 +10,7 @@ import DrSpaceManagement from "./pages/DrSpaceManagement";
 import DrChannelManagement from "./pages/DrChannelManagement";
 import DrArticleManagement from "./pages/DrArticleManagement";
 import DrUserManagement from "./pages/DrUserManagement";
+import DrCollectionManagement from "./pages/DrCollectionManagement";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem("juma_token");
@@ -72,6 +73,7 @@ function App() {
             <Route path="api-playground" element={<ApiPlayground />} />
             <Route path="dr/spaces" element={<DrSpaceManagement />} />
             <Route path="dr/channels" element={<DrChannelManagement />} />
+            <Route path="dr/collections" element={<DrCollectionManagement />} />
             <Route path="dr/articles" element={<DrArticleManagement />} />
             <Route path="dr/users" element={<DrUserManagement />} />
           </Route>
