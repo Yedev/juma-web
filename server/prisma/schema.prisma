@@ -132,6 +132,7 @@ model DrChannel {
   channelId String   @unique @map("channel_id")
   spaceId   String   @map("space_id")
   name      String
+  coverUrl  String   @default("") @map("cover_url")
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
   @@map("dr_channels")
@@ -230,4 +231,27 @@ model DrCollectionArticle {
   addedAt      DateTime @default(now()) @map("added_at")
   @@unique([collectionId, articleId])
   @@map("dr_collection_articles")
+}
+
+model DrSpaceCollection {
+  id           Int      @id @default(autoincrement())
+  collectionId String   @unique @map("collection_id")
+  spaceId      String   @map("space_id")
+  name         String
+  description  String   @default("")
+  coverUrl     String   @default("") @map("cover_url")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  @@map("dr_space_collections")
+}
+
+model DrSpaceCollectionArticle {
+  id           Int      @id @default(autoincrement())
+  collectionId String   @map("collection_id")
+  articleId    String   @map("article_id")
+  sortOrder    Int      @default(0) @map("sort_order")
+  addedAt      DateTime @default(now()) @map("added_at")
+  @@unique([collectionId, articleId])
+  @@map("dr_space_collection_articles")
 }

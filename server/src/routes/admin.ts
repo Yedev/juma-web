@@ -1150,14 +1150,17 @@ router.get("/dr/spaces/:spaceId/homepage-modules", async (req: AuthRequest, res:
     // Fetch resource details
     const channelIds = resources.filter((r) => r.resourceType === "channel").map((r) => r.resourceId);
     const articleIds = resources.filter((r) => r.resourceType === "article").map((r) => r.resourceId);
+    const collectionIds = resources.filter((r) => r.resourceType === "collection").map((r) => r.resourceId);
 
-    const [channels, articles] = await Promise.all([
+    const [channels, articles, collections] = await Promise.all([
       channelIds.length > 0 ? prisma.drChannel.findMany({ where: { channelId: { in: channelIds } } }) : [],
       articleIds.length > 0 ? prisma.drArticle.findMany({ where: { articleId: { in: articleIds } } }) : [],
+      collectionIds.length > 0 ? prisma.drSpaceCollection.findMany({ where: { collectionId: { in: collectionIds } } }) : [],
     ]);
 
     const channelMap = new Map(channels.map((c) => [c.channelId, c]));
     const articleMap = new Map(articles.map((a) => [a.articleId, a]));
+    const collectionMap = new Map(collections.map((c) => [c.collectionId, c]));
 
     const resourcesByModule = new Map<string, unknown[]>();
     for (const r of resources) {
@@ -1165,6 +1168,7 @@ router.get("/dr/spaces/:spaceId/homepage-modules", async (req: AuthRequest, res:
       let detail: unknown = null;
       if (r.resourceType === "channel") detail = channelMap.get(r.resourceId) ?? null;
       else if (r.resourceType === "article") detail = articleMap.get(r.resourceId) ?? null;
+      else if (r.resourceType === "collection") detail = collectionMap.get(r.resourceId) ?? null;
       resourcesByModule.get(r.moduleId)!.push({ ...r, detail });
     }
 
@@ -1310,8 +1314,8 @@ router.post("/dr/homepage-modules/:moduleId/resources", async (req: AuthRequest,
     const moduleId = req.params.moduleId as string;
     const { resourceType, resourceId } = req.body as { resourceType?: string; resourceId?: string };
 
-    if (!resourceType || !["channel", "article"].includes(resourceType)) {
-      res.status(400).json({ code: 400, message: "resourceType 必须是 channel 或 article" });
+    if (!resourceType || !["channel", "article", "collection"].includes(resourceType)) {
+      res.status(400).json({ code: 400, message: "resourceType 必须是 channel、article 或 collection" });
       return;
     }
     if (!resourceId || !resourceId.trim()) {
@@ -1332,10 +1336,16 @@ router.post("/dr/homepage-modules/:moduleId/resources", async (req: AuthRequest,
         res.status(404).json({ code: 404, message: "频道不存在" });
         return;
       }
-    } else {
+    } else if (resourceType === "article") {
       const art = await prisma.drArticle.findUnique({ where: { articleId: resourceId } });
       if (!art) {
         res.status(404).json({ code: 404, message: "文章不存在" });
+        return;
+      }
+    } else {
+      const col = await prisma.drSpaceCollection.findUnique({ where: { collectionId: resourceId } });
+      if (!col) {
+        res.status(404).json({ code: 404, message: "集合不存在" });
         return;
       }
     }
@@ -1382,6 +1392,215 @@ router.delete("/dr/homepage-modules/:moduleId/resources/:resourceId", async (req
     res.json({ code: 200, message: "资源已移除" });
   } catch (error) {
     console.error("Admin remove module resource error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── Space Collections ──────────────────────────────────────────
+
+router.get("/dr/spaces/:spaceId/collections", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const space = await prisma.drSpace.findUnique({ where: { spaceId } });
+    if (!space) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
+      return;
+    }
+
+    const collections = await prisma.drSpaceCollection.findMany({
+      where: { spaceId },
+      orderBy: { sortOrder: "asc" },
+    });
+
+    const collectionIds = collections.map((c) => c.collectionId);
+    const counts = await prisma.drSpaceCollectionArticle.groupBy({
+      by: ["collectionId"],
+      where: { collectionId: { in: collectionIds } },
+      _count: { articleId: true },
+    });
+    const countMap = new Map(counts.map((c) => [c.collectionId, c._count.articleId]));
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: collections.map((c) => ({ ...c, articleCount: countMap.get(c.collectionId) ?? 0 })),
+    });
+  } catch (error) {
+    console.error("Admin list space collections error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.post("/dr/spaces/:spaceId/collections", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const { name, description, coverUrl } = req.body as { name?: string; description?: string; coverUrl?: string };
+
+    if (!name || !name.trim()) {
+      res.status(400).json({ code: 400, message: "集合名称不能为空" });
+      return;
+    }
+
+    const space = await prisma.drSpace.findUnique({ where: { spaceId } });
+    if (!space) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
+      return;
+    }
+
+    const maxOrder = await prisma.drSpaceCollection.findFirst({
+      where: { spaceId },
+      orderBy: { sortOrder: "desc" },
+      select: { sortOrder: true },
+    });
+
+    const collection = await prisma.drSpaceCollection.create({
+      data: {
+        collectionId: generateDrId("SC"),
+        spaceId,
+        name: name.trim(),
+        description: description?.trim() || "",
+        coverUrl: coverUrl?.trim() || "",
+        sortOrder: (maxOrder?.sortOrder ?? -1) + 1,
+      },
+    });
+
+    res.json({ code: 200, message: "集合已创建", data: collection });
+  } catch (error) {
+    console.error("Admin create space collection error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.put("/dr/collections/:collectionId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const collectionId = req.params.collectionId as string;
+    const { name, description, coverUrl } = req.body as { name?: string; description?: string; coverUrl?: string };
+
+    const existing = await prisma.drSpaceCollection.findUnique({ where: { collectionId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "集合不存在" });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (name !== undefined) updateData.name = name.trim();
+    if (description !== undefined) updateData.description = description.trim();
+    if (coverUrl !== undefined) updateData.coverUrl = coverUrl.trim();
+
+    const updated = await prisma.drSpaceCollection.update({ where: { collectionId }, data: updateData });
+    res.json({ code: 200, message: "集合已更新", data: updated });
+  } catch (error) {
+    console.error("Admin update space collection error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/dr/collections/:collectionId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const collectionId = req.params.collectionId as string;
+    const existing = await prisma.drSpaceCollection.findUnique({ where: { collectionId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "集合不存在" });
+      return;
+    }
+
+    await prisma.drSpaceCollectionArticle.deleteMany({ where: { collectionId } });
+    await prisma.drSpaceCollection.delete({ where: { collectionId } });
+    res.json({ code: 200, message: "集合已删除" });
+  } catch (error) {
+    console.error("Admin delete space collection error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.get("/dr/collections/:collectionId/articles", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const collectionId = req.params.collectionId as string;
+    const existing = await prisma.drSpaceCollection.findUnique({ where: { collectionId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "集合不存在" });
+      return;
+    }
+
+    const items = await prisma.drSpaceCollectionArticle.findMany({
+      where: { collectionId },
+      orderBy: { sortOrder: "asc" },
+    });
+
+    const articleIds = items.map((i) => i.articleId);
+    const articles = articleIds.length > 0 ? await prisma.drArticle.findMany({ where: { articleId: { in: articleIds } } }) : [];
+    const articleMap = new Map(articles.map((a) => [a.articleId, a]));
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: items.map((i) => ({ ...i, article: articleMap.get(i.articleId) ?? null })),
+    });
+  } catch (error) {
+    console.error("Admin list collection articles error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.post("/dr/collections/:collectionId/articles", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const collectionId = req.params.collectionId as string;
+    const { articleId } = req.body as { articleId?: string };
+
+    if (!articleId || !articleId.trim()) {
+      res.status(400).json({ code: 400, message: "articleId 不能为空" });
+      return;
+    }
+
+    const collection = await prisma.drSpaceCollection.findUnique({ where: { collectionId } });
+    if (!collection) {
+      res.status(404).json({ code: 404, message: "集合不存在" });
+      return;
+    }
+
+    const article = await prisma.drArticle.findUnique({ where: { articleId } });
+    if (!article) {
+      res.status(404).json({ code: 404, message: "文章不存在" });
+      return;
+    }
+
+    const maxOrder = await prisma.drSpaceCollectionArticle.findFirst({
+      where: { collectionId },
+      orderBy: { sortOrder: "desc" },
+      select: { sortOrder: true },
+    });
+
+    const item = await prisma.drSpaceCollectionArticle.upsert({
+      where: { collectionId_articleId: { collectionId, articleId } },
+      create: { collectionId, articleId, sortOrder: (maxOrder?.sortOrder ?? -1) + 1 },
+      update: {},
+    });
+
+    res.json({ code: 200, message: "文章已加入集合", data: item });
+  } catch (error) {
+    console.error("Admin add article to collection error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/dr/collections/:collectionId/articles/:articleId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { collectionId, articleId } = req.params as { collectionId: string; articleId: string };
+
+    const existing = await prisma.drSpaceCollectionArticle.findUnique({
+      where: { collectionId_articleId: { collectionId, articleId } },
+    });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "文章不在该集合中" });
+      return;
+    }
+
+    await prisma.drSpaceCollectionArticle.delete({
+      where: { collectionId_articleId: { collectionId, articleId } },
+    });
+    res.json({ code: 200, message: "文章已从集合移除" });
+  } catch (error) {
+    console.error("Admin remove article from collection error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });

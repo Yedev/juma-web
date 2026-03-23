@@ -666,9 +666,10 @@ router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response
     // Collect IDs
     const channelIds = resources.filter((r) => r.resourceType === "channel").map((r) => r.resourceId);
     const articleIds = resources.filter((r) => r.resourceType === "article").map((r) => r.resourceId);
+    const collectionIds = resources.filter((r) => r.resourceType === "collection").map((r) => r.resourceId);
 
     // Fetch details + user state in parallel
-    const [channels, articles, bookmarks, readStatuses] = await Promise.all([
+    const [channels, articles, collectionsData, bookmarks, readStatuses] = await Promise.all([
       channelIds.length > 0 ? prisma.drChannel.findMany({ where: { channelId: { in: channelIds } } }) : [],
       articleIds.length > 0
         ? prisma.drArticle.findMany({
@@ -686,6 +687,9 @@ router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response
             },
           })
         : [],
+      collectionIds.length > 0
+        ? prisma.drSpaceCollection.findMany({ where: { collectionId: { in: collectionIds } } })
+        : [],
       articleIds.length > 0
         ? prisma.drBookmark.findMany({ where: { userId: req.drUserId!, articleId: { in: articleIds } } })
         : [],
@@ -696,6 +700,7 @@ router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response
 
     const channelMap = new Map(channels.map((c) => [c.channelId, c]));
     const articleMap = new Map(articles.map((a) => [a.articleId, a]));
+    const collectionMap = new Map(collectionsData.map((c) => [c.collectionId, c]));
     const bookmarkSet = new Set(bookmarks.map((b) => b.articleId));
     const readMap = new Map(readStatuses.map((r) => [r.articleId, r.progress]));
 
@@ -715,6 +720,8 @@ router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response
             readProgress: readMap.get(a.articleId) ?? 0,
           };
         }
+      } else if (r.resourceType === "collection") {
+        detail = collectionMap.get(r.resourceId) ?? null;
       }
       resourcesByModule.get(r.moduleId)!.push({
         resourceType: r.resourceType,
