@@ -54,6 +54,68 @@
 
 ---
 
+### GET /api/v1/dr/spaces/:spaceId/homepage
+
+获取空间首页模块列表（含资源详情）。需要用户 JWT。
+
+**路径参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `spaceId` | 空间 ID |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "moduleId": "HM1000001",
+      "title": "编辑推荐",
+      "subtitle": "本周精选",
+      "layoutType": "large_card",
+      "sortOrder": 0,
+      "resources": [
+        {
+          "resourceType": "article",
+          "resourceId": "A1000001",
+          "sortOrder": 0,
+          "detail": {
+            "articleId": "A1000001",
+            "channelId": "C1000001",
+            "title": "AI 时代的教育变革",
+            "summary": "探讨人工智能对教育的深远影响",
+            "coverUrl": "https://example.com/cover.jpg",
+            "layoutType": "default",
+            "author": "李四",
+            "readCount": 128,
+            "publishedAt": "2026-03-01T08:00:00.000Z",
+            "bookmarked": false,
+            "readProgress": 0
+          }
+        },
+        {
+          "resourceType": "channel",
+          "resourceId": "C1000001",
+          "sortOrder": 1,
+          "detail": {
+            "channelId": "C1000001",
+            "spaceId": "S1000001",
+            "name": "科技前沿",
+            "sortOrder": 0
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+`layoutType` 决定客户端渲染样式，取值由管理员在后台配置（如 `large_card`、`small_card` 等）。
+
+---
+
 ### POST /api/v1/dr/space/join
 
 通过邀请码加入空间。需要用户 JWT。
@@ -69,16 +131,20 @@
   "code": 200,
   "message": "加入成功",
   "data": {
-    "space_id": "S1000001",
-    "space_name": "DeepRead 精选"
+    "spaceId": "S1000001",
+    "name": "DeepRead 精选",
+    "description": "DeepRead 官方精选阅读空间"
   }
 }
 ```
 
+> 若用户已是该空间成员，返回 200 `"您已是该空间成员"` 而不报错。
+
 **错误情况：**
 ```json
-{ "code": 400, "message": "邀请码无效或已过期" }
-{ "code": 400, "message": "已加入该空间" }
+{ "code": 404, "message": "邀请码无效" }
+{ "code": 400, "message": "邀请码已过期" }
+{ "code": 400, "message": "邀请码使用次数已达上限" }
 ```
 
 ---
@@ -100,23 +166,27 @@
 ```json
 {
   "code": 200,
+  "message": "success",
   "data": {
-    "articles": [
+    "list": [
       {
         "articleId": "A1000001",
+        "spaceId": "S1000001",
+        "channelId": "C1000001",
         "title": "AI 时代的教育变革",
         "summary": "探讨人工智能对教育的深远影响",
         "coverUrl": "https://example.com/cover.jpg",
+        "layoutType": "default",
         "author": "李四",
         "readCount": 128,
         "publishedAt": "2026-03-01T08:00:00.000Z",
-        "isBookmarked": true,
+        "bookmarked": true,
         "readProgress": 75
       }
     ],
     "total": 24,
     "page": 1,
-    "page_size": 20
+    "pageSize": 20
   }
 }
 ```
@@ -131,6 +201,7 @@
 ```json
 {
   "code": 200,
+  "message": "success",
   "data": {
     "articleId": "A1000001",
     "spaceId": "S1000001",
@@ -138,22 +209,14 @@
     "title": "AI 时代的教育变革",
     "summary": "探讨人工智能对教育的深远影响",
     "coverUrl": "https://example.com/cover.jpg",
+    "layoutType": "default",
     "content": "<h1>AI 时代的教育变革</h1><p>...</p>",
     "contentType": "html",
     "author": "李四",
     "readCount": 129,
     "publishedAt": "2026-03-01T08:00:00.000Z",
-    "isBookmarked": true,
-    "readProgress": 75,
-    "highlights": [
-      {
-        "highlightId": "H1000001",
-        "text": "AI 技术正在重新定义教育",
-        "color": "#FFEB3B",
-        "positionData": { "paragraph": 1, "offset": 10, "length": 12 },
-        "note": "核心观点"
-      }
-    ]
+    "bookmarked": true,
+    "readProgress": 75
   }
 }
 ```
@@ -171,7 +234,8 @@
 
 **响应示例：**
 ```json
-{ "code": 200, "message": "已收藏", "data": { "bookmarked": true } }
+{ "code": 200, "message": "已收藏" }
+// 取消收藏时 message 为 "已取消收藏"
 ```
 
 ---
@@ -187,7 +251,12 @@
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `progress` | number | 阅读进度百分比（0-100） |
+| `progress` | number | 阅读进度百分比（0-100），不传则默认 100（标记已读） |
+
+**响应示例：**
+```json
+{ "code": 200, "message": "已标记" }
+```
 
 ---
 
@@ -222,10 +291,14 @@
 ```json
 {
   "code": 200,
+  "message": "批注已创建",
   "data": {
     "highlightId": "H1000002",
+    "articleId": "A1000001",
     "text": "AI 技术正在重新定义我们对教育的理解",
     "color": "#FFEB3B",
+    "positionData": { "paragraph": 1, "offset": 10, "length": 20 },
+    "note": "这个观点很有启发",
     "createdAt": "2026-03-01T12:30:00.000Z"
   }
 }
@@ -245,11 +318,30 @@
 }
 ```
 
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "批注已更新",
+  "data": {
+    "highlightId": "H1000002",
+    "color": "#FF5722",
+    "note": "修改后的笔记内容",
+    "updatedAt": "2026-03-01T13:00:00.000Z"
+  }
+}
+```
+
 ---
 
 ### DELETE /api/v1/dr/highlights/:highlightId
 
 删除批注。需要用户 JWT（只能删除自己的批注）。
+
+**响应示例：**
+```json
+{ "code": 200, "message": "批注已删除" }
+```
 
 ---
 
@@ -263,68 +355,23 @@
 |------|------|------|------|
 | `article_id` | string | 是 | 文章 ID |
 
----
-
-### POST /api/v1/dr/collections
-
-创建合集。需要用户 JWT。
-
-**请求体：**
-```json
-{ "name": "AI 专题精选" }
-```
-
 **响应示例：**
 ```json
 {
   "code": 200,
-  "data": {
-    "collectionId": "COL1000001",
-    "name": "AI 专题精选",
-    "createdAt": "2026-03-01T12:00:00.000Z"
-  }
-}
-```
-
----
-
-### PUT /api/v1/dr/collections/:collectionId/articles
-
-向合集添加或移除文章。需要用户 JWT。
-
-**请求体：**
-```json
-{
-  "article_id": "A1000001",
-  "action": "add"
-}
-```
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `article_id` | string | 文章 ID |
-| `action` | string | `add`（添加）或 `remove`（移除） |
-
----
-
-### GET /api/v1/dr/collections
-
-获取用户的合集列表（含文章数）。需要用户 JWT。
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "data": {
-    "collections": [
-      {
-        "collectionId": "COL1000001",
-        "name": "AI 专题精选",
-        "articleCount": 8,
-        "createdAt": "2026-03-01T12:00:00.000Z"
-      }
-    ]
-  }
+  "message": "success",
+  "data": [
+    {
+      "highlightId": "H1000001",
+      "articleId": "A1000001",
+      "text": "AI 技术正在重新定义教育",
+      "color": "#FFEB3B",
+      "positionData": { "paragraph": 1, "offset": 10, "length": 12 },
+      "note": "核心观点",
+      "createdAt": "2026-03-01T10:00:00.000Z",
+      "updatedAt": "2026-03-01T10:00:00.000Z"
+    }
+  ]
 }
 ```
 
@@ -346,6 +393,7 @@
 ```json
 {
   "code": 200,
+  "message": "success",
   "data": {
     "reply": "这篇文章的核心观点是：AI 技术将从三个维度重塑教育体系——个性化学习路径、实时反馈机制和跨语言教学壁垒消除。作者认为..."
   }
