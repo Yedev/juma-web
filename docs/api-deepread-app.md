@@ -54,6 +54,68 @@
 
 ---
 
+### GET /api/v1/dr/spaces/:spaceId/homepage
+
+获取空间首页模块列表（含资源详情）。需要用户 JWT。
+
+**路径参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `spaceId` | 空间 ID |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "moduleId": "HM1000001",
+      "title": "编辑推荐",
+      "subtitle": "本周精选",
+      "layoutType": "large_card",
+      "sortOrder": 0,
+      "resources": [
+        {
+          "resourceType": "article",
+          "resourceId": "A1000001",
+          "sortOrder": 0,
+          "detail": {
+            "articleId": "A1000001",
+            "channelId": "C1000001",
+            "title": "AI 时代的教育变革",
+            "summary": "探讨人工智能对教育的深远影响",
+            "coverUrl": "https://example.com/cover.jpg",
+            "layoutType": "default",
+            "author": "李四",
+            "readCount": 128,
+            "publishedAt": "2026-03-01T08:00:00.000Z",
+            "bookmarked": false,
+            "readProgress": 0
+          }
+        },
+        {
+          "resourceType": "channel",
+          "resourceId": "C1000001",
+          "sortOrder": 1,
+          "detail": {
+            "channelId": "C1000001",
+            "spaceId": "S1000001",
+            "name": "科技前沿",
+            "sortOrder": 0
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+`layoutType` 决定客户端渲染样式，取值由管理员在后台配置（如 `large_card`、`small_card` 等）。
+
+---
+
 ### POST /api/v1/dr/space/join
 
 通过邀请码加入空间。需要用户 JWT。

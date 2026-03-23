@@ -631,6 +631,117 @@ router.get("/collections", async (req: DrAuthRequest, res: Response): Promise<vo
   }
 });
 
+// ── Space Homepage ───────────────────────────────────────
+
+// Get space homepage modules with resources
+router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+
+    // Check membership
+    const member = await prisma.drSpaceMember.findUnique({
+      where: { spaceId_userId: { spaceId, userId: req.drUserId! } },
+    });
+    if (!member) {
+      res.status(403).json({ code: 403, message: "您不是该空间的成员" });
+      return;
+    }
+
+    const modules = await prisma.drSpaceHomepageModule.findMany({
+      where: { spaceId },
+      orderBy: { sortOrder: "asc" },
+    });
+
+    if (modules.length === 0) {
+      res.json({ code: 200, message: "success", data: [] });
+      return;
+    }
+
+    const moduleIds = modules.map((m) => m.moduleId);
+    const resources = await prisma.drSpaceHomepageModuleResource.findMany({
+      where: { moduleId: { in: moduleIds } },
+      orderBy: { sortOrder: "asc" },
+    });
+
+    // Collect IDs
+    const channelIds = resources.filter((r) => r.resourceType === "channel").map((r) => r.resourceId);
+    const articleIds = resources.filter((r) => r.resourceType === "article").map((r) => r.resourceId);
+
+    // Fetch details + user state in parallel
+    const [channels, articles, bookmarks, readStatuses] = await Promise.all([
+      channelIds.length > 0 ? prisma.drChannel.findMany({ where: { channelId: { in: channelIds } } }) : [],
+      articleIds.length > 0
+        ? prisma.drArticle.findMany({
+            where: { articleId: { in: articleIds } },
+            select: {
+              articleId: true,
+              channelId: true,
+              title: true,
+              summary: true,
+              coverUrl: true,
+              layoutType: true,
+              author: true,
+              readCount: true,
+              publishedAt: true,
+            },
+          })
+        : [],
+      articleIds.length > 0
+        ? prisma.drBookmark.findMany({ where: { userId: req.drUserId!, articleId: { in: articleIds } } })
+        : [],
+      articleIds.length > 0
+        ? prisma.drReadStatus.findMany({ where: { userId: req.drUserId!, articleId: { in: articleIds } } })
+        : [],
+    ]);
+
+    const channelMap = new Map(channels.map((c) => [c.channelId, c]));
+    const articleMap = new Map(articles.map((a) => [a.articleId, a]));
+    const bookmarkSet = new Set(bookmarks.map((b) => b.articleId));
+    const readMap = new Map(readStatuses.map((r) => [r.articleId, r.progress]));
+
+    // Group resources by module
+    const resourcesByModule = new Map<string, unknown[]>();
+    for (const r of resources) {
+      if (!resourcesByModule.has(r.moduleId)) resourcesByModule.set(r.moduleId, []);
+      let detail: unknown = null;
+      if (r.resourceType === "channel") {
+        detail = channelMap.get(r.resourceId) ?? null;
+      } else if (r.resourceType === "article") {
+        const a = articleMap.get(r.resourceId);
+        if (a) {
+          detail = {
+            ...a,
+            bookmarked: bookmarkSet.has(a.articleId),
+            readProgress: readMap.get(a.articleId) ?? 0,
+          };
+        }
+      }
+      resourcesByModule.get(r.moduleId)!.push({
+        resourceType: r.resourceType,
+        resourceId: r.resourceId,
+        sortOrder: r.sortOrder,
+        detail,
+      });
+    }
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: modules.map((m) => ({
+        moduleId: m.moduleId,
+        title: m.title,
+        subtitle: m.subtitle,
+        layoutType: m.layoutType,
+        sortOrder: m.sortOrder,
+        resources: resourcesByModule.get(m.moduleId) ?? [],
+      })),
+    });
+  } catch (error) {
+    console.error("Get homepage error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
 // ── AI Chat (Phase 6) ────────────────────────────────────
 
 router.post("/ai/chat", async (req: DrAuthRequest, res: Response): Promise<void> => {
