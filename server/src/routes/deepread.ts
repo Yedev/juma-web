@@ -631,6 +631,73 @@ router.get("/collections", async (req: DrAuthRequest, res: Response): Promise<vo
   }
 });
 
+// 5.4 Get space collection articles
+router.get("/spaces/:spaceId/collections/:collectionId/articles", async (req: DrAuthRequest, res: Response): Promise<void> => {
+  try {
+    const { spaceId, collectionId } = req.params as { spaceId: string; collectionId: string };
+
+    // Check space membership
+    const member = await prisma.drSpaceMember.findUnique({
+      where: { spaceId_userId: { spaceId, userId: req.drUserId! } },
+    });
+    if (!member) {
+      res.status(403).json({ code: 403, message: "您不是该空间的成员" });
+      return;
+    }
+
+    // Check collection belongs to the space
+    const collection = await prisma.drSpaceCollection.findUnique({ where: { collectionId } });
+    if (!collection || collection.spaceId !== spaceId) {
+      res.status(404).json({ code: 404, message: "合集不存在" });
+      return;
+    }
+
+    const items = await prisma.drSpaceCollectionArticle.findMany({
+      where: { collectionId },
+      orderBy: { sortOrder: "asc" },
+    });
+
+    const articleIds = items.map((i) => i.articleId);
+    const articles =
+      articleIds.length > 0
+        ? await prisma.drArticle.findMany({
+            where: { articleId: { in: articleIds } },
+            select: {
+              articleId: true,
+              channelId: true,
+              title: true,
+              summary: true,
+              coverUrl: true,
+              layoutType: true,
+              author: true,
+              readCount: true,
+              publishedAt: true,
+            },
+          })
+        : [];
+    const articleMap = new Map(articles.map((a) => [a.articleId, a]));
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        collectionId: collection.collectionId,
+        name: collection.name,
+        description: collection.description,
+        coverUrl: collection.coverUrl,
+        articles: items.map((i) => ({
+          sortOrder: i.sortOrder,
+          addedAt: i.addedAt,
+          article: articleMap.get(i.articleId) ?? null,
+        })),
+      },
+    });
+  } catch (error) {
+    console.error("Get space collection articles error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
 // ── Space Homepage ───────────────────────────────────────
 
 // Get space homepage modules with resources

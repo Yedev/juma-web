@@ -517,3 +517,57 @@
 { "code": 404, "message": "合集不存在" }
 { "code": 403, "message": "无权操作他人的合集" }
 ```
+
+---
+
+## 空间合集
+
+> 空间合集由管理员创建并维护，用户加入空间后可通过首页模块入口访问合集内的文章。所有接口需要用户 JWT，且用户必须是对应空间的成员。
+
+### GET /api/v1/dr/spaces/:spaceId/collections/:collectionId/articles
+
+获取空间合集内的文章列表（按 sortOrder 升序）。
+
+**路径参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `spaceId` | 空间 ID |
+| `collectionId` | 合集 ID（首页 homepage 接口中 `resourceType: "collection"` 对应的 `resourceId`） |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "collectionId": "SC1000001",
+    "name": "AI 专题精选",
+    "description": "精选 AI 领域深度好文",
+    "coverUrl": "https://example.com/cover.jpg",
+    "articles": [
+      {
+        "sortOrder": 0,
+        "addedAt": "2026-03-20T08:00:00.000Z",
+        "article": {
+          "articleId": "A1000001",
+          "channelId": "CH1000001",
+          "title": "大模型的未来",
+          "summary": "深度解析大语言模型的发展趋势",
+          "coverUrl": "https://example.com/article-cover.jpg",
+          "layoutType": "standard",
+          "author": "张三",
+          "readCount": 1200,
+          "publishedAt": "2026-03-18T10:00:00.000Z"
+        }
+      }
+    ]
+  }
+}
+```
+
+**错误情况：**
+```json
+{ "code": 403, "message": "您不是该空间的成员" }
+{ "code": 404, "message": "合集不存在" }
+```
