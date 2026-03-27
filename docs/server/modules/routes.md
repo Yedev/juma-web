@@ -412,12 +412,6 @@ GET /api/v1/app/task/status?task_id=T17111234567890001
 | `PUT` | `/api/v1/dr/collections/:collectionId/articles` | 向合集添加或移除文章（action: "add"/"remove"） |
 | `GET` | `/api/v1/dr/collections` | 获取当前用户的合集列表（含文章数） |
 
-#### AI 对话
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `POST` | `/api/v1/dr/ai/chat` | 基于文章内容的 AI 问答（Gemini 2.0 Flash） |
-
 ### 关键接口详解
 
 #### POST /api/v1/dr/sms/send
@@ -518,26 +512,3 @@ GET /api/v1/dr/articles?space_id=S1000001&channel_id=CH1000001&page=1&page_size=
 
 `action` 为 `"add"` 或 `"remove"`。操作失败如越权（非本人合集）返回 403。
 
-#### POST /api/v1/dr/ai/chat
-
-**请求体**：
-```json
-{
-  "article_id": "A1000001",
-  "message": "这篇文章的主要观点是什么？"
-}
-```
-
-**响应**：
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": { "reply": "本文主要探讨了..." }
-}
-```
-
-- 需要 `GEMINI_API_KEY` 环境变量，否则返回 500
-- 使用模型：`gemini-2.0-flash`
-- 文章内容先去除 HTML 标签，截取前 8000 个字符作为上下文
-- System prompt：`你是 DeepRead 阅读助手。基于以下文章内容回答用户的问题。`

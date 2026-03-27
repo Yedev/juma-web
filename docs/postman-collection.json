@@ -1,0 +1,362 @@
+{
+  "info": {
+    "name": "DeepRead API",
+    "description": "DeepRead 客户端 API 测试集合",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:3000/api/v1/dr" },
+    { "key": "token", "value": "" },
+    { "key": "user_id", "value": "" },
+    { "key": "space_id", "value": "S1000001" },
+    { "key": "article_id", "value": "A1000001" },
+    { "key": "highlight_id", "value": "" },
+    { "key": "collection_id", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      { "key": "token", "value": "{{token}}", "type": "string" }
+    ]
+  },
+  "item": [
+    {
+      "name": "1. 认证",
+      "item": [
+        {
+          "name": "1.1 发送验证码",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"13800138000\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/sms/send", "host": ["{{base_url}}"], "path": ["sms", "send"] }
+          }
+        },
+        {
+          "name": "1.2 登录",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.code === 200) {",
+                  "    pm.collectionVariables.set('token', jsonData.data.token);",
+                  "    pm.collectionVariables.set('user_id', jsonData.data.user.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"13800138000\",\n  \"code\": \"888888\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/login", "host": ["{{base_url}}"], "path": ["login"] }
+          }
+        },
+        {
+          "name": "1.3 加入空间",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invite_code\": \"TEST2026\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/space/join", "host": ["{{base_url}}"], "path": ["space", "join"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. 空间",
+      "item": [
+        {
+          "name": "2.1 获取空间首页",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/spaces/{{space_id}}/homepage", "host": ["{{base_url}}"], "path": ["spaces", "{{space_id}}", "homepage"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. 文章",
+      "item": [
+        {
+          "name": "3.1 获取文章列表",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/articles?space_id={{space_id}}&page=1&page_size=20", "host": ["{{base_url}}"], "path": ["articles"], "query": [
+              { "key": "space_id", "value": "{{space_id}}" },
+              { "key": "page", "value": "1" },
+              { "key": "page_size", "value": "20" }
+            ]}
+          }
+        },
+        {
+          "name": "3.2 获取文章详情",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.code === 200) {",
+                  "    pm.collectionVariables.set('article_id', jsonData.data.articleId);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/articles/{{article_id}}", "host": ["{{base_url}}"], "path": ["articles", "{{article_id}}"] }
+          }
+        },
+        {
+          "name": "3.3 收藏文章",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"bookmarked\": true\n}" },
+            "url": { "raw": "{{base_url}}/articles/{{article_id}}/bookmark", "host": ["{{base_url}}"], "path": ["articles", "{{article_id}}", "bookmark"] }
+          }
+        },
+        {
+          "name": "3.4 取消收藏",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"bookmarked\": false\n}" },
+            "url": { "raw": "{{base_url}}/articles/{{article_id}}/bookmark", "host": ["{{base_url}}"], "path": ["articles", "{{article_id}}", "bookmark"] }
+          }
+        },
+        {
+          "name": "3.5 标记已读",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"progress\": 100\n}" },
+            "url": { "raw": "{{base_url}}/articles/{{article_id}}/read", "host": ["{{base_url}}"], "path": ["articles", "{{article_id}}", "read"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. 批注",
+      "item": [
+        {
+          "name": "4.1 创建批注",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.code === 200) {",
+                  "    pm.collectionVariables.set('highlight_id', jsonData.data.highlightId);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"article_id\": \"{{article_id}}\",\n  \"text\": \"这是高亮的文字内容\",\n  \"color\": \"#FFEB3B\",\n  \"position_data\": {\"paragraph\": 1, \"offset\": 10, \"length\": 20},\n  \"note\": \"这是批注笔记\"\n}"
+            },
+            "url": { "raw": "{{base_url}}/highlights", "host": ["{{base_url}}"], "path": ["highlights"] }
+          }
+        },
+        {
+          "name": "4.2 获取批注列表",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/highlights?article_id={{article_id}}", "host": ["{{base_url}}"], "path": ["highlights"], "query": [
+              { "key": "article_id", "value": "{{article_id}}" }
+            ]}
+          }
+        },
+        {
+          "name": "4.3 更新批注",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"color\": \"#FF5722\",\n  \"note\": \"更新后的笔记\"\n}" },
+            "url": { "raw": "{{base_url}}/highlights/{{highlight_id}}", "host": ["{{base_url}}"], "path": ["highlights", "{{highlight_id}}"] }
+          }
+        },
+        {
+          "name": "4.4 删除批注",
+          "request": {
+            "method": "DELETE",
+            "url": { "raw": "{{base_url}}/highlights/{{highlight_id}}", "host": ["{{base_url}}"], "path": ["highlights", "{{highlight_id}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. 个人合集",
+      "item": [
+        {
+          "name": "5.1 创建合集",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.code === 200) {",
+                  "    pm.collectionVariables.set('collection_id', jsonData.data.collectionId);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"我的 AI 阅读清单\"\n}" },
+            "url": { "raw": "{{base_url}}/collections", "host": ["{{base_url}}"], "path": ["collections"] }
+          }
+        },
+        {
+          "name": "5.2 获取合集列表",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/collections", "host": ["{{base_url}}"], "path": ["collections"] }
+          }
+        },
+        {
+          "name": "5.3 添加文章到合集",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"article_id\": \"{{article_id}}\",\n  \"action\": \"add\"\n}" },
+            "url": { "raw": "{{base_url}}/collections/{{collection_id}}/articles", "host": ["{{base_url}}"], "path": ["collections", "{{collection_id}}", "articles"] }
+          }
+        },
+        {
+          "name": "5.4 从合集移除文章",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"article_id\": \"{{article_id}}\",\n  \"action\": \"remove\"\n}" },
+            "url": { "raw": "{{base_url}}/collections/{{collection_id}}/articles", "host": ["{{base_url}}"], "path": ["collections", "{{collection_id}}", "articles"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. 每日精选",
+      "item": [
+        {
+          "name": "6.1 获取每日精选",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/spaces/{{space_id}}/daily-picks", "host": ["{{base_url}}"], "path": ["spaces", "{{space_id}}", "daily-picks"] }
+          }
+        },
+        {
+          "name": "6.2 每日一文",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/daily-article", "host": ["{{base_url}}"], "path": ["daily-article"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. 阅读统计",
+      "item": [
+        {
+          "name": "7.1 上报阅读统计",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"article_id\": \"{{article_id}}\",\n  \"reading_time_seconds\": 180,\n  \"scroll_depth\": 85,\n  \"session_start\": \"2026-03-25T10:00:00.000Z\",\n  \"session_end\": \"2026-03-25T10:03:00.000Z\",\n  \"highlight_count\": 3,\n  \"note_count\": 1\n}"
+            },
+            "url": { "raw": "{{base_url}}/stats/reading", "host": ["{{base_url}}"], "path": ["stats", "reading"] }
+          }
+        },
+        {
+          "name": "7.2 获取统计汇总",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/stats/summary?period=all", "host": ["{{base_url}}"], "path": ["stats", "summary"], "query": [
+              { "key": "period", "value": "all" }
+            ]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. 收藏列表",
+      "item": [
+        {
+          "name": "8.1 获取收藏列表",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/bookmarks?page=1&page_size=20", "host": ["{{base_url}}"], "path": ["bookmarks"], "query": [
+              { "key": "page", "value": "1" },
+              { "key": "page_size", "value": "20" }
+            ]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. 批量同步",
+      "item": [
+        {
+          "name": "9.1 批量同步",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client_sync_id\": \"client-001\",\n  \"last_sync_at\": \"2026-03-01T00:00:00.000Z\",\n  \"payload\": {\n    \"highlights\": [\n      {\n        \"local_id\": \"local-h-1\",\n        \"action\": \"create\",\n        \"data\": {\n          \"article_id\": \"{{article_id}}\",\n          \"text\": \"高亮文字\",\n          \"color\": \"#FFEB3B\"\n        }\n      }\n    ],\n    \"bookmarks\": [\n      {\n        \"local_id\": \"local-b-1\",\n        \"action\": \"create\",\n        \"data\": { \"article_id\": \"{{article_id}}\", \"bookmarked\": true }\n      }\n    ],\n    \"read_progress\": [\n      {\n        \"local_id\": \"local-r-1\",\n        \"action\": \"update\",\n        \"data\": { \"article_id\": \"{{article_id}}\", \"progress\": 80 }\n      }\n    ],\n    \"reading_stats\": [\n      {\n        \"local_id\": \"local-s-1\",\n        \"action\": \"create\",\n        \"data\": {\n          \"article_id\": \"{{article_id}}\",\n          \"reading_time_seconds\": 120,\n          \"scroll_depth\": 75\n        }\n      }\n    ]\n  }\n}"
+            },
+            "url": { "raw": "{{base_url}}/sync", "host": ["{{base_url}}"], "path": ["sync"] }
+          }
+        },
+        {
+          "name": "9.2 增量获取",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/sync/changes?last_sync_at=2026-03-01T00:00:00.000Z&entity_types=highlights,bookmarks", "host": ["{{base_url}}"], "path": ["sync", "changes"], "query": [
+              { "key": "last_sync_at", "value": "2026-03-01T00:00:00.000Z" },
+              { "key": "entity_types", "value": "highlights,bookmarks" }
+            ]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. AI 对话",
+      "item": [
+        {
+          "name": "10.1 AI 对话",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"article_id\": \"{{article_id}}\",\n  \"message\": \"这篇文章的核心观点是什么？\"\n}" },
+            "url": { "raw": "{{base_url}}/ai/chat", "host": ["{{base_url}}"], "path": ["ai", "chat"] }
+          }
+        }
+      ]
+    }
+  ]
+}

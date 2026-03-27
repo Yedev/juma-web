@@ -181,7 +181,6 @@ sign.ts         └─ taskNaming.ts
 | `TASK_LOG_MAX_BYTES` | `65536` | `services/executionEngine.ts` / `ws/executorWsGateway.ts` | 任务日志最大字节数（64KB） |
 | `EXECUTOR_HEARTBEAT_INTERVAL_MS` | `10000` | `ws/executorWsGateway.ts` | 向客户端建议的心跳间隔，随 server.hello 下发 |
 | `EXECUTOR_DISPATCH_INTERVAL_MS` | `1500` | `ws/executorWsGateway.ts` | WebSocket 任务分发轮询间隔 |
-| `GEMINI_API_KEY` | 无 | `routes/deepread.ts` | Google Gemini API 密钥，不配置则 AI 对话返回 500 |
 
 ### 生产环境推荐配置
 
@@ -192,7 +191,6 @@ JWT_SECRET="your-strong-random-secret-64chars"
 APP_SECRET="your-app-secret-32chars"
 DR_JWT_SECRET="your-dr-jwt-secret-64chars"
 EXECUTOR_SHARED_KEY="your-executor-key-32chars"
-GEMINI_API_KEY="AIzaSy..."
 LOCAL_EXECUTOR_CONCURRENCY=2
 ```
 

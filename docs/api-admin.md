@@ -466,3 +466,111 @@ curl -X PUT "http://localhost:3001/api/admin/dr/spaces/S1000002/homepage-modules
 |------|------|------|
 | GET | `/api/admin/dr/users` | 用户列表（分页，含空间数/批注数统计） |
 | GET | `/api/admin/dr/users/:userId` | 用户详情（含加入的空间列表） |
+
+---
+
+#### 每日精选（Daily Picks）
+
+每日精选是按空间区分的精选文章轮换系统，管理员将文章加入精选池后，系统基于日期自动轮换展示。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/admin/dr/spaces/:spaceId/daily-picks` | 精选文章池列表（含文章详情和高亮数统计） |
+| POST | `/api/admin/dr/spaces/:spaceId/daily-picks` | 添加文章到精选池 |
+| DELETE | `/api/admin/dr/daily-picks/:pickId` | 从精选池移除文章 |
+| PUT | `/api/admin/dr/daily-picks/:pickId/toggle` | 启用/禁用精选文章 |
+
+**精选文章数据字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `pickId` | string | 精选记录 ID（DP 开头） |
+| `spaceId` | string | 所属空间 ID |
+| `articleId` | string | 关联文章 ID |
+| `sortOrder` | number | 在轮换池中的排序 |
+| `enabled` | boolean | 是否启用（禁用后不参与轮换） |
+| `article` | object | 关联的文章详情 |
+| `highlightCount` | number | 编辑高亮数量 |
+| `createdAt` | string | 创建时间 |
+| `updatedAt` | string | 更新时间 |
+
+**添加文章到精选池：**
+```bash
+curl -X POST "http://localhost:3001/api/admin/dr/spaces/S1000002/daily-picks" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{ "articleId": "A1000001" }'
+```
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "文章已加入精选池",
+  "data": {
+    "pickId": "DP1709001234567",
+    "spaceId": "S1000002",
+    "articleId": "A1000001",
+    "sortOrder": 0,
+    "enabled": true,
+    "createdAt": "2026-03-25T08:00:00.000Z"
+  }
+}
+```
+
+---
+
+#### 编辑高亮（Editor Highlights）
+
+编辑高亮是管理员为文章预先标注的重点文本，用于引导读者阅读。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/admin/dr/articles/:articleId/editor-highlights` | 获取文章的编辑高亮列表 |
+| POST | `/api/admin/dr/articles/:articleId/editor-highlights` | 创建编辑高亮 |
+| PUT | `/api/admin/dr/editor-highlights/:highlightId` | 更新编辑高亮 |
+| DELETE | `/api/admin/dr/editor-highlights/:highlightId` | 删除编辑高亮 |
+
+**编辑高亮数据字段：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `highlightId` | string | 高亮 ID（EH 开头） |
+| `articleId` | string | 关联文章 ID |
+| `text` | string | 高亮文本内容 |
+| `color` | string | 高亮颜色（十六进制，默认 `#FFD700`） |
+| `positionData` | string | 位置信息 JSON（原样存储） |
+| `note` | string | 编辑备注/推荐理由 |
+| `sortOrder` | number | 显示排序 |
+| `createdAt` | string | 创建时间 |
+| `updatedAt` | string | 更新时间 |
+
+**创建编辑高亮：**
+```bash
+curl -X POST "http://localhost:3001/api/admin/dr/articles/A1000001/editor-highlights" \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "这是文章中最关键的观点...",
+    "color": "#FFD700",
+    "note": "核心论点，推荐阅读"
+  }'
+```
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "高亮已创建",
+  "data": {
+    "highlightId": "EH1709001234567",
+    "articleId": "A1000001",
+    "text": "这是文章中最关键的观点...",
+    "color": "#FFD700",
+    "positionData": "{}",
+    "note": "核心论点，推荐阅读",
+    "sortOrder": 0,
+    "createdAt": "2026-03-25T08:00:00.000Z"
+  }
+}
+```

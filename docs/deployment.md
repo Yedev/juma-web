@@ -52,7 +52,6 @@ docker run -d \
   -e APP_SECRET="<移动端签名密钥>" \
   -e DR_JWT_SECRET="<DeepRead密钥-32位以上>" \
   -e EXECUTOR_SHARED_KEY="<执行器共享密钥>" \
-  -e GEMINI_API_KEY="<Google Gemini API Key>" \
   -e NODE_ENV="production" \
   juma-web:latest
 ```
@@ -78,7 +77,6 @@ services:
       - APP_SECRET=${APP_SECRET}
       - DR_JWT_SECRET=${DR_JWT_SECRET}
       - EXECUTOR_SHARED_KEY=${EXECUTOR_SHARED_KEY}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - DATABASE_URL=file:/app/data/juma.db
     healthcheck:
       test: ["CMD", "wget", "-q", "-O-", "http://localhost:3001/api/health"]
@@ -103,7 +101,6 @@ JWT_SECRET=your_strong_jwt_secret_here
 APP_SECRET=your_app_secret_here
 DR_JWT_SECRET=your_dr_jwt_secret_here
 EXECUTOR_SHARED_KEY=your_executor_key_here
-GEMINI_API_KEY=your_gemini_key_here
 EOF
 
 # 部署
@@ -178,7 +175,6 @@ Environment="JWT_SECRET=your_strong_jwt_secret"
 Environment="APP_SECRET=your_app_secret"
 Environment="DR_JWT_SECRET=your_dr_jwt_secret"
 Environment="EXECUTOR_SHARED_KEY=your_executor_key"
-Environment="GEMINI_API_KEY=your_gemini_key"
 
 # 安全限制
 NoNewPrivileges=true

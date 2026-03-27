@@ -398,36 +398,6 @@
 
 ---
 
-### POST /api/v1/dr/ai/chat
-
-基于文章内容与 AI 对话（需配置 `GEMINI_API_KEY`）。需要用户 JWT。
-
-**请求体：**
-```json
-{
-  "article_id": "A1000001",
-  "message": "这篇文章的核心观点是什么？"
-}
-```
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "reply": "这篇文章的核心观点是：AI 技术将从三个维度重塑教育体系——个性化学习路径、实时反馈机制和跨语言教学壁垒消除。作者认为..."
-  }
-}
-```
-
-**错误情况（未配置 API Key）：**
-```json
-{ "code": 500, "message": "AI 服务未配置" }
-```
-
----
-
 ## 个人合集
 
 > 个人合集是用户自建的文章收藏夹，与空间集合（Space Collection）相互独立。所有接口需要用户 JWT。
@@ -570,4 +540,354 @@
 ```json
 { "code": 403, "message": "您不是该空间的成员" }
 { "code": 404, "message": "合集不存在" }
+```
+
+---
+
+## 每日精选
+
+> 每日精选根据日期和空间自动轮换，每天显示 1-3 篇精选文章。管理员可预先标注编辑高亮，引导用户阅读重点内容。
+
+### GET /api/v1/dr/spaces/:spaceId/daily-picks
+
+获取当日精选文章列表（含编辑高亮）。需要用户 JWT。
+
+**路径参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `spaceId` | 空间 ID |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "date": "2026-03-25",
+    "articles": [
+      {
+        "articleId": "A1000001",
+        "title": "大模型的未来",
+        "summary": "深度解析大语言模型的发展趋势",
+        "coverUrl": "https://example.com/cover.jpg",
+        "author": "张三",
+        "readCount": 1200,
+        "publishedAt": "2026-03-18T10:00:00.000Z",
+        "readProgress": 75,
+        "isBookmarked": true,
+        "editorHighlights": [
+          {
+            "highlightId": "EH1000001",
+            "text": "这是文章中最关键的观点，大模型将从根本上改变软件开发的范式...",
+            "color": "#FFD700",
+            "note": "核心论点"
+          },
+          {
+            "highlightId": "EH1000002",
+            "text": "预计到 2030 年，90% 的代码将由 AI 辅助生成...",
+            "color": "#FFD700",
+            "note": "数据预测"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**字段说明：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `date` | string | 当日日期（YYYY-MM-DD） |
+| `articles` | array | 精选文章列表（最多 3 篇） |
+| `readProgress` | number | 当前用户的阅读进度（0-100） |
+| `isBookmarked` | boolean | 当前用户是否已收藏 |
+| `editorHighlights` | array | 编辑预标注的高亮列表 |
+| `editorHighlights[].text` | string | 高亮文本内容 |
+| `editorHighlights[].color` | string | 高亮颜色（十六进制） |
+| `editorHighlights[].note` | string | 编辑备注/推荐理由 |
+
+**轮换规则：**
+- 基于日期索引 + 空间 ID 哈希计算起始位置
+- 同一天内多次请求返回相同结果
+- 不同空间同一天可能显示不同文章
+- 从精选池中循环选取最多 3 篇启用的文章
+
+---
+
+## 阅读统计
+
+### POST /api/v1/dr/stats/reading
+
+上报阅读统计数据。需要用户 JWT。
+
+**请求体：**
+```json
+{
+  "article_id": "A1000001",
+  "reading_time_seconds": 180,
+  "scroll_depth": 85,
+  "session_start": "2026-03-25T10:00:00.000Z",
+  "session_end": "2026-03-25T10:03:00.000Z",
+  "highlight_count": 3,
+  "note_count": 1
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `article_id` | string | 是 | 文章 ID |
+| `reading_time_seconds` | int | 是 | 有效阅读时长（秒） |
+| `scroll_depth` | int | 是 | 滚动深度 (0-100) |
+| `session_start` | string | 是 | 阅读开始时间 |
+| `session_end` | string | 是 | 阅读结束时间 |
+| `highlight_count` | int | 否 | 本次创建批注数 |
+| `note_count` | int | 否 | 本次创建笔记数 |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "统计已记录",
+  "data": {
+    "total_reading_time_today": 3600,
+    "articles_read_today": 5
+  }
+}
+```
+
+---
+
+### GET /api/v1/dr/stats/summary
+
+获取用户阅读统计汇总。需要用户 JWT。
+
+**查询参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `period` | string | 否 | 统计周期: `today`/`week`/`month`/`all`，默认 `all` |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "total_reading_time_seconds": 86400,
+    "total_articles_read": 45,
+    "total_highlights": 128,
+    "total_notes": 32,
+    "reading_streak_days": 12
+  }
+}
+```
+
+---
+
+## 收藏列表
+
+### GET /api/v1/dr/bookmarks
+
+获取用户收藏的文章列表。需要用户 JWT。
+
+**查询参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `page` | int | 否 | 页码，默认 1 |
+| `page_size` | int | 否 | 每页数量，默认 20 |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "list": [
+      {
+        "articleId": "A1000001",
+        "title": "AI 时代的教育变革",
+        "summary": "探讨人工智能对教育的深远影响...",
+        "coverUrl": "https://example.com/cover.jpg",
+        "author": "李四",
+        "bookmarkedAt": "2026-03-25T10:00:00.000Z"
+      }
+    ],
+    "total": 24,
+    "page": 1,
+    "pageSize": 20
+  }
+}
+```
+
+---
+
+## 每日一文
+
+### GET /api/v1/dr/daily-article
+
+获取每日推荐文章。需要用户 JWT。
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "date": "2026-03-25",
+    "article": {
+      "articleId": "A1000001",
+      "title": "AI 时代的教育变革",
+      "summary": "探讨人工智能对教育的深远影响...",
+      "coverUrl": "https://example.com/cover.jpg",
+      "author": "李四",
+      "readTimeMinutes": 8,
+      "channelId": "C1000001",
+      "channelName": "科技前沿"
+    },
+    "reason": "根据您的阅读偏好推荐"
+  }
+}
+```
+
+---
+
+## 批量同步
+
+### POST /api/v1/dr/sync
+
+批量同步客户端数据到服务器。需要用户 JWT。
+
+**请求体：**
+```json
+{
+  "client_sync_id": "uuid-xxx",
+  "last_sync_at": "2026-03-25T09:00:00.000Z",
+  "payload": {
+    "highlights": [
+      {
+        "local_id": "uuid-1",
+        "action": "create",
+        "data": {
+          "article_id": "A1000001",
+          "text": "高亮文字",
+          "color": "#FFEB3B",
+          "position_data": { "paragraph": 1, "offset": 10 },
+          "note": "批注内容"
+        }
+      },
+      {
+        "local_id": "uuid-2",
+        "action": "delete",
+        "remote_id": "H1000001"
+      }
+    ],
+    "bookmarks": [
+      {
+        "local_id": "uuid-3",
+        "action": "create",
+        "data": { "article_id": "A1000001", "bookmarked": true }
+      }
+    ],
+    "read_progress": [
+      {
+        "local_id": "uuid-4",
+        "action": "update",
+        "data": { "article_id": "A1000001", "progress": 75 }
+      }
+    ],
+    "reading_stats": [
+      {
+        "local_id": "uuid-5",
+        "action": "create",
+        "data": {
+          "article_id": "A1000001",
+          "reading_time_seconds": 180,
+          "scroll_depth": 85,
+          "session_start": "2026-03-25T10:00:00.000Z",
+          "session_end": "2026-03-25T10:03:00.000Z"
+        }
+      }
+    ]
+  }
+}
+```
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "同步成功",
+  "data": {
+    "server_sync_id": "sync-1742908800000",
+    "synced_at": "2026-03-25T10:30:00.000Z",
+    "results": {
+      "highlights": [
+        { "local_id": "uuid-1", "remote_id": "H1000002", "status": "success" }
+      ],
+      "bookmarks": [
+        { "local_id": "uuid-3", "status": "success" }
+      ],
+      "read_progress": [
+        { "local_id": "uuid-4", "status": "success" }
+      ],
+      "reading_stats": [
+        { "local_id": "uuid-5", "status": "success" }
+      ]
+    },
+    "server_changes": {
+      "highlights": [],
+      "bookmarks": [],
+      "articles": []
+    }
+  }
+}
+```
+
+---
+
+### GET /api/v1/dr/sync/changes
+
+获取自上次同步以来的服务端数据变化。需要用户 JWT。
+
+**查询参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `last_sync_at` | string | 是 | 上次同步时间 |
+| `entity_types` | string | 否 | 实体类型，逗号分隔，默认全部 |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "synced_at": "2026-03-25T10:30:00.000Z",
+    "changes": {
+      "highlights": {
+        "created": [],
+        "updated": [
+          {
+            "highlightId": "H1000001",
+            "articleId": "A1000001",
+            "text": "更新后的文字",
+            "color": "#FF5722",
+            "note": "更新后的笔记",
+            "updatedAt": "2026-03-25T10:00:00.000Z"
+          }
+        ],
+        "deleted": []
+      },
+      "bookmarks": {
+        "created": [],
+        "updated": [],
+        "deleted": []
+      }
+    }
+  }
+}
 ```

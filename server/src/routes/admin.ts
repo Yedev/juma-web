@@ -1,7 +1,7 @@
 import { Router, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware, AuthRequest } from "../middleware/auth";
-import { beautifyToHtml } from "../services/ai";
+
 import { listRegisteredTasks } from "../services/taskRegistry";
 import { enqueueTaskByRegisteredName } from "../services/taskEnqueue";
 import { inferTaskTypeFromName, taskNameRuleText } from "../services/taskNaming";
@@ -1607,31 +1607,263 @@ router.delete("/dr/collections/:collectionId/articles/:articleId", async (req: A
 
 // ── AI 工具 ──────────────────────────────────────────────────
 
-// AI 格式美化：将原始文本内容格式化为适合手机阅读的 HTML
-router.post("/ai/beautify", authMiddleware, async (req: AuthRequest, res: Response): Promise<void> => {
+
+// ── 每日精选文章池 ──────────────────────────────────────────────────
+
+// 获取空间的精选文章池列表
+router.get("/dr/spaces/:spaceId/daily-picks", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { content } = req.body as { content?: string };
-
-    if (!content || !content.trim()) {
-      res.status(400).json({ code: 400, message: "内容不能为空" });
+    const spaceId = req.params.spaceId as string;
+    const space = await prisma.drSpace.findUnique({ where: { spaceId } });
+    if (!space) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
       return;
     }
 
-    if (content.length > 20000) {
-      res.status(400).json({ code: 400, message: "内容过长，请控制在 20000 字以内" });
-      return;
-    }
+    const picks = await prisma.drDailyPickArticle.findMany({
+      where: { spaceId },
+      orderBy: { sortOrder: "asc" },
+    });
 
-    const html = await beautifyToHtml(content.trim());
+    const articleIds = picks.map((p) => p.articleId);
+    const articles = articleIds.length > 0 ? await prisma.drArticle.findMany({ where: { articleId: { in: articleIds } } }) : [];
+    const articleMap = new Map(articles.map((a) => [a.articleId, a]));
+
+    // 获取每篇文章的编辑高亮数量
+    const highlightCounts = await prisma.drEditorHighlight.groupBy({
+      by: ["articleId"],
+      where: { articleId: { in: articleIds } },
+      _count: { id: true },
+    });
+    const hlCountMap = new Map(highlightCounts.map((h) => [h.articleId, h._count.id]));
 
     res.json({
       code: 200,
       message: "success",
-      data: { html },
+      data: picks.map((p) => ({
+        ...p,
+        article: articleMap.get(p.articleId) ?? null,
+        highlightCount: hlCountMap.get(p.articleId) ?? 0,
+      })),
     });
   } catch (error) {
-    console.error("AI beautify error:", error);
-    res.status(500).json({ code: 500, message: "AI 服务暂不可用，请稍后重试" });
+    console.error("Admin list daily picks error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 添加文章到精选池
+router.post("/dr/spaces/:spaceId/daily-picks", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const { articleId } = req.body as { articleId?: string };
+
+    if (!articleId || !articleId.trim()) {
+      res.status(400).json({ code: 400, message: "articleId 不能为空" });
+      return;
+    }
+
+    const space = await prisma.drSpace.findUnique({ where: { spaceId } });
+    if (!space) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
+      return;
+    }
+
+    const article = await prisma.drArticle.findUnique({ where: { articleId } });
+    if (!article) {
+      res.status(404).json({ code: 404, message: "文章不存在" });
+      return;
+    }
+
+    // 检查是否已存在
+    const existing = await prisma.drDailyPickArticle.findUnique({
+      where: { spaceId_articleId: { spaceId, articleId } },
+    });
+    if (existing) {
+      res.status(400).json({ code: 400, message: "该文章已在精选池中" });
+      return;
+    }
+
+    const maxOrder = await prisma.drDailyPickArticle.findFirst({
+      where: { spaceId },
+      orderBy: { sortOrder: "desc" },
+      select: { sortOrder: true },
+    });
+
+    const pick = await prisma.drDailyPickArticle.create({
+      data: {
+        pickId: generateDrId("DP"),
+        spaceId,
+        articleId,
+        sortOrder: (maxOrder?.sortOrder ?? -1) + 1,
+      },
+    });
+
+    res.json({ code: 200, message: "文章已加入精选池", data: pick });
+  } catch (error) {
+    console.error("Admin add daily pick error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 从精选池移除文章
+router.delete("/dr/daily-picks/:pickId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const pickId = req.params.pickId as string;
+    const existing = await prisma.drDailyPickArticle.findUnique({ where: { pickId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "精选记录不存在" });
+      return;
+    }
+
+    await prisma.drDailyPickArticle.delete({ where: { pickId } });
+    res.json({ code: 200, message: "文章已从精选池移除" });
+  } catch (error) {
+    console.error("Admin delete daily pick error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 启用/禁用精选文章
+router.put("/dr/daily-picks/:pickId/toggle", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const pickId = req.params.pickId as string;
+    const existing = await prisma.drDailyPickArticle.findUnique({ where: { pickId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "精选记录不存在" });
+      return;
+    }
+
+    const updated = await prisma.drDailyPickArticle.update({
+      where: { pickId },
+      data: { enabled: !existing.enabled },
+    });
+    res.json({ code: 200, message: updated.enabled ? "已启用" : "已禁用", data: updated });
+  } catch (error) {
+    console.error("Admin toggle daily pick error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── 编辑高亮 ──────────────────────────────────────────────────
+
+// 获取文章的编辑高亮列表
+router.get("/dr/articles/:articleId/editor-highlights", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const articleId = req.params.articleId as string;
+    const article = await prisma.drArticle.findUnique({ where: { articleId } });
+    if (!article) {
+      res.status(404).json({ code: 404, message: "文章不存在" });
+      return;
+    }
+
+    const highlights = await prisma.drEditorHighlight.findMany({
+      where: { articleId },
+      orderBy: { sortOrder: "asc" },
+    });
+
+    res.json({ code: 200, message: "success", data: highlights });
+  } catch (error) {
+    console.error("Admin list editor highlights error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 创建编辑高亮
+router.post("/dr/articles/:articleId/editor-highlights", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const articleId = req.params.articleId as string;
+    const { text, color, positionData, note } = req.body as {
+      text?: string;
+      color?: string;
+      positionData?: string;
+      note?: string;
+    };
+
+    if (!text || !text.trim()) {
+      res.status(400).json({ code: 400, message: "高亮文本不能为空" });
+      return;
+    }
+
+    const article = await prisma.drArticle.findUnique({ where: { articleId } });
+    if (!article) {
+      res.status(404).json({ code: 404, message: "文章不存在" });
+      return;
+    }
+
+    const maxOrder = await prisma.drEditorHighlight.findFirst({
+      where: { articleId },
+      orderBy: { sortOrder: "desc" },
+      select: { sortOrder: true },
+    });
+
+    const highlight = await prisma.drEditorHighlight.create({
+      data: {
+        highlightId: generateDrId("EH"),
+        articleId,
+        text: text.trim(),
+        color: color || "#FFD700",
+        positionData: positionData || "{}",
+        note: note?.trim() || "",
+        sortOrder: (maxOrder?.sortOrder ?? -1) + 1,
+      },
+    });
+
+    res.json({ code: 200, message: "高亮已创建", data: highlight });
+  } catch (error) {
+    console.error("Admin create editor highlight error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 更新编辑高亮
+router.put("/dr/editor-highlights/:highlightId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const highlightId = req.params.highlightId as string;
+    const { text, color, positionData, note, sortOrder } = req.body as {
+      text?: string;
+      color?: string;
+      positionData?: string;
+      note?: string;
+      sortOrder?: number;
+    };
+
+    const existing = await prisma.drEditorHighlight.findUnique({ where: { highlightId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "高亮不存在" });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+    if (text !== undefined) updateData.text = text.trim();
+    if (color !== undefined) updateData.color = color;
+    if (positionData !== undefined) updateData.positionData = positionData;
+    if (note !== undefined) updateData.note = note.trim();
+    if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
+
+    const updated = await prisma.drEditorHighlight.update({ where: { highlightId }, data: updateData });
+    res.json({ code: 200, message: "高亮已更新", data: updated });
+  } catch (error) {
+    console.error("Admin update editor highlight error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 删除编辑高亮
+router.delete("/dr/editor-highlights/:highlightId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const highlightId = req.params.highlightId as string;
+    const existing = await prisma.drEditorHighlight.findUnique({ where: { highlightId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "高亮不存在" });
+      return;
+    }
+
+    await prisma.drEditorHighlight.delete({ where: { highlightId } });
+    res.json({ code: 200, message: "高亮已删除" });
+  } catch (error) {
+    console.error("Admin delete editor highlight error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
 

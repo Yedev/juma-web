@@ -278,7 +278,6 @@ juma-web/
 - **文章**：列表、详情、收藏、阅读进度追踪
 - **批注**：创建/编辑/删除高亮批注，支持颜色与笔记
 - **合集**：创建合集，批量管理文章
-- **AI 对话**：基于文章内容与 Gemini 2.0 Flash 对话
 
 ---
 
@@ -303,7 +302,6 @@ juma-web/
 | `LOCAL_EXECUTOR_CONCURRENCY` | `1` | 本地并发执行任务数 |
 | `REMOTE_TASK_STALE_TIMEOUT_MS` | `300000` | 远程任务超时（5分钟） |
 | `TASK_LOG_MAX_BYTES` | `65536` | 单任务日志最大字节数（64KB） |
-| `GEMINI_API_KEY` | _(无)_ | Google Gemini API Key（AI 对话必需） |
 
 ### 前端（`admin-ui/.env.local`）
 
@@ -604,7 +602,6 @@ User（用户）
 | 阅读进度 | 支持 0-100% 的精确进度追踪 |
 | 高亮批注 | 文本高亮+颜色+位置信息+笔记，完整 CRUD |
 | 合集 | 用户自定义文章合集，增删文章 |
-| AI 对话 | 基于 Gemini 2.0 Flash，以文章为上下文进行对话 |
 
 ### 认证流程
 
@@ -659,7 +656,6 @@ docker run -d \
   -e APP_SECRET="your_app_secret" \
   -e DR_JWT_SECRET="your_dr_secret" \
   -e EXECUTOR_SHARED_KEY="your_executor_key" \
-  -e GEMINI_API_KEY="your_gemini_key" \
   --name juma-web \
   juma-web
 ```
@@ -670,7 +666,6 @@ docker run -d \
 2. **持久化 SQLite 数据库**（挂载 `/app/data` 目录）
 3. **配置 HTTPS 反向代理**（推荐 Nginx）
 4. **WebSocket 需配置代理升级**（`proxy_set_header Upgrade $http_upgrade`）
-5. **Gemini API Key**（AI 对话功能需配置 `GEMINI_API_KEY`）
 
 ---
 

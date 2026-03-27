@@ -255,3 +255,53 @@ model DrSpaceCollectionArticle {
   @@unique([collectionId, articleId])
   @@map("dr_space_collection_articles")
 }
+
+// ── 每日精选 ──────────────────────────────────────────────
+
+model DrDailyPickArticle {
+  id        Int      @id @default(autoincrement())
+  pickId    String   @unique @map("pick_id")
+  spaceId   String   @map("space_id")
+  articleId String   @map("article_id")
+  sortOrder Int      @default(0) @map("sort_order")
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([spaceId, articleId])
+  @@map("dr_daily_pick_articles")
+}
+
+model DrEditorHighlight {
+  id           Int      @id @default(autoincrement())
+  highlightId  String   @unique @map("highlight_id")
+  articleId    String   @map("article_id")
+  text         String
+  color        String   @default("#FFD700")
+  positionData String   @default("{}") @map("position_data")
+  note         String   @default("")
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("dr_editor_highlights")
+}
+
+// ── 阅读统计 ────────────────────────────────────────────────
+
+model DrReadingStats {
+  id                Int      @id @default(autoincrement())
+  statsId           String   @unique @map("stats_id")
+  userId            Int      @map("user_id")
+  articleId         String   @map("article_id")
+  readingTimeMs     Int      @default(0) @map("reading_time_ms")
+  scrollDepth       Int      @default(0) @map("scroll_depth")
+  sessionStart      DateTime @map("session_start")
+  sessionEnd        DateTime @map("session_end")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([articleId])
+  @@index([createdAt])
+  @@map("dr_reading_stats")
+}

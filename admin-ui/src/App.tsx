@@ -11,6 +11,7 @@ import DrChannelManagement from "./pages/DrChannelManagement";
 import DrArticleManagement from "./pages/DrArticleManagement";
 import DrUserManagement from "./pages/DrUserManagement";
 import DrCollectionManagement from "./pages/DrCollectionManagement";
+import DrDailyPicksManagement from "./pages/DrDailyPicksManagement";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem("juma_token");
@@ -76,6 +77,7 @@ function App() {
             <Route path="dr/collections" element={<DrCollectionManagement />} />
             <Route path="dr/articles" element={<DrArticleManagement />} />
             <Route path="dr/users" element={<DrUserManagement />} />
+            <Route path="dr/daily-picks" element={<DrDailyPicksManagement />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

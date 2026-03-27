@@ -371,6 +371,58 @@ error/running → queued（重试时重置）
 
 ---
 
+### 2.20 DrDailyPickArticle（每日精选文章）
+
+**表名**：`dr_daily_pick_articles`
+
+| 字段 | 类型 | 约束 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `id` | Int | PK, 自增 | — | 内部 ID |
+| `pickId` | String | 唯一 | — | 业务 ID（格式：DP + 时间戳 + 随机数） |
+| `spaceId` | String | 联合唯一 | — | 所属空间 ID |
+| `articleId` | String | 联合唯一 | — | 关联文章 ID |
+| `sortOrder` | Int | — | `0` | 在精选池中的排序权重（升序） |
+| `enabled` | Boolean | — | `true` | 是否启用（禁用后不参与轮换） |
+| `createdAt` | DateTime | 默认 now() | — | 创建时间 |
+| `updatedAt` | DateTime | 自动更新 | — | 最后更新时间 |
+
+**唯一约束**：`pickId`，`(spaceId, articleId)` — 同一文章不能重复加入同一空间的精选池
+
+**轮换算法**：
+```typescript
+dayIndex = Math.floor(Date.now() / 86400000)  // 天数索引
+spaceHash = hashString(spaceId)               // 空间 ID 哈希
+startIndex = (dayIndex + spaceHash) % poolSize // 起始位置
+// 循环选取最多 3 篇启用的文章
+```
+
+---
+
+### 2.21 DrEditorHighlight（编辑高亮）
+
+**表名**：`dr_editor_highlights`
+
+| 字段 | 类型 | 约束 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `id` | Int | PK, 自增 | — | 内部 ID |
+| `highlightId` | String | 唯一 | — | 业务 ID（格式：EH + 时间戳 + 随机数） |
+| `articleId` | String | — | — | 关联文章 ID |
+| `text` | String | — | — | 高亮文本内容 |
+| `color` | String | — | `"#FFD700"` | 高亮颜色（十六进制，默认金色） |
+| `positionData` | String | — | `"{}"` | JSON 格式位置信息 |
+| `note` | String | — | `""` | 编辑备注/推荐理由 |
+| `sortOrder` | Int | — | `0` | 显示排序权重（升序） |
+| `createdAt` | DateTime | 默认 now() | — | 创建时间 |
+| `updatedAt` | DateTime | 自动更新 | — | 最后更新时间 |
+
+**唯一约束**：`highlightId`
+
+**与用户高亮的区别**：
+- `DrHighlight`：用户创建的批注，关联 `userId`
+- `DrEditorHighlight`：管理员预标注的编辑精选，无用户关联
+
+---
+
 ## 3. 模型关系图
 
 ```
@@ -392,11 +444,14 @@ DrUser ────────────────────────�
   │                      DrSpaceHomepageModule       │
   │                           │                      │
   │                      DrSpaceHomepageModuleResource│
-  │                        (channel/article ref)     │
+  │                        (channel/article/collection ref)
   │                                │                 │
   │                         DrChannel               │
   │                           │                      │
   │                       DrArticle <───────────────┤
+  │                           │                      │
+  │                           ├──< DrEditorHighlight │ (编辑高亮)
+  │                           │     text, color, note
   │                           │                      │
   ├──< DrBookmark >───────────┤                      │
   │     (userId+articleId, unique)  │                │
@@ -405,13 +460,24 @@ DrUser ────────────────────────�
   │     (userId+articleId, unique)  │                │
   │     progress: 0-100             │                │
   │                                 │                │
-  ├──< DrHighlight >────────────────┘                │
+  ├──< DrHighlight >────────────────┘                │ (用户批注)
   │     text, color, positionData, note              │
   │                                                  │
   └──< DrCollection >                                │
         │                                            │
         └──< DrCollectionArticle >──────────────────┘
               (collectionId+articleId, unique)
+
+DrSpace ──────────────────────────────────────────────┐
+  │                                                  │
+  ├──< DrSpaceCollection >                          │
+  │     └──< DrSpaceCollectionArticle >─────────────┤
+  │           (collectionId+articleId, unique)       │
+  │                                                  │
+  └──< DrDailyPickArticle > (每日精选池)              │
+        (spaceId+articleId, unique)                  │
+        enabled: boolean                             │
+        → 轮换算法：日期 + 空间哈希选取 1-3 篇 ────────┘
 ```
 
 ---
@@ -437,6 +503,8 @@ DrUser ────────────────────────�
 | DrHighlight | `highlightId` |
 | DrCollection | `collectionId` |
 | DrCollectionArticle | `(collectionId, articleId)` |
+| DrDailyPickArticle | `pickId`, `(spaceId, articleId)` |
+| DrEditorHighlight | `highlightId` |
 
 ---
 

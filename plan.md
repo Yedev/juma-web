@@ -452,7 +452,6 @@ Body: { article_id: "xxx", message: "这篇文章的核心观点是什么？" }
 | 新建 | `server/src/middleware/drAuth.ts` | DeepRead 用户 JWT 鉴权 |
 | 新建 | `server/src/routes/deepread.ts` | 客户端 API 路由 |
 | 新建 | `server/src/services/deepread/smsService.ts` | 短信验证码服务 |
-| 新建 | `server/src/services/deepread/aiService.ts` | Gemini AI 对话服务 |
 | 修改 | `server/src/routes/admin.ts` | 追加 DR 管理 API 路由 |
 | 修改 | `server/src/index.ts` | 注册 deepread 路由 |
 | 修改 | `server/src/prisma/seed.ts` | 追加 DR 种子数据 |

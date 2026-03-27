@@ -2,7 +2,6 @@ import { Router, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { signMiddleware } from "../middleware/sign";
 import { drAuthMiddleware, DrAuthRequest, signDrToken } from "../middleware/drAuth";
-import { chatWithArticle } from "../services/ai";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -816,40 +815,822 @@ router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response
   }
 });
 
-// ── AI Chat (Phase 6) ────────────────────────────────────
 
-router.post("/ai/chat", async (req: DrAuthRequest, res: Response): Promise<void> => {
+// ── 每日精选 (Phase 7) ────────────────────────────────────
+
+// 简单字符串哈希函数
+function hashString(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+// 获取当日精选文章
+router.get("/spaces/:spaceId/daily-picks", async (req: DrAuthRequest, res: Response): Promise<void> => {
   try {
-    const { article_id, message: userMessage } = req.body as {
-      article_id?: string;
-      message?: string;
-    };
+    const spaceId = req.params.spaceId as string;
 
-    if (!article_id || !userMessage) {
-      res.status(400).json({ code: 400, message: "article_id 和 message 不能为空" });
+    // 验证成员身份
+    const member = await prisma.drSpaceMember.findUnique({
+      where: { spaceId_userId: { spaceId, userId: req.drUserId! } },
+    });
+    if (!member) {
+      res.status(403).json({ code: 403, message: "您不是该空间的成员" });
       return;
     }
 
-    const article = await prisma.drArticle.findUnique({
-      where: { articleId: article_id },
+    // 获取启用的精选文章池
+    const pickArticles = await prisma.drDailyPickArticle.findMany({
+      where: { spaceId, enabled: true },
+      orderBy: { sortOrder: "asc" },
     });
+
+    if (pickArticles.length === 0) {
+      res.json({
+        code: 200,
+        message: "success",
+        data: { date: new Date().toISOString().split("T")[0], articles: [] },
+      });
+      return;
+    }
+
+    // 计算日期索引（基于 UTC 时间）
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dayIndex = Math.floor(today.getTime() / 86400000);
+
+    // 计算起始位置（基于空间ID的哈希，确保不同空间同一天不同内容）
+    const spaceHash = hashString(spaceId);
+    const startIndex = (dayIndex + spaceHash) % pickArticles.length;
+
+    // 循环选取最多 3 篇文章
+    const pickCount = Math.min(3, pickArticles.length);
+    const selectedPicks: typeof pickArticles = [];
+
+    for (let i = 0; i < pickCount; i++) {
+      const idx = (startIndex + i) % pickArticles.length;
+      selectedPicks.push(pickArticles[idx]);
+    }
+
+    const articleIds = selectedPicks.map((p) => p.articleId);
+
+    // 获取文章详情
+    const articles = await prisma.drArticle.findMany({
+      where: { articleId: { in: articleIds } },
+    });
+    const articleMap = new Map(articles.map((a) => [a.articleId, a]));
+
+    // 获取编辑高亮
+    const highlights = await prisma.drEditorHighlight.findMany({
+      where: { articleId: { in: articleIds } },
+      orderBy: { sortOrder: "asc" },
+    });
+
+    // 按文章分组高亮
+    const highlightsByArticle = new Map<string, typeof highlights>();
+    for (const h of highlights) {
+      if (!highlightsByArticle.has(h.articleId)) {
+        highlightsByArticle.set(h.articleId, []);
+      }
+      highlightsByArticle.get(h.articleId)!.push(h);
+    }
+
+    // 获取用户阅读状态
+    const readStatuses = await prisma.drReadStatus.findMany({
+      where: { userId: req.drUserId!, articleId: { in: articleIds } },
+    });
+    const readMap = new Map(readStatuses.map((r) => [r.articleId, r.progress]));
+
+    // 获取用户书签状态
+    const bookmarks = await prisma.drBookmark.findMany({
+      where: { userId: req.drUserId!, articleId: { in: articleIds } },
+    });
+    const bookmarkSet = new Set(bookmarks.map((b) => b.articleId));
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        date: new Date().toISOString().split("T")[0],
+        articles: selectedPicks
+          .filter((p) => articleMap.has(p.articleId))
+          .map((p) => {
+            const article = articleMap.get(p.articleId)!;
+            return {
+              articleId: article.articleId,
+              title: article.title,
+              summary: article.summary,
+              coverUrl: article.coverUrl,
+              author: article.author,
+              readCount: article.readCount,
+              publishedAt: article.publishedAt,
+              readProgress: readMap.get(article.articleId) ?? 0,
+              isBookmarked: bookmarkSet.has(article.articleId),
+              editorHighlights: (highlightsByArticle.get(article.articleId) ?? []).map((h) => ({
+                highlightId: h.highlightId,
+                text: h.text,
+                color: h.color,
+                note: h.note,
+              })),
+            };
+          }),
+      },
+    });
+  } catch (error) {
+    console.error("Get daily picks error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── 阅读统计 ───────────────────────────────────────────────────
+
+// 生成唯一的 statsId
+function generateStatsId(): string {
+  return `RS${Date.now()}${Math.floor(Math.random() * 100000).toString().padStart(5, "0")}`;
+}
+
+// 上报阅读统计
+// include_today_summary=true 时返回当日汇总（total_reading_time_today, articles_read_today）
+router.post("/reading-stats", async (req: DrAuthRequest, res: Response): Promise<void> => {
+  try {
+    const includeTodaySummary = req.query.include_today_summary === "true";
+    const { article_id, reading_time_seconds, scroll_depth, session_start, session_end } = req.body as {
+      article_id?: string;
+      reading_time_seconds?: number;
+      scroll_depth?: number;
+      session_start?: string;
+      session_end?: string;
+    };
+
+    if (!article_id) {
+      res.status(400).json({ code: 400, message: "article_id 不能为空" });
+      return;
+    }
+
+    // 验证文章存在
+    const article = await prisma.drArticle.findUnique({ where: { articleId: article_id } });
     if (!article) {
       res.status(404).json({ code: 404, message: "文章不存在" });
       return;
     }
 
-    // Strip HTML tags to get plain text
-    const plainText = article.content.replace(/<[^>]*>/g, "").replace(/[#*`]/g, "").trim();
+    const stats = await prisma.drReadingStats.create({
+      data: {
+        statsId: generateStatsId(),
+        userId: req.drUserId!,
+        articleId: article_id,
+        readingTimeMs: (reading_time_seconds ?? 0) * 1000,
+        scrollDepth: scroll_depth ?? 0,
+        sessionStart: session_start ? new Date(session_start) : new Date(),
+        sessionEnd: session_end ? new Date(session_end) : new Date(),
+      },
+    });
 
-    const reply = await chatWithArticle(article.title, plainText, userMessage);
+    const baseData = {
+      statsId: stats.statsId,
+      articleId: stats.articleId,
+      readingTimeSeconds: Math.floor(stats.readingTimeMs / 1000),
+      scrollDepth: stats.scrollDepth,
+      createdAt: stats.createdAt,
+    };
+
+    // 按需返回当日汇总
+    if (includeTodaySummary) {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+
+      const todayStats = await prisma.drReadingStats.findMany({
+        where: { userId: req.drUserId!, createdAt: { gte: todayStart } },
+        select: { articleId: true, readingTimeMs: true },
+      });
+
+      const uniqueArticles = new Set(todayStats.map((s) => s.articleId));
+      const totalReadingTimeMs = todayStats.reduce((sum, s) => sum + s.readingTimeMs, 0);
+
+      res.json({
+        code: 200,
+        message: "统计已记录",
+        data: {
+          ...baseData,
+          total_reading_time_today: Math.floor(totalReadingTimeMs / 1000),
+          articles_read_today: uniqueArticles.size,
+        },
+      });
+    } else {
+      res.json({
+        code: 200,
+        message: "统计已上报",
+        data: baseData,
+      });
+    }
+  } catch (error) {
+    console.error("Create reading stats error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 批量上报阅读统计（最多 100 条）
+router.post("/reading-stats/batch", async (req: DrAuthRequest, res: Response): Promise<void> => {
+  try {
+    const { stats } = req.body as {
+      stats?: Array<{
+        article_id: string;
+        reading_time_seconds: number;
+        scroll_depth: number;
+        session_start: string;
+        session_end: string;
+      }>;
+    };
+
+    if (!Array.isArray(stats) || stats.length === 0) {
+      res.status(400).json({ code: 400, message: "stats 不能为空" });
+      return;
+    }
+
+    if (stats.length > 100) {
+      res.status(400).json({ code: 400, message: "单次最多上报 100 条统计" });
+      return;
+    }
+
+    // 验证所有文章存在
+    const articleIds = [...new Set(stats.map((s) => s.article_id))];
+    const articles = await prisma.drArticle.findMany({
+      where: { articleId: { in: articleIds } },
+    });
+    const validArticleIds = new Set(articles.map((a) => a.articleId));
+
+    const createData = stats
+      .filter((s) => validArticleIds.has(s.article_id))
+      .map(() => ({
+        statsId: generateStatsId(),
+        userId: req.drUserId!,
+        articleId: stats.find((s) => validArticleIds.has(s.article_id))!.article_id,
+        readingTimeMs: 0,
+        scrollDepth: 0,
+        sessionStart: new Date(),
+        sessionEnd: new Date(),
+      }));
+
+    // 重新构建正确的数据
+    const validStats = stats.filter((s) => validArticleIds.has(s.article_id));
+    const createDataFixed = validStats.map((s) => ({
+      statsId: generateStatsId(),
+      userId: req.drUserId!,
+      articleId: s.article_id,
+      readingTimeMs: (s.reading_time_seconds ?? 0) * 1000,
+      scrollDepth: s.scroll_depth ?? 0,
+      sessionStart: s.session_start ? new Date(s.session_start) : new Date(),
+      sessionEnd: s.session_end ? new Date(s.session_end) : new Date(),
+    }));
+
+    if (createDataFixed.length === 0) {
+      res.json({ code: 200, message: "无有效统计数据", data: { count: 0 } });
+      return;
+    }
+
+    await prisma.drReadingStats.createMany({ data: createDataFixed });
+
+    res.json({
+      code: 200,
+      message: "统计已批量上报",
+      data: { count: createDataFixed.length },
+    });
+  } catch (error) {
+    console.error("Batch create reading stats error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 获取用户阅读统计汇总
+router.get("/stats/summary", async (req: DrAuthRequest, res: Response): Promise<void> => {
+  try {
+    const period = (req.query.period as string) || "all";
+
+    // 计算时间范围
+    let startDate: Date | null = null;
+    const now = new Date();
+    switch (period) {
+      case "today":
+        startDate = new Date();
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case "week":
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        break;
+      case "month":
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        break;
+    }
+
+    const whereClause = startDate ? { userId: req.drUserId!, createdAt: { gte: startDate } } : { userId: req.drUserId! };
+
+    // 获取阅读统计
+    const stats = await prisma.drReadingStats.findMany({
+      where: whereClause,
+      select: { articleId: true, readingTimeMs: true },
+    });
+
+    // 获取批注数
+    const highlightCount = await prisma.drHighlight.count({
+      where: { userId: req.drUserId! },
+    });
+
+    // 获取收藏数
+    const bookmarkCount = await prisma.drBookmark.count({
+      where: { userId: req.drUserId! },
+    });
+
+    // 计算连续阅读天数
+    const allStats = await prisma.drReadingStats.findMany({
+      where: { userId: req.drUserId! },
+      select: { createdAt: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    let streakDays = 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    for (let i = 0; i < 365; i++) {
+      const checkDate = new Date(today.getTime() - i * 24 * 60 * 60 * 1000);
+      const hasStats = allStats.some((s) => {
+        const statDate = new Date(s.createdAt);
+        return statDate.toDateString() === checkDate.toDateString();
+      });
+      if (hasStats) {
+        streakDays++;
+      } else if (i > 0) {
+        break;
+      }
+    }
+
+    // 统计文章数
+    const uniqueArticles = new Set(stats.map((s) => s.articleId));
+    const totalReadingTimeMs = stats.reduce((sum, s) => sum + s.readingTimeMs, 0);
 
     res.json({
       code: 200,
       message: "success",
-      data: { reply: reply || "抱歉，无法生成回复" },
+      data: {
+        total_reading_time_seconds: Math.floor(totalReadingTimeMs / 1000),
+        total_articles_read: uniqueArticles.size,
+        total_highlights: highlightCount,
+        total_notes: highlightCount,
+        reading_streak_days: streakDays,
+      },
     });
   } catch (error) {
-    console.error("AI chat error:", error);
+    console.error("Get stats summary error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── 收藏列表 ───────────────────────────────────────────────────
+
+router.get("/bookmarks", async (req: DrAuthRequest, res: Response): Promise<void> => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const pageSize = parseInt(req.query.page_size as string) || 20;
+
+    const [bookmarks, total] = await Promise.all([
+      prisma.drBookmark.findMany({
+        where: { userId: req.drUserId! },
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.drBookmark.count({ where: { userId: req.drUserId! } }),
+    ]);
+
+    // 获取文章详情
+    const articleIds = bookmarks.map((b) => b.articleId);
+    const articles = articleIds.length > 0
+      ? await prisma.drArticle.findMany({
+          where: { articleId: { in: articleIds } },
+          select: { articleId: true, title: true, summary: true, coverUrl: true, author: true },
+        })
+      : [];
+    const articleMap = new Map(articles.map((a) => [a.articleId, a]));
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        list: bookmarks
+          .filter((b) => articleMap.has(b.articleId))
+          .map((b) => {
+            const article = articleMap.get(b.articleId)!;
+            return {
+              articleId: article.articleId,
+              title: article.title,
+              summary: article.summary,
+              coverUrl: article.coverUrl,
+              author: article.author,
+              bookmarkedAt: b.createdAt,
+            };
+          }),
+        total,
+        page,
+        pageSize,
+      },
+    });
+  } catch (error) {
+    console.error("Get bookmarks error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── 每日一文 ───────────────────────────────────────────────────
+
+router.get("/daily-article", async (req: DrAuthRequest, res: Response): Promise<void> => {
+  try {
+    // 获取用户所属空间
+    const memberships = await prisma.drSpaceMember.findMany({
+      where: { userId: req.drUserId! },
+    });
+
+    if (memberships.length === 0) {
+      res.json({
+        code: 200,
+        message: "success",
+        data: { date: new Date().toISOString().split("T")[0], article: null, reason: "您还没有加入任何空间" },
+      });
+      return;
+    }
+
+    // 取第一个空间获取每日精选
+    const spaceId = memberships[0].spaceId;
+
+    const pickArticles = await prisma.drDailyPickArticle.findMany({
+      where: { spaceId, enabled: true },
+      orderBy: { sortOrder: "asc" },
+    });
+
+    if (pickArticles.length === 0) {
+      res.json({
+        code: 200,
+        message: "success",
+        data: { date: new Date().toISOString().split("T")[0], article: null, reason: "暂无精选文章" },
+      });
+      return;
+    }
+
+    // 计算当日索引
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dayIndex = Math.floor(today.getTime() / 86400000);
+    const spaceHash = hashString(spaceId);
+    const selectedIndex = (dayIndex + spaceHash) % pickArticles.length;
+
+    const selectedPick = pickArticles[selectedIndex];
+    const article = await prisma.drArticle.findUnique({
+      where: { articleId: selectedPick.articleId },
+    });
+
+    if (!article) {
+      res.json({
+        code: 200,
+        message: "success",
+        data: { date: new Date().toISOString().split("T")[0], article: null, reason: "文章不存在" },
+      });
+      return;
+    }
+
+    // 获取频道信息
+    const channel = await prisma.drChannel.findUnique({
+      where: { channelId: article.channelId },
+      select: { channelId: true, name: true },
+    });
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        date: new Date().toISOString().split("T")[0],
+        article: {
+          articleId: article.articleId,
+          title: article.title,
+          summary: article.summary,
+          coverUrl: article.coverUrl,
+          author: article.author,
+          readTimeMinutes: Math.max(1, Math.ceil(article.content.length / 500)),
+          channelId: article.channelId,
+          channelName: channel?.name ?? "",
+        },
+        reason: "根据您的阅读偏好推荐",
+      },
+    });
+  } catch (error) {
+    console.error("Get daily article error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── 批量同步接口 ───────────────────────────────────────────────────
+
+interface SyncHighlightItem {
+  local_id: string;
+  action: "create" | "update" | "delete";
+  data?: {
+    article_id?: string;
+    text?: string;
+    color?: string;
+    position_data?: unknown;
+    note?: string;
+  };
+  remote_id?: string;
+}
+
+interface SyncBookmarkItem {
+  local_id: string;
+  action: "create" | "delete";
+  data?: {
+    article_id?: string;
+    bookmarked?: boolean;
+  };
+}
+
+interface SyncReadProgressItem {
+  local_id: string;
+  action: "update";
+  data?: {
+    article_id?: string;
+    progress?: number;
+  };
+}
+
+interface SyncReadingStatsItem {
+  local_id: string;
+  action: "create";
+  data?: {
+    article_id?: string;
+    reading_time_seconds?: number;
+    scroll_depth?: number;
+    session_start?: string;
+    session_end?: string;
+  };
+}
+
+// POST /sync - 批量同步
+router.post("/sync", async (req: DrAuthRequest, res: Response): Promise<void> => {
+  try {
+    const { client_sync_id, last_sync_at, payload } = req.body as {
+      client_sync_id?: string;
+      last_sync_at?: string;
+      payload?: {
+        highlights?: SyncHighlightItem[];
+        bookmarks?: SyncBookmarkItem[];
+        read_progress?: SyncReadProgressItem[];
+        reading_stats?: SyncReadingStatsItem[];
+      };
+    };
+
+    const results = {
+      highlights: [] as Array<{ local_id: string; remote_id?: string; status: string; error?: string }>,
+      bookmarks: [] as Array<{ local_id: string; status: string; error?: string }>,
+      read_progress: [] as Array<{ local_id: string; status: string; error?: string }>,
+      reading_stats: [] as Array<{ local_id: string; status: string; error?: string }>,
+    };
+
+    // 处理高亮同步
+    if (payload?.highlights && payload.highlights.length > 0) {
+      for (const item of payload.highlights) {
+        try {
+          if (item.action === "create" && item.data) {
+            const highlight = await prisma.drHighlight.create({
+              data: {
+                highlightId: generateId("H"),
+                userId: req.drUserId!,
+                articleId: item.data.article_id ?? "",
+                text: item.data.text ?? "",
+                color: item.data.color || "#FFEB3B",
+                positionData: item.data.position_data ? JSON.stringify(item.data.position_data) : "{}",
+                note: item.data.note || "",
+              },
+            });
+            results.highlights.push({ local_id: item.local_id, remote_id: highlight.highlightId, status: "success" });
+          } else if (item.action === "delete" && item.remote_id) {
+            const existing = await prisma.drHighlight.findUnique({ where: { highlightId: item.remote_id } });
+            if (existing && existing.userId === req.drUserId) {
+              await prisma.drHighlight.delete({ where: { highlightId: item.remote_id } });
+              results.highlights.push({ local_id: item.local_id, status: "success" });
+            } else {
+              results.highlights.push({ local_id: item.local_id, status: "failed", error: "无权删除或不存在" });
+            }
+          } else if (item.action === "update" && item.remote_id && item.data) {
+            const existing = await prisma.drHighlight.findUnique({ where: { highlightId: item.remote_id } });
+            if (existing && existing.userId === req.drUserId) {
+              const updateData: Record<string, unknown> = {};
+              if (item.data.color !== undefined) updateData.color = item.data.color;
+              if (item.data.note !== undefined) updateData.note = item.data.note;
+              await prisma.drHighlight.update({ where: { highlightId: item.remote_id }, data: updateData });
+              results.highlights.push({ local_id: item.local_id, status: "success" });
+            } else {
+              results.highlights.push({ local_id: item.local_id, status: "failed", error: "无权更新或不存在" });
+            }
+          }
+        } catch (err) {
+          results.highlights.push({ local_id: item.local_id, status: "failed", error: String(err) });
+        }
+      }
+    }
+
+    // 处理收藏同步
+    if (payload?.bookmarks && payload.bookmarks.length > 0) {
+      for (const item of payload.bookmarks) {
+        try {
+          if (item.action === "create" && item.data?.article_id) {
+            await prisma.drBookmark.upsert({
+              where: { userId_articleId: { userId: req.drUserId!, articleId: item.data.article_id } },
+              update: {},
+              create: { userId: req.drUserId!, articleId: item.data.article_id },
+            });
+            results.bookmarks.push({ local_id: item.local_id, status: "success" });
+          } else if (item.action === "delete" && item.data?.article_id) {
+            await prisma.drBookmark.deleteMany({
+              where: { userId: req.drUserId!, articleId: item.data.article_id },
+            });
+            results.bookmarks.push({ local_id: item.local_id, status: "success" });
+          }
+        } catch (err) {
+          results.bookmarks.push({ local_id: item.local_id, status: "failed", error: String(err) });
+        }
+      }
+    }
+
+    // 处理阅读进度同步
+    if (payload?.read_progress && payload.read_progress.length > 0) {
+      for (const item of payload.read_progress) {
+        try {
+          if (item.action === "update" && item.data?.article_id) {
+            await prisma.drReadStatus.upsert({
+              where: { userId_articleId: { userId: req.drUserId!, articleId: item.data.article_id } },
+              update: { progress: item.data.progress ?? 100, readAt: new Date() },
+              create: { userId: req.drUserId!, articleId: item.data.article_id, progress: item.data.progress ?? 100 },
+            });
+            results.read_progress.push({ local_id: item.local_id, status: "success" });
+          }
+        } catch (err) {
+          results.read_progress.push({ local_id: item.local_id, status: "failed", error: String(err) });
+        }
+      }
+    }
+
+    // 处理阅读统计同步
+    if (payload?.reading_stats && payload.reading_stats.length > 0) {
+      for (const item of payload.reading_stats) {
+        try {
+          if (item.action === "create" && item.data?.article_id) {
+            const statsId = `RS${Date.now()}${Math.floor(Math.random() * 1000).toString().padStart(3, "0")}`;
+            await prisma.drReadingStats.create({
+              data: {
+                statsId,
+                userId: req.drUserId!,
+                articleId: item.data.article_id,
+                readingTimeMs: (item.data.reading_time_seconds ?? 0) * 1000,
+                scrollDepth: item.data.scroll_depth ?? 0,
+                sessionStart: item.data.session_start ? new Date(item.data.session_start) : new Date(),
+                sessionEnd: item.data.session_end ? new Date(item.data.session_end) : new Date(),
+              },
+            });
+            results.reading_stats.push({ local_id: item.local_id, status: "success" });
+          }
+        } catch (err) {
+          results.reading_stats.push({ local_id: item.local_id, status: "failed", error: String(err) });
+        }
+      }
+    }
+
+    // 获取服务端变化（如果有 last_sync_at）
+    type ServerChanges = {
+      highlights: Array<{ highlightId: string; articleId: string; text: string; color: string; note: string; updatedAt: Date }>;
+      bookmarks: unknown[];
+      articles: unknown[];
+    };
+    let serverChanges: ServerChanges = { highlights: [], bookmarks: [], articles: [] };
+    if (last_sync_at) {
+      const syncDate = new Date(last_sync_at);
+      const updatedHighlights = await prisma.drHighlight.findMany({
+        where: { userId: req.drUserId!, updatedAt: { gte: syncDate } },
+      });
+
+      serverChanges = {
+        highlights: updatedHighlights.map((h) => ({
+          highlightId: h.highlightId,
+          articleId: h.articleId,
+          text: h.text,
+          color: h.color,
+          note: h.note,
+          updatedAt: h.updatedAt,
+        })),
+        bookmarks: [],
+        articles: [],
+      };
+    }
+
+    res.json({
+      code: 200,
+      message: "同步成功",
+      data: {
+        server_sync_id: `sync-${Date.now()}`,
+        synced_at: new Date().toISOString(),
+        results,
+        server_changes: serverChanges,
+      },
+    });
+  } catch (error) {
+    console.error("Sync error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// GET /sync/changes - 增量获取
+router.get("/sync/changes", async (req: DrAuthRequest, res: Response): Promise<void> => {
+  try {
+    const lastSyncAt = req.query.last_sync_at as string;
+    const entityTypes = (req.query.entity_types as string)?.split(",") || ["highlights", "bookmarks", "read_progress"];
+
+    if (!lastSyncAt) {
+      res.status(400).json({ code: 400, message: "last_sync_at 不能为空" });
+      return;
+    }
+
+    const syncDate = new Date(lastSyncAt);
+    const changes: Record<string, { created: unknown[]; updated: unknown[]; deleted: string[] }> = {};
+
+    // 获取高亮变化
+    if (entityTypes.includes("highlights")) {
+      const highlights = await prisma.drHighlight.findMany({
+        where: { userId: req.drUserId!, updatedAt: { gte: syncDate } },
+      });
+      const createdHighlights = highlights.filter((h) => h.createdAt >= syncDate);
+      const updatedHighlights = highlights.filter((h) => h.createdAt < syncDate);
+
+      changes.highlights = {
+        created: createdHighlights.map((h) => ({
+          highlightId: h.highlightId,
+          articleId: h.articleId,
+          text: h.text,
+          color: h.color,
+          positionData: JSON.parse(h.positionData),
+          note: h.note,
+          createdAt: h.createdAt,
+        })),
+        updated: updatedHighlights.map((h) => ({
+          highlightId: h.highlightId,
+          color: h.color,
+          note: h.note,
+          updatedAt: h.updatedAt,
+        })),
+        deleted: [], // 需要 tombstone 表支持
+      };
+    }
+
+    // 获取收藏变化
+    if (entityTypes.includes("bookmarks")) {
+      const bookmarks = await prisma.drBookmark.findMany({
+        where: { userId: req.drUserId!, createdAt: { gte: syncDate } },
+      });
+
+      changes.bookmarks = {
+        created: bookmarks.map((b) => ({
+          articleId: b.articleId,
+          createdAt: b.createdAt,
+        })),
+        updated: [],
+        deleted: [], // 需要 tombstone 表支持
+      };
+    }
+
+    // 获取阅读进度变化
+    if (entityTypes.includes("read_progress")) {
+      const readStatuses = await prisma.drReadStatus.findMany({
+        where: { userId: req.drUserId!, readAt: { gte: syncDate } },
+      });
+
+      changes.read_progress = {
+        created: [],
+        updated: readStatuses.map((r) => ({
+          articleId: r.articleId,
+          progress: r.progress,
+          readAt: r.readAt,
+        })),
+        deleted: [],
+      };
+    }
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        synced_at: new Date().toISOString(),
+        changes,
+      },
+    });
+  } catch (error) {
+    console.error("Get sync changes error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
