@@ -261,7 +261,7 @@ error/running → queued（重试时重置）
 | `spaceId` | String | — | — | 所属空间 ID |
 | `title` | String | — | — | 模块标题 |
 | `subtitle` | String | — | `""` | 副标题（小字说明） |
-| `layoutType` | String | — | `"large_card"` | 资源排列方式，支持：`large_card`（大图卡）、`horizontal_card`（横向卡）、`vertical_card`（纵向卡）、`waterfall`（瀑布流） |
+| `layoutType` | String | — | `"large_horizontal"` | 资源排列方式，支持：`large_horizontal`（大图横向）、`small_horizontal`（小图横向）、`large_vertical`（大图纵向）、`small_vertical`（小图纵向）、`plain_text`（纯文本） |
 | `sortOrder` | Int | — | `0` | 排序权重（升序） |
 | `createdAt` | DateTime | 默认 now() | — | 创建时间 |
 | `updatedAt` | DateTime | 自动更新 | — | 最后更新时间 |

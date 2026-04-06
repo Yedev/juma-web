@@ -10,6 +10,7 @@ import {
   TeamOutlined,
   FolderOutlined,
   StarOutlined,
+  PictureOutlined,
 } from "@ant-design/icons";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 
@@ -18,6 +19,7 @@ type MenuItem = { key: string; icon: React.ReactNode; label: string } | { type: 
 const menuItems: MenuItem[] = [
   { key: "/tasks", icon: <UnorderedListOutlined />, label: "任务管理" },
   { key: "/config", icon: <SettingOutlined />, label: "配置管理" },
+  { key: "/media", icon: <PictureOutlined />, label: "图床" },
   { key: "/api-playground", icon: <ApiOutlined />, label: "API接口说明" },
   { type: "divider", label: "DeepRead" },
   { key: "/dr/spaces", icon: <AppstoreOutlined />, label: "空间管理" },
@@ -31,6 +33,7 @@ const menuItems: MenuItem[] = [
 const pageTitle: Record<string, string> = {
   "/tasks": "任务管理",
   "/config": "配置管理",
+  "/media": "图床",
   "/api-playground": "API接口说明",
   "/dr/spaces": "空间管理",
   "/dr/channels": "频道管理",

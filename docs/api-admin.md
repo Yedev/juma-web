@@ -429,10 +429,11 @@ curl -X POST "http://localhost:3001/api/admin/dr/collections/SC1709001234567/art
 
 | 值 | 说明 |
 |----|------|
-| `large_card` | 大图卡（默认） |
-| `horizontal_card` | 横向卡 |
-| `vertical_card` | 纵向卡 |
-| `waterfall` | 瀑布流 |
+| `large_horizontal` | 大图横向（默认） |
+| `small_horizontal` | 小图横向 |
+| `large_vertical` | 大图纵向 |
+| `small_vertical` | 小图纵向 |
+| `plain_text` | 纯文本 |
 
 **资源类型（resourceType）：**
 

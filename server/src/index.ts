@@ -26,6 +26,9 @@ app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/v1/app", appRoutes);
 app.use("/api/v1/dr", deepreadRoutes);
+const uploadsDir = path.resolve(__dirname, "../uploads");
+app.use("/uploads", express.static(uploadsDir));
+
 const staticDir = path.resolve(__dirname, "../public");
 app.use(express.static(staticDir));
 app.get("*", (_req, res) => {

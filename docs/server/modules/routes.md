@@ -137,10 +137,11 @@
 
 | 值 | 含义 |
 |----|------|
-| `large_card` | 大图卡 |
-| `horizontal_card` | 横向卡 |
-| `vertical_card` | 纵向卡 |
-| `waterfall` | 瀑布流 |
+| `large_horizontal` | 大图横向（默认） |
+| `small_horizontal` | 小图横向 |
+| `large_vertical` | 大图纵向 |
+| `small_vertical` | 小图纵向 |
+| `plain_text` | 纯文本 |
 
 **GET /api/admin/dr/spaces/:spaceId/homepage-modules 响应示例**：
 
@@ -155,7 +156,7 @@
       "spaceId": "S17111234567890001",
       "title": "推荐阅读",
       "subtitle": "精选内容每日更新",
-      "layoutType": "large_card",
+      "layoutType": "large_horizontal",
       "sortOrder": 0,
       "createdAt": "2026-03-22T00:00:00.000Z",
       "updatedAt": "2026-03-22T00:00:00.000Z",

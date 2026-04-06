@@ -1,6 +1,10 @@
 import { Router, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware, AuthRequest } from "../middleware/auth";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import crypto from "crypto";
 
 import { listRegisteredTasks } from "../services/taskRegistry";
 import { enqueueTaskByRegisteredName } from "../services/taskEnqueue";
@@ -855,6 +859,7 @@ router.delete("/dr/channels/:channelId", async (req: AuthRequest, res: Response)
       return;
     }
 
+    await prisma.drSpaceHomepageModuleResource.deleteMany({ where: { resourceId: channelId, resourceType: "channel" } });
     await prisma.drChannel.delete({ where: { channelId } });
     res.json({ code: 200, message: "频道已删除" });
   } catch (error) {
@@ -1030,6 +1035,7 @@ router.delete("/dr/articles/:articleId", async (req: AuthRequest, res: Response)
     await prisma.drReadStatus.deleteMany({ where: { articleId } });
     await prisma.drHighlight.deleteMany({ where: { articleId } });
     await prisma.drCollectionArticle.deleteMany({ where: { articleId } });
+    await prisma.drSpaceHomepageModuleResource.deleteMany({ where: { resourceId: articleId, resourceType: "article" } });
     await prisma.drArticle.delete({ where: { articleId } });
 
     res.json({ code: 200, message: "文章已删除" });
@@ -1124,8 +1130,11 @@ router.get("/dr/users/:userId", async (req: AuthRequest, res: Response): Promise
 
 // ── Space Homepage Modules ──────────────────────────────────
 
-const VALID_LAYOUT_TYPES = ["large_card", "horizontal_card", "vertical_card", "waterfall"] as const;
+const VALID_LAYOUT_TYPES = ["large_horizontal", "small_horizontal", "large_vertical", "small_vertical", "plain_text"] as const;
 type LayoutType = (typeof VALID_LAYOUT_TYPES)[number];
+const VALID_MODULE_TYPES = ["standard", "title_desc", "load_list"] as const;
+type ModuleType = (typeof VALID_MODULE_TYPES)[number];
+const VALID_SOURCE_TYPES = ["channel", "collection"] as const;
 
 router.get("/dr/spaces/:spaceId/homepage-modules", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -1186,10 +1195,14 @@ router.get("/dr/spaces/:spaceId/homepage-modules", async (req: AuthRequest, res:
 router.post("/dr/spaces/:spaceId/homepage-modules", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const spaceId = req.params.spaceId as string;
-    const { title, subtitle, layoutType } = req.body as {
+    const { title, subtitle, layoutType, moduleType, description, sourceType, sourceId } = req.body as {
       title?: string;
       subtitle?: string;
       layoutType?: string;
+      moduleType?: string;
+      description?: string;
+      sourceType?: string;
+      sourceId?: string;
     };
 
     if (!title || !title.trim()) {
@@ -1197,7 +1210,24 @@ router.post("/dr/spaces/:spaceId/homepage-modules", async (req: AuthRequest, res
       return;
     }
 
-    if (layoutType && !VALID_LAYOUT_TYPES.includes(layoutType as LayoutType)) {
+    const resolvedModuleType = (moduleType || "standard") as ModuleType;
+    if (!VALID_MODULE_TYPES.includes(resolvedModuleType)) {
+      res.status(400).json({ code: 400, message: "无效的模块类型" });
+      return;
+    }
+
+    if (resolvedModuleType === "load_list") {
+      if (!sourceType || !VALID_SOURCE_TYPES.includes(sourceType as typeof VALID_SOURCE_TYPES[number])) {
+        res.status(400).json({ code: 400, message: "load_list 模块需要指定有效的 sourceType（channel 或 collection）" });
+        return;
+      }
+      if (!sourceId) {
+        res.status(400).json({ code: 400, message: "load_list 模块需要指定 sourceId" });
+        return;
+      }
+    }
+
+    if (resolvedModuleType !== "title_desc" && layoutType && !VALID_LAYOUT_TYPES.includes(layoutType as LayoutType)) {
       res.status(400).json({ code: 400, message: "无效的布局类型" });
       return;
     }
@@ -1208,20 +1238,39 @@ router.post("/dr/spaces/:spaceId/homepage-modules", async (req: AuthRequest, res
       return;
     }
 
-    const maxOrder = await prisma.drSpaceHomepageModule.findFirst({
-      where: { spaceId },
-      orderBy: { sortOrder: "desc" },
-      select: { sortOrder: true },
-    });
+    let newSortOrder: number;
+    if (resolvedModuleType === "load_list") {
+      const maxOrder = await prisma.drSpaceHomepageModule.findFirst({
+        where: { spaceId },
+        orderBy: { sortOrder: "desc" },
+        select: { sortOrder: true },
+      });
+      newSortOrder = (maxOrder?.sortOrder ?? -1) + 1;
+    } else {
+      const maxNonLoadList = await prisma.drSpaceHomepageModule.findFirst({
+        where: { spaceId, moduleType: { not: "load_list" } },
+        orderBy: { sortOrder: "desc" },
+        select: { sortOrder: true },
+      });
+      newSortOrder = (maxNonLoadList?.sortOrder ?? -1) + 1;
+      await prisma.drSpaceHomepageModule.updateMany({
+        where: { spaceId, moduleType: "load_list" },
+        data: { sortOrder: { increment: 1 } },
+      });
+    }
 
     const module = await prisma.drSpaceHomepageModule.create({
       data: {
         moduleId: generateDrId("HM"),
         spaceId,
+        moduleType: resolvedModuleType,
         title: title.trim(),
         subtitle: subtitle?.trim() || "",
-        layoutType: (layoutType as LayoutType) || "large_card",
-        sortOrder: (maxOrder?.sortOrder ?? -1) + 1,
+        description: description?.trim() || "",
+        layoutType: resolvedModuleType !== "title_desc" ? ((layoutType as LayoutType) || "large_horizontal") : "",
+        sourceType: resolvedModuleType === "load_list" ? (sourceType || "") : "",
+        sourceId: resolvedModuleType === "load_list" ? (sourceId || "") : "",
+        sortOrder: newSortOrder,
       },
     });
 
@@ -1235,10 +1284,13 @@ router.post("/dr/spaces/:spaceId/homepage-modules", async (req: AuthRequest, res
 router.put("/dr/homepage-modules/:moduleId", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const moduleId = req.params.moduleId as string;
-    const { title, subtitle, layoutType } = req.body as {
+    const { title, subtitle, layoutType, description, sourceType, sourceId } = req.body as {
       title?: string;
       subtitle?: string;
       layoutType?: string;
+      description?: string;
+      sourceType?: string;
+      sourceId?: string;
     };
 
     const existing = await prisma.drSpaceHomepageModule.findUnique({ where: { moduleId } });
@@ -1247,7 +1299,12 @@ router.put("/dr/homepage-modules/:moduleId", async (req: AuthRequest, res: Respo
       return;
     }
 
-    if (layoutType && !VALID_LAYOUT_TYPES.includes(layoutType as LayoutType)) {
+    if (existing.moduleType === "load_list" && sourceType && !VALID_SOURCE_TYPES.includes(sourceType as typeof VALID_SOURCE_TYPES[number])) {
+      res.status(400).json({ code: 400, message: "无效的 sourceType" });
+      return;
+    }
+
+    if (existing.moduleType !== "title_desc" && layoutType && !VALID_LAYOUT_TYPES.includes(layoutType as LayoutType)) {
       res.status(400).json({ code: 400, message: "无效的布局类型" });
       return;
     }
@@ -1255,7 +1312,10 @@ router.put("/dr/homepage-modules/:moduleId", async (req: AuthRequest, res: Respo
     const updateData: Record<string, unknown> = {};
     if (title !== undefined) updateData.title = title.trim();
     if (subtitle !== undefined) updateData.subtitle = subtitle.trim();
+    if (description !== undefined) updateData.description = description.trim();
     if (layoutType !== undefined) updateData.layoutType = layoutType;
+    if (sourceType !== undefined) updateData.sourceType = sourceType;
+    if (sourceId !== undefined) updateData.sourceId = sourceId;
 
     const updated = await prisma.drSpaceHomepageModule.update({ where: { moduleId }, data: updateData });
     res.json({ code: 200, message: "模块已更新", data: updated });
@@ -1291,6 +1351,22 @@ router.put("/dr/spaces/:spaceId/homepage-modules/reorder", async (req: AuthReque
     if (!Array.isArray(moduleIds)) {
       res.status(400).json({ code: 400, message: "moduleIds 必须是数组" });
       return;
+    }
+
+    const existingModules = await prisma.drSpaceHomepageModule.findMany({
+      where: { spaceId, moduleId: { in: moduleIds } },
+      select: { moduleId: true, moduleType: true },
+    });
+    const typeMap = Object.fromEntries(existingModules.map((m) => [m.moduleId, m.moduleType]));
+    let seenLoadList = false;
+    for (const moduleId of moduleIds) {
+      const type = typeMap[moduleId];
+      if (type === "load_list") {
+        seenLoadList = true;
+      } else if (seenLoadList) {
+        res.status(400).json({ code: 400, message: "加载列表模块必须排在所有其他模块之后" });
+        return;
+      }
     }
 
     await Promise.all(
@@ -1505,6 +1581,7 @@ router.delete("/dr/collections/:collectionId", async (req: AuthRequest, res: Res
     }
 
     await prisma.drSpaceCollectionArticle.deleteMany({ where: { collectionId } });
+    await prisma.drSpaceHomepageModuleResource.deleteMany({ where: { resourceId: collectionId, resourceType: "collection" } });
     await prisma.drSpaceCollection.delete({ where: { collectionId } });
     res.json({ code: 200, message: "集合已删除" });
   } catch (error) {
@@ -1656,7 +1733,7 @@ router.get("/dr/spaces/:spaceId/daily-picks", async (req: AuthRequest, res: Resp
 router.post("/dr/spaces/:spaceId/daily-picks", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const spaceId = req.params.spaceId as string;
-    const { articleId } = req.body as { articleId?: string };
+    const { articleId, reason } = req.body as { articleId?: string; reason?: string };
 
     if (!articleId || !articleId.trim()) {
       res.status(400).json({ code: 400, message: "articleId 不能为空" });
@@ -1695,6 +1772,7 @@ router.post("/dr/spaces/:spaceId/daily-picks", async (req: AuthRequest, res: Res
         pickId: generateDrId("DP"),
         spaceId,
         articleId,
+        reason: reason?.trim() || "",
         sortOrder: (maxOrder?.sortOrder ?? -1) + 1,
       },
     });
@@ -1745,6 +1823,29 @@ router.put("/dr/daily-picks/:pickId/toggle", async (req: AuthRequest, res: Respo
   }
 });
 
+// 更新精选文章 reason
+router.put("/dr/daily-picks/:pickId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const pickId = req.params.pickId as string;
+    const { reason } = req.body as { reason?: string };
+
+    const existing = await prisma.drDailyPickArticle.findUnique({ where: { pickId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "精选记录不存在" });
+      return;
+    }
+
+    const updated = await prisma.drDailyPickArticle.update({
+      where: { pickId },
+      data: { reason: reason?.trim() ?? existing.reason },
+    });
+    res.json({ code: 200, message: "已更新", data: updated });
+  } catch (error) {
+    console.error("Admin update daily pick error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
 // ── 编辑高亮 ──────────────────────────────────────────────────
 
 // 获取文章的编辑高亮列表
@@ -1773,11 +1874,13 @@ router.get("/dr/articles/:articleId/editor-highlights", async (req: AuthRequest,
 router.post("/dr/articles/:articleId/editor-highlights", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const articleId = req.params.articleId as string;
-    const { text, color, positionData, note } = req.body as {
+    const { text, color, positionData, note, contextBefore, contextAfter } = req.body as {
       text?: string;
       color?: string;
       positionData?: string;
       note?: string;
+      contextBefore?: string;
+      contextAfter?: string;
     };
 
     if (!text || !text.trim()) {
@@ -1805,6 +1908,8 @@ router.post("/dr/articles/:articleId/editor-highlights", async (req: AuthRequest
         color: color || "#FFD700",
         positionData: positionData || "{}",
         note: note?.trim() || "",
+        contextBefore: contextBefore?.trim() || "",
+        contextAfter: contextAfter?.trim() || "",
         sortOrder: (maxOrder?.sortOrder ?? -1) + 1,
       },
     });
@@ -1820,12 +1925,14 @@ router.post("/dr/articles/:articleId/editor-highlights", async (req: AuthRequest
 router.put("/dr/editor-highlights/:highlightId", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const highlightId = req.params.highlightId as string;
-    const { text, color, positionData, note, sortOrder } = req.body as {
+    const { text, color, positionData, note, sortOrder, contextBefore, contextAfter } = req.body as {
       text?: string;
       color?: string;
       positionData?: string;
       note?: string;
       sortOrder?: number;
+      contextBefore?: string;
+      contextAfter?: string;
     };
 
     const existing = await prisma.drEditorHighlight.findUnique({ where: { highlightId } });
@@ -1840,6 +1947,8 @@ router.put("/dr/editor-highlights/:highlightId", async (req: AuthRequest, res: R
     if (positionData !== undefined) updateData.positionData = positionData;
     if (note !== undefined) updateData.note = note.trim();
     if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
+    if (contextBefore !== undefined) updateData.contextBefore = contextBefore.trim();
+    if (contextAfter !== undefined) updateData.contextAfter = contextAfter.trim();
 
     const updated = await prisma.drEditorHighlight.update({ where: { highlightId }, data: updateData });
     res.json({ code: 200, message: "高亮已更新", data: updated });
@@ -1865,6 +1974,69 @@ router.delete("/dr/editor-highlights/:highlightId", async (req: AuthRequest, res
     console.error("Admin delete editor highlight error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
+});
+
+// ── Image Hosting ─────────────────────────────────────────
+
+const UPLOADS_DIR = path.resolve(__dirname, "../../uploads/images");
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const hash = crypto.randomBytes(8).toString("hex");
+    cb(null, `${Date.now()}_${hash}${ext}`);
+  },
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: (_req, file, cb) => {
+    const allowed = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowed.includes(ext)) cb(null, true);
+    else cb(new Error("仅支持图片格式：jpg/png/gif/webp/svg"));
+  },
+});
+
+router.post("/upload/image", upload.single("file"), (req: AuthRequest, res: Response): void => {
+  if (!req.file) {
+    res.status(400).json({ code: 400, message: "未收到文件" });
+    return;
+  }
+  const url = `/uploads/images/${req.file.filename}`;
+  res.json({ code: 200, message: "上传成功", data: { url, filename: req.file.filename, size: req.file.size } });
+});
+
+router.get("/upload/images", (_req: AuthRequest, res: Response): void => {
+  try {
+    const files = fs.readdirSync(UPLOADS_DIR)
+      .filter((f) => /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(f))
+      .map((filename) => {
+        const stat = fs.statSync(path.join(UPLOADS_DIR, filename));
+        return { filename, url: `/uploads/images/${filename}`, size: stat.size, createdAt: stat.birthtimeMs };
+      })
+      .sort((a, b) => b.createdAt - a.createdAt);
+    res.json({ code: 200, message: "success", data: files });
+  } catch {
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/upload/images/:filename", (req: AuthRequest, res: Response): void => {
+  const filename = req.params.filename as string;
+  if (filename.includes("/") || filename.includes("..")) {
+    res.status(400).json({ code: 400, message: "非法文件名" });
+    return;
+  }
+  const filepath = path.join(UPLOADS_DIR, filename);
+  if (!fs.existsSync(filepath)) {
+    res.status(404).json({ code: 404, message: "文件不存在" });
+    return;
+  }
+  fs.unlinkSync(filepath);
+  res.json({ code: 200, message: "已删除" });
 });
 
 export default router;

@@ -13,6 +13,7 @@ interface PickRecord {
   pickId: string;
   spaceId: string;
   articleId: string;
+  reason: string;
   sortOrder: number;
   enabled: boolean;
   createdAt: string;
@@ -30,6 +31,8 @@ interface PickRecord {
 interface EditorHighlight {
   highlightId: string;
   articleId: string;
+  contextBefore?: string;
+  contextAfter?: string;
   text: string;
   color: string;
   positionData: string;
@@ -55,7 +58,14 @@ export default function DrDailyPicksManagement() {
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [articleOptions, setArticleOptions] = useState<ArticleOption[]>([]);
   const [selectedArticleId, setSelectedArticleId] = useState<string>("");
+  const [addReason, setAddReason] = useState("");
   const [loadingArticleOptions, setLoadingArticleOptions] = useState(false);
+
+  // Edit reason modal
+  const [reasonModalOpen, setReasonModalOpen] = useState(false);
+  const [editingPick, setEditingPick] = useState<PickRecord | null>(null);
+  const [editReason, setEditReason] = useState("");
+  const [reasonSaving, setReasonSaving] = useState(false);
   const [addingArticle, setAddingArticle] = useState(false);
 
   // Editor highlights drawer
@@ -70,6 +80,8 @@ export default function DrDailyPicksManagement() {
   const [hlText, setHlText] = useState("");
   const [hlNote, setHlNote] = useState("");
   const [hlColor, setHlColor] = useState("#FFD700");
+  const [hlContextBefore, setHlContextBefore] = useState("");
+  const [hlContextAfter, setHlContextAfter] = useState("");
   const [hlSaving, setHlSaving] = useState(false);
 
   // Preview
@@ -115,6 +127,7 @@ export default function DrDailyPicksManagement() {
   const openAddModal = async () => {
     if (!selectedSpaceId) return;
     setSelectedArticleId("");
+    setAddReason("");
     setAddModalOpen(true);
     setLoadingArticleOptions(true);
     try {
@@ -140,6 +153,7 @@ export default function DrDailyPicksManagement() {
     try {
       const res = await adminClient.post(`/api/admin/dr/spaces/${selectedSpaceId}/daily-picks`, {
         articleId: selectedArticleId,
+        reason: addReason.trim(),
       });
       if (res.data.code === 200) {
         message.success("文章已加入精选池");
@@ -152,6 +166,31 @@ export default function DrDailyPicksManagement() {
       message.error("添加失败");
     } finally {
       setAddingArticle(false);
+    }
+  };
+
+  const openEditReason = (record: PickRecord) => {
+    setEditingPick(record);
+    setEditReason(record.reason || "");
+    setReasonModalOpen(true);
+  };
+
+  const handleSaveReason = async () => {
+    if (!editingPick) return;
+    setReasonSaving(true);
+    try {
+      const res = await adminClient.put(`/api/admin/dr/daily-picks/${editingPick.pickId}`, {
+        reason: editReason.trim(),
+      });
+      if (res.data.code === 200) {
+        message.success("已更新");
+        setReasonModalOpen(false);
+        fetchPicks(selectedSpaceId);
+      }
+    } catch {
+      message.error("更新失败");
+    } finally {
+      setReasonSaving(false);
     }
   };
 
@@ -213,6 +252,8 @@ export default function DrDailyPicksManagement() {
     setHlText("");
     setHlNote("");
     setHlColor("#FFD700");
+    setHlContextBefore("");
+    setHlContextAfter("");
     setHlModalOpen(true);
   };
 
@@ -221,6 +262,8 @@ export default function DrDailyPicksManagement() {
     setHlText(hl.text);
     setHlNote(hl.note);
     setHlColor(hl.color);
+    setHlContextBefore(hl.contextBefore ?? "");
+    setHlContextAfter(hl.contextAfter ?? "");
     setHlModalOpen(true);
   };
 
@@ -238,6 +281,8 @@ export default function DrDailyPicksManagement() {
           text: hlText.trim(),
           note: hlNote.trim(),
           color: hlColor,
+          contextBefore: hlContextBefore.trim(),
+          contextAfter: hlContextAfter.trim(),
         });
         if (res.data.code === 200) {
           message.success("高亮已更新");
@@ -250,6 +295,8 @@ export default function DrDailyPicksManagement() {
           text: hlText.trim(),
           note: hlNote.trim(),
           color: hlColor,
+          contextBefore: hlContextBefore.trim(),
+          contextAfter: hlContextAfter.trim(),
         });
         if (res.data.code === 200) {
           message.success("高亮已创建");
@@ -322,6 +369,17 @@ export default function DrDailyPicksManagement() {
       width: 80,
       align: "center" as const,
       render: (count: number) => <Tag color={count > 0 ? "gold" : "default"}>{count}</Tag>,
+    },
+    {
+      title: "推荐语",
+      dataIndex: "reason",
+      key: "reason",
+      render: (reason: string, record: PickRecord) => (
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ color: reason ? "#333" : "#ccc", fontSize: 13 }}>{reason || "未填写"}</span>
+          <EditOutlined style={{ color: "#999", cursor: "pointer", fontSize: 12 }} onClick={() => openEditReason(record)} />
+        </div>
+      ),
     },
     {
       title: "状态",
@@ -497,6 +555,31 @@ export default function DrDailyPicksManagement() {
               options={articleOptions.map((a) => ({ value: a.articleId, label: `${a.title} - ${a.author || "未知"}` }))}
             />
           )}
+          <div style={{ fontSize: 13, color: "#666", marginBottom: 4, marginTop: 12 }}>推荐语（可选）</div>
+          <Input
+            value={addReason}
+            onChange={(e) => setAddReason(e.target.value)}
+            placeholder="填写推荐语，展示给用户"
+          />
+        </div>
+      </Modal>
+
+      {/* Edit Reason Modal */}
+      <Modal
+        title="编辑推荐语"
+        open={reasonModalOpen}
+        onCancel={() => setReasonModalOpen(false)}
+        onOk={handleSaveReason}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={reasonSaving}
+      >
+        <div style={{ padding: "12px 0" }}>
+          <Input
+            value={editReason}
+            onChange={(e) => setEditReason(e.target.value)}
+            placeholder="填写推荐语，展示给用户，留空则不展示"
+          />
         </div>
       </Modal>
 
@@ -555,6 +638,24 @@ export default function DrDailyPicksManagement() {
               onChange={(e) => setHlText(e.target.value)}
               placeholder="请输入要高亮的文本内容"
               rows={3}
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>前文（高亮前的原文片段）</div>
+            <Input.TextArea
+              value={hlContextBefore}
+              onChange={(e) => setHlContextBefore(e.target.value)}
+              placeholder="可选：填写高亮文字前的原文内容"
+              rows={2}
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>后文（高亮后的原文片段）</div>
+            <Input.TextArea
+              value={hlContextAfter}
+              onChange={(e) => setHlContextAfter(e.target.value)}
+              placeholder="可选：填写高亮文字后的原文内容"
+              rows={2}
             />
           </div>
           <div>

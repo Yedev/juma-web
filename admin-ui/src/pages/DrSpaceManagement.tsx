@@ -26,7 +26,8 @@ import {
   KeyOutlined,
   UserOutlined,
   AppstoreOutlined,
-  DragOutlined,
+  ArrowUpOutlined,
+  ArrowDownOutlined,
   MinusCircleOutlined,
 } from "@ant-design/icons";
 import { adminClient } from "../api/client";
@@ -35,19 +36,21 @@ import dayjs from "dayjs";
 const { Text } = Typography;
 
 const LAYOUT_TYPES = [
-  { value: "large_card", label: "大图卡" },
-  { value: "horizontal_card", label: "横向卡" },
-  { value: "vertical_card", label: "纵向卡" },
-  { value: "waterfall", label: "瀑布流" },
+  { value: "large_horizontal", label: "大图横向" },
+  { value: "small_horizontal", label: "小图横向" },
+  { value: "large_vertical", label: "大图纵向" },
+  { value: "small_vertical", label: "小图纵向" },
+  { value: "plain_text", label: "纯文本" },
 ];
 
 const layoutLabel = (type: string) => LAYOUT_TYPES.find((t) => t.value === type)?.label ?? type;
 const layoutColor = (type: string): string => {
   const map: Record<string, string> = {
-    large_card: "blue",
-    horizontal_card: "cyan",
-    vertical_card: "green",
-    waterfall: "purple",
+    large_horizontal: "blue",
+    small_horizontal: "cyan",
+    large_vertical: "green",
+    small_vertical: "lime",
+    plain_text: "default",
   };
   return map[type] ?? "default";
 };
@@ -129,9 +132,13 @@ interface HomepageModule {
   id: number;
   moduleId: string;
   spaceId: string;
+  moduleType: string;
   title: string;
   subtitle: string;
+  description: string;
   layoutType: string;
+  sourceType: string;
+  sourceId: string;
   sortOrder: number;
   createdAt: string;
   resources: ModuleResource[];
@@ -189,9 +196,16 @@ export default function DrSpaceManagement() {
   const [modulesLoading, setModulesLoading] = useState(false);
   const [moduleModalOpen, setModuleModalOpen] = useState(false);
   const [editingModule, setEditingModule] = useState<HomepageModule | null>(null);
+  const [moduleType, setModuleType] = useState("standard");
   const [moduleTitle, setModuleTitle] = useState("");
   const [moduleSubtitle, setModuleSubtitle] = useState("");
-  const [moduleLayoutType, setModuleLayoutType] = useState("large_card");
+  const [moduleDescription, setModuleDescription] = useState("");
+  const [moduleLayoutType, setModuleLayoutType] = useState("large_horizontal");
+  const [moduleSourceType, setModuleSourceType] = useState<"channel" | "collection">("channel");
+  const [moduleSourceId, setModuleSourceId] = useState("");
+  const [moduleSourceChannelOptions, setModuleSourceChannelOptions] = useState<ChannelOption[]>([]);
+  const [moduleSourceCollectionOptions, setModuleSourceCollectionOptions] = useState<CollectionOption[]>([]);
+  const [loadingSourceOptions, setLoadingSourceOptions] = useState(false);
   const [savingModule, setSavingModule] = useState(false);
 
   // Resource binding state
@@ -407,20 +421,46 @@ export default function DrSpaceManagement() {
     await fetchHomepageModules(record.spaceId);
   };
 
+  const loadModuleSourceOptions = async (spaceId: string) => {
+    setLoadingSourceOptions(true);
+    try {
+      const [chRes, colRes] = await Promise.all([
+        adminClient.get(`/api/admin/dr/channels?space_id=${spaceId}`),
+        adminClient.get(`/api/admin/dr/spaces/${spaceId}/collections`),
+      ]);
+      if (chRes.data.code === 200) setModuleSourceChannelOptions(chRes.data.data ?? []);
+      if (colRes.data.code === 200) setModuleSourceCollectionOptions(colRes.data.data ?? []);
+    } catch {
+      message.error("加载来源选项失败");
+    } finally {
+      setLoadingSourceOptions(false);
+    }
+  };
+
   const openCreateModule = () => {
     setEditingModule(null);
+    setModuleType("standard");
     setModuleTitle("");
     setModuleSubtitle("");
-    setModuleLayoutType("large_card");
+    setModuleDescription("");
+    setModuleLayoutType("large_horizontal");
+    setModuleSourceType("channel");
+    setModuleSourceId("");
     setModuleModalOpen(true);
+    if (homepageSpace) loadModuleSourceOptions(homepageSpace.spaceId);
   };
 
   const openEditModule = (mod: HomepageModule) => {
     setEditingModule(mod);
+    setModuleType(mod.moduleType || "standard");
     setModuleTitle(mod.title);
     setModuleSubtitle(mod.subtitle);
-    setModuleLayoutType(mod.layoutType);
+    setModuleDescription(mod.description || "");
+    setModuleLayoutType(mod.layoutType || "large_horizontal");
+    setModuleSourceType((mod.sourceType as "channel" | "collection") || "channel");
+    setModuleSourceId(mod.sourceId || "");
     setModuleModalOpen(true);
+    if (homepageSpace) loadModuleSourceOptions(homepageSpace.spaceId);
   };
 
   const handleSaveModule = async () => {
@@ -432,22 +472,23 @@ export default function DrSpaceManagement() {
     setSavingModule(true);
     try {
       if (editingModule) {
-        const res = await adminClient.put(`/api/admin/dr/homepage-modules/${editingModule.moduleId}`, {
-          title: moduleTitle.trim(),
-          subtitle: moduleSubtitle.trim(),
-          layoutType: moduleLayoutType,
-        });
+        const payload: Record<string, string> = { title: moduleTitle.trim() };
+        if (moduleType !== "title_desc") { payload.subtitle = moduleSubtitle.trim(); payload.layoutType = moduleLayoutType; }
+        if (moduleType === "title_desc") payload.description = moduleDescription.trim();
+        if (moduleType === "load_list") { payload.sourceType = moduleSourceType; payload.sourceId = moduleSourceId; }
+        const res = await adminClient.put(`/api/admin/dr/homepage-modules/${editingModule.moduleId}`, payload);
         if (res.data.code === 200) {
           message.success("模块已更新");
           setModuleModalOpen(false);
           await fetchHomepageModules(homepageSpace.spaceId);
         }
       } else {
-        const res = await adminClient.post(`/api/admin/dr/spaces/${homepageSpace.spaceId}/homepage-modules`, {
-          title: moduleTitle.trim(),
-          subtitle: moduleSubtitle.trim(),
-          layoutType: moduleLayoutType,
-        });
+        if (moduleType === "load_list" && !moduleSourceId) { message.error("请选择来源"); setSavingModule(false); return; }
+        const payload: Record<string, string> = { moduleType, title: moduleTitle.trim() };
+        if (moduleType !== "title_desc") { payload.subtitle = moduleSubtitle.trim(); payload.layoutType = moduleLayoutType; }
+        if (moduleType === "title_desc") payload.description = moduleDescription.trim();
+        if (moduleType === "load_list") { payload.sourceType = moduleSourceType; payload.sourceId = moduleSourceId; }
+        const res = await adminClient.post(`/api/admin/dr/spaces/${homepageSpace.spaceId}/homepage-modules`, payload);
         if (res.data.code === 200) {
           message.success("模块已创建");
           setModuleModalOpen(false);
@@ -481,6 +522,22 @@ export default function DrSpaceManagement() {
         }
       },
     });
+  };
+
+  const handleMoveModule = async (index: number, direction: "up" | "down") => {
+    if (!homepageSpace) return;
+    const newModules = [...modules];
+    const swapIndex = direction === "up" ? index - 1 : index + 1;
+    [newModules[index], newModules[swapIndex]] = [newModules[swapIndex], newModules[index]];
+    setModules(newModules);
+    try {
+      await adminClient.put(`/api/admin/dr/spaces/${homepageSpace.spaceId}/homepage-modules/reorder`, {
+        moduleIds: newModules.map((m) => m.moduleId),
+      });
+    } catch {
+      message.error("排序更新失败");
+      await fetchHomepageModules(homepageSpace.spaceId);
+    }
   };
 
   const openAddResource = async (mod: HomepageModule) => {
@@ -918,16 +975,33 @@ export default function DrSpaceManagement() {
                 styles={{ header: { padding: "8px 16px" }, body: { padding: "12px 16px" } }}
                 title={
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <DragOutlined style={{ color: "#bbb", cursor: "grab" }} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                      <ArrowUpOutlined
+                        style={{ fontSize: 10, color: (idx === 0 || mod.moduleType === "load_list") ? "#ddd" : "#999", cursor: (idx === 0 || mod.moduleType === "load_list") ? "not-allowed" : "pointer" }}
+                        onClick={() => idx > 0 && mod.moduleType !== "load_list" && handleMoveModule(idx, "up")}
+                      />
+                      <ArrowDownOutlined
+                        style={{ fontSize: 10, color: (idx === modules.length - 1 || mod.moduleType === "load_list" || modules[idx + 1]?.moduleType === "load_list") ? "#ddd" : "#999", cursor: (idx === modules.length - 1 || mod.moduleType === "load_list" || modules[idx + 1]?.moduleType === "load_list") ? "not-allowed" : "pointer" }}
+                        onClick={() => idx < modules.length - 1 && mod.moduleType !== "load_list" && modules[idx + 1]?.moduleType !== "load_list" && handleMoveModule(idx, "down")}
+                      />
+                    </div>
                     <span style={{ fontWeight: 600, fontSize: 14 }}>{mod.title}</span>
-                    {mod.subtitle && (
+                    {mod.moduleType === "title_desc" && (
+                      <Tag color="gold" style={{ fontSize: 11 }}>标题描述</Tag>
+                    )}
+                    {mod.moduleType === "load_list" && (
+                      <Tag color="volcano" style={{ fontSize: 11 }}>加载列表</Tag>
+                    )}
+                    {mod.subtitle && mod.moduleType !== "title_desc" && (
                       <Text type="secondary" style={{ fontSize: 12, fontWeight: 400 }}>
                         {mod.subtitle}
                       </Text>
                     )}
-                    <Tag color={layoutColor(mod.layoutType)} style={{ marginLeft: 4, fontSize: 11 }}>
-                      {layoutLabel(mod.layoutType)}
-                    </Tag>
+                    {mod.moduleType !== "title_desc" && (
+                      <Tag color={layoutColor(mod.layoutType)} style={{ marginLeft: 4, fontSize: 11 }}>
+                        {layoutLabel(mod.layoutType)}
+                      </Tag>
+                    )}
                     <Text type="secondary" style={{ fontSize: 11, fontWeight: 400 }}>
                       #{idx + 1}
                     </Text>
@@ -935,14 +1009,16 @@ export default function DrSpaceManagement() {
                 }
                 extra={
                   <Space size={8}>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<PlusOutlined />}
-                      onClick={() => openAddResource(mod)}
-                    >
-                      绑定资源
-                    </Button>
+                    {(!mod.moduleType || mod.moduleType === "standard") && (
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<PlusOutlined />}
+                        onClick={() => openAddResource(mod)}
+                      >
+                        绑定资源
+                      </Button>
+                    )}
                     <Button
                       type="text"
                       size="small"
@@ -962,7 +1038,18 @@ export default function DrSpaceManagement() {
                   </Space>
                 }
               >
-                {mod.resources.length === 0 ? (
+                {mod.moduleType === "title_desc" ? (
+                  <div style={{ fontSize: 13, color: mod.description ? "#555" : "#bbb" }}>
+                    {mod.description || "暂无描述文本"}
+                  </div>
+                ) : mod.moduleType === "load_list" ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Tag color={mod.sourceType === "channel" ? "geekblue" : "purple"} style={{ fontSize: 11 }}>
+                      {mod.sourceType === "channel" ? "频道" : "集合"}
+                    </Tag>
+                    <span style={{ fontFamily: "monospace", fontSize: 12, color: "#666" }}>{mod.sourceId}</span>
+                  </div>
+                ) : mod.resources.length === 0 ? (
                   <div style={{ color: "#bbb", fontSize: 12 }}>暂未绑定资源</div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -1030,6 +1117,21 @@ export default function DrSpaceManagement() {
         confirmLoading={savingModule}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: "12px 0" }}>
+          {!editingModule && (
+            <div>
+              <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>模块类型 *</div>
+              <Select
+                value={moduleType}
+                onChange={(v) => { setModuleType(v); setModuleSourceId(""); }}
+                style={{ width: "100%" }}
+                options={[
+                  { value: "standard", label: "标准模块（手动绑定资源）" },
+                  { value: "title_desc", label: "标题描述" },
+                  { value: "load_list", label: "加载列表（自动拉取频道/集合文章）" },
+                ]}
+              />
+            </div>
+          )}
           <div>
             <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>模块标题 *</div>
             <Input
@@ -1038,23 +1140,78 @@ export default function DrSpaceManagement() {
               placeholder="例如：推荐阅读"
             />
           </div>
-          <div>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>副标题（小字说明，可选）</div>
-            <Input
-              value={moduleSubtitle}
-              onChange={(e) => setModuleSubtitle(e.target.value)}
-              placeholder="例如：精选内容每日更新"
-            />
-          </div>
-          <div>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>资源排列方式</div>
-            <Select
-              value={moduleLayoutType}
-              onChange={(v) => setModuleLayoutType(v)}
-              style={{ width: "100%" }}
-              options={LAYOUT_TYPES}
-            />
-          </div>
+          {moduleType === "title_desc" && (
+            <div>
+              <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>描述文本</div>
+              <Input.TextArea
+                value={moduleDescription}
+                onChange={(e) => setModuleDescription(e.target.value)}
+                placeholder="展示在标题下方的描述内容"
+                rows={3}
+              />
+            </div>
+          )}
+          {moduleType !== "title_desc" && (
+            <>
+              <div>
+                <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>副标题（可选）</div>
+                <Input
+                  value={moduleSubtitle}
+                  onChange={(e) => setModuleSubtitle(e.target.value)}
+                  placeholder="例如：精选内容每日更新"
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>资源排列方式</div>
+                <Select
+                  value={moduleLayoutType}
+                  onChange={(v) => setModuleLayoutType(v)}
+                  style={{ width: "100%" }}
+                  options={LAYOUT_TYPES}
+                />
+              </div>
+            </>
+          )}
+          {moduleType === "load_list" && (
+            <>
+              <div>
+                <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>来源类型 *</div>
+                <Select
+                  value={moduleSourceType}
+                  onChange={(v) => { setModuleSourceType(v); setModuleSourceId(""); }}
+                  style={{ width: "100%" }}
+                  options={[
+                    { value: "channel", label: "频道" },
+                    { value: "collection", label: "集合" },
+                  ]}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>
+                  选择{moduleSourceType === "channel" ? "频道" : "集合"} *
+                </div>
+                {loadingSourceOptions ? (
+                  <div style={{ display: "flex", justifyContent: "center", padding: 8 }}>
+                    <Spin size="small" />
+                  </div>
+                ) : (
+                  <Select
+                    value={moduleSourceId || undefined}
+                    onChange={(v) => setModuleSourceId(v)}
+                    style={{ width: "100%" }}
+                    placeholder={`请选择${moduleSourceType === "channel" ? "频道" : "集合"}`}
+                    showSearch
+                    optionFilterProp="label"
+                    options={
+                      moduleSourceType === "channel"
+                        ? moduleSourceChannelOptions.map((c) => ({ value: c.channelId, label: c.name }))
+                        : moduleSourceCollectionOptions.map((c) => ({ value: c.collectionId, label: c.name }))
+                    }
+                  />
+                )}
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 

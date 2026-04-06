@@ -161,9 +161,13 @@ model DrSpaceHomepageModule {
   id           Int      @id @default(autoincrement())
   moduleId     String   @unique @map("module_id")
   spaceId      String   @map("space_id")
+  moduleType   String   @default("standard") @map("module_type")
   title        String
   subtitle     String   @default("")
-  layoutType   String   @default("large_card") @map("layout_type")
+  description  String   @default("")
+  layoutType   String   @default("large_horizontal") @map("layout_type")
+  sourceType   String   @default("") @map("source_type")
+  sourceId     String   @default("") @map("source_id")
   sortOrder    Int      @default(0) @map("sort_order")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
@@ -263,6 +267,7 @@ model DrDailyPickArticle {
   pickId    String   @unique @map("pick_id")
   spaceId   String   @map("space_id")
   articleId String   @map("article_id")
+  reason    String   @default("") @map("reason")
   sortOrder Int      @default(0) @map("sort_order")
   enabled   Boolean  @default(true)
   createdAt DateTime @default(now()) @map("created_at")
@@ -273,16 +278,18 @@ model DrDailyPickArticle {
 }
 
 model DrEditorHighlight {
-  id           Int      @id @default(autoincrement())
-  highlightId  String   @unique @map("highlight_id")
-  articleId    String   @map("article_id")
-  text         String
-  color        String   @default("#FFD700")
-  positionData String   @default("{}") @map("position_data")
-  note         String   @default("")
-  sortOrder    Int      @default(0) @map("sort_order")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  id             Int      @id @default(autoincrement())
+  highlightId    String   @unique @map("highlight_id")
+  articleId      String   @map("article_id")
+  text           String
+  color          String   @default("#FFD700")
+  positionData   String   @default("{}") @map("position_data")
+  note           String   @default("")
+  contextBefore  String   @default("") @map("context_before")
+  contextAfter   String   @default("") @map("context_after")
+  sortOrder      Int      @default(0) @map("sort_order")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("dr_editor_highlights")
 }

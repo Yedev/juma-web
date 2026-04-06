@@ -328,4 +328,13 @@ GET /api/v1/dr/collections
 | POST | `/api/v1/dr/collections` | sign + drAuth | 创建合集 |
 | PUT | `/api/v1/dr/collections/:collectionId/articles` | sign + drAuth | 添加/移除合集文章 |
 | GET | `/api/v1/dr/collections` | sign + drAuth | 获取合集列表 |
-| POST | `/api/v1/dr/ai/chat` | sign + drAuth | AI 文章问答 |
+| GET | `/api/v1/dr/spaces/:spaceId/collections/:collectionId/articles` | sign + drAuth | 获取空间合集文章列表 |
+| GET | `/api/v1/dr/spaces/:spaceId/homepage` | sign + drAuth | 获取空间首页模块 |
+| GET | `/api/v1/dr/spaces/:spaceId/daily-picks` | sign + drAuth | 获取每日精选文章 |
+| POST | `/api/v1/dr/reading-stats` | sign + drAuth | 上报单条阅读统计 |
+| POST | `/api/v1/dr/reading-stats/batch` | sign + drAuth | 批量上报阅读统计 |
+| GET | `/api/v1/dr/stats/summary` | sign + drAuth | 获取阅读统计汇总 |
+| GET | `/api/v1/dr/bookmarks` | sign + drAuth | 获取收藏列表 |
+| GET | `/api/v1/dr/daily-article` | sign + drAuth | 获取每日推荐文章 |
+| POST | `/api/v1/dr/sync` | sign + drAuth | 批量同步 |
+| GET | `/api/v1/dr/sync/changes` | sign + drAuth | 增量获取同步变化 |
