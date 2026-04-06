@@ -10,6 +10,7 @@ function generateId(prefix: string): string {
   return `${prefix}${Date.now()}${Math.floor(Math.random() * 1000).toString().padStart(3, "0")}`;
 }
 
+
 // All routes use sign middleware
 router.use(signMiddleware);
 
@@ -192,6 +193,7 @@ router.get("/articles", async (req: DrAuthRequest, res: Response): Promise<void>
   try {
     const spaceId = req.query.space_id as string;
     const channelId = req.query.channel_id as string | undefined;
+    const collectionId = req.query.collection_id as string | undefined;
     const page = parseInt(req.query.page as string) || 1;
     const pageSize = parseInt(req.query.page_size as string) || 20;
 
@@ -209,30 +211,87 @@ router.get("/articles", async (req: DrAuthRequest, res: Response): Promise<void>
       return;
     }
 
-    const where: Record<string, unknown> = { spaceId };
-    if (channelId) where.channelId = channelId;
+    let articles: {
+      articleId: string;
+      spaceId: string;
+      channelId: string;
+      title: string;
+      summary: string | null;
+      coverUrl: string | null;
+      layoutType: string;
+      author: string | null;
+      readCount: number;
+      publishedAt: Date;
+    }[];
+    let total: number;
 
-    const [articles, total] = await Promise.all([
-      prisma.drArticle.findMany({
-        where,
-        select: {
-          articleId: true,
-          spaceId: true,
-          channelId: true,
-          title: true,
-          summary: true,
-          coverUrl: true,
-          layoutType: true,
-          author: true,
-          readCount: true,
-          publishedAt: true,
-        },
-        orderBy: { publishedAt: "desc" },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      prisma.drArticle.count({ where }),
-    ]);
+    if (collectionId) {
+      // Verify collection belongs to the space
+      const collection = await prisma.drSpaceCollection.findUnique({ where: { collectionId } });
+      if (!collection || collection.spaceId !== spaceId) {
+        res.status(404).json({ code: 404, message: "合集不存在" });
+        return;
+      }
+
+      const [items, count] = await Promise.all([
+        prisma.drSpaceCollectionArticle.findMany({
+          where: { collectionId },
+          orderBy: { sortOrder: "asc" },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        prisma.drSpaceCollectionArticle.count({ where: { collectionId } }),
+      ]);
+
+      total = count;
+      const articleIds = items.map((i) => i.articleId);
+      articles =
+        articleIds.length > 0
+          ? await prisma.drArticle.findMany({
+              where: { articleId: { in: articleIds } },
+              select: {
+                articleId: true,
+                spaceId: true,
+                channelId: true,
+                title: true,
+                summary: true,
+                coverUrl: true,
+                layoutType: true,
+                author: true,
+                readCount: true,
+                publishedAt: true,
+              },
+            }).then((rows) => {
+              const map = new Map(rows.map((r) => [r.articleId, r]));
+              return items.map((i) => map.get(i.articleId)!).filter(Boolean);
+            })
+          : [];
+    } else {
+      const where: Record<string, unknown> = { spaceId };
+      if (channelId) where.channelId = channelId;
+
+      [articles, total] = await Promise.all([
+        prisma.drArticle.findMany({
+          where,
+          select: {
+            articleId: true,
+            spaceId: true,
+            channelId: true,
+            title: true,
+            summary: true,
+            coverUrl: true,
+            layoutType: true,
+            author: true,
+            readCount: true,
+            publishedAt: true,
+          },
+          orderBy: { publishedAt: "desc" },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        prisma.drArticle.count({ where }),
+      ]);
+    }
 
     // Batch get bookmark & read status
     const articleIds = articles.map((a) => a.articleId);
@@ -631,72 +690,6 @@ router.get("/collections", async (req: DrAuthRequest, res: Response): Promise<vo
 });
 
 // 5.4 Get space collection articles
-router.get("/spaces/:spaceId/collections/:collectionId/articles", async (req: DrAuthRequest, res: Response): Promise<void> => {
-  try {
-    const { spaceId, collectionId } = req.params as { spaceId: string; collectionId: string };
-
-    // Check space membership
-    const member = await prisma.drSpaceMember.findUnique({
-      where: { spaceId_userId: { spaceId, userId: req.drUserId! } },
-    });
-    if (!member) {
-      res.status(403).json({ code: 403, message: "您不是该空间的成员" });
-      return;
-    }
-
-    // Check collection belongs to the space
-    const collection = await prisma.drSpaceCollection.findUnique({ where: { collectionId } });
-    if (!collection || collection.spaceId !== spaceId) {
-      res.status(404).json({ code: 404, message: "合集不存在" });
-      return;
-    }
-
-    const items = await prisma.drSpaceCollectionArticle.findMany({
-      where: { collectionId },
-      orderBy: { sortOrder: "asc" },
-    });
-
-    const articleIds = items.map((i) => i.articleId);
-    const articles =
-      articleIds.length > 0
-        ? await prisma.drArticle.findMany({
-            where: { articleId: { in: articleIds } },
-            select: {
-              articleId: true,
-              channelId: true,
-              title: true,
-              summary: true,
-              coverUrl: true,
-              layoutType: true,
-              author: true,
-              readCount: true,
-              publishedAt: true,
-            },
-          })
-        : [];
-    const articleMap = new Map(articles.map((a) => [a.articleId, a]));
-
-    res.json({
-      code: 200,
-      message: "success",
-      data: {
-        collectionId: collection.collectionId,
-        name: collection.name,
-        description: collection.description,
-        coverUrl: collection.coverUrl,
-        articles: items.map((i) => ({
-          sortOrder: i.sortOrder,
-          addedAt: i.addedAt,
-          article: articleMap.get(i.articleId) ?? null,
-        })),
-      },
-    });
-  } catch (error) {
-    console.error("Get space collection articles error:", error);
-    res.status(500).json({ code: 500, message: "服务器内部错误" });
-  }
-});
-
 // ── Space Homepage ───────────────────────────────────────
 
 // Get space homepage modules with resources
@@ -723,33 +716,34 @@ router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response
       return;
     }
 
-    const moduleIds = modules.map((m) => m.moduleId);
-    const resources = await prisma.drSpaceHomepageModuleResource.findMany({
-      where: { moduleId: { in: moduleIds } },
-      orderBy: { sortOrder: "asc" },
-    });
+    // load_list modules always appear last
+    const nonLoadListModules = modules.filter((m) => m.moduleType !== "load_list");
+    const loadListModules = modules.filter((m) => m.moduleType === "load_list");
+    const orderedModules = [...nonLoadListModules, ...loadListModules];
 
-    // Collect IDs
+    // ── Fetch resources for standard modules only ──
+    const standardModuleIds = nonLoadListModules
+      .filter((m) => m.moduleType === "standard" || !m.moduleType)
+      .map((m) => m.moduleId);
+    const resources = standardModuleIds.length > 0
+      ? await prisma.drSpaceHomepageModuleResource.findMany({
+          where: { moduleId: { in: standardModuleIds } },
+          orderBy: { sortOrder: "asc" },
+        })
+      : [];
+
     const channelIds = resources.filter((r) => r.resourceType === "channel").map((r) => r.resourceId);
     const articleIds = resources.filter((r) => r.resourceType === "article").map((r) => r.resourceId);
     const collectionIds = resources.filter((r) => r.resourceType === "collection").map((r) => r.resourceId);
 
-    // Fetch details + user state in parallel
     const [channels, articles, collectionsData, bookmarks, readStatuses] = await Promise.all([
       channelIds.length > 0 ? prisma.drChannel.findMany({ where: { channelId: { in: channelIds } } }) : [],
       articleIds.length > 0
         ? prisma.drArticle.findMany({
             where: { articleId: { in: articleIds } },
             select: {
-              articleId: true,
-              channelId: true,
-              title: true,
-              summary: true,
-              coverUrl: true,
-              layoutType: true,
-              author: true,
-              readCount: true,
-              publishedAt: true,
+              articleId: true, channelId: true, title: true, summary: true,
+              coverUrl: true, layoutType: true, author: true, readCount: true, publishedAt: true,
             },
           })
         : [],
@@ -770,7 +764,6 @@ router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response
     const bookmarkSet = new Set(bookmarks.map((b) => b.articleId));
     const readMap = new Map(readStatuses.map((r) => [r.articleId, r.progress]));
 
-    // Group resources by module
     const resourcesByModule = new Map<string, unknown[]>();
     for (const r of resources) {
       if (!resourcesByModule.has(r.moduleId)) resourcesByModule.set(r.moduleId, []);
@@ -779,35 +772,27 @@ router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response
         detail = channelMap.get(r.resourceId) ?? null;
       } else if (r.resourceType === "article") {
         const a = articleMap.get(r.resourceId);
-        if (a) {
-          detail = {
-            ...a,
-            bookmarked: bookmarkSet.has(a.articleId),
-            readProgress: readMap.get(a.articleId) ?? 0,
-          };
-        }
+        if (a) detail = { ...a, bookmarked: bookmarkSet.has(a.articleId), readProgress: readMap.get(a.articleId) ?? 0 };
       } else if (r.resourceType === "collection") {
         detail = collectionMap.get(r.resourceId) ?? null;
       }
-      resourcesByModule.get(r.moduleId)!.push({
-        resourceType: r.resourceType,
-        resourceId: r.resourceId,
-        sortOrder: r.sortOrder,
-        detail,
-      });
+      resourcesByModule.get(r.moduleId)!.push({ resourceType: r.resourceType, resourceId: r.resourceId, sortOrder: r.sortOrder, detail });
     }
 
     res.json({
       code: 200,
       message: "success",
-      data: modules.map((m) => ({
-        moduleId: m.moduleId,
-        title: m.title,
-        subtitle: m.subtitle,
-        layoutType: m.layoutType,
-        sortOrder: m.sortOrder,
-        resources: resourcesByModule.get(m.moduleId) ?? [],
-      })),
+      data: orderedModules.map((m) => {
+        const base = { moduleId: m.moduleId, moduleType: m.moduleType || "standard", title: m.title };
+        if (m.moduleType === "title_desc") {
+          return { ...base, description: m.description };
+        }
+        if (m.moduleType === "load_list") {
+          return { ...base, subtitle: m.subtitle, sourceType: m.sourceType, sourceId: m.sourceId };
+        }
+        // standard
+        return { ...base, subtitle: m.subtitle, layoutType: m.layoutType, resources: resourcesByModule.get(m.moduleId) ?? [] };
+      }),
     });
   } catch (error) {
     console.error("Get homepage error:", error);
@@ -1298,11 +1283,20 @@ router.get("/daily-article", async (req: DrAuthRequest, res: Response): Promise<
       return;
     }
 
-    // 获取频道信息
-    const channel = await prisma.drChannel.findUnique({
-      where: { channelId: article.channelId },
-      select: { channelId: true, name: true },
-    });
+    // 获取频道信息和编辑高亮
+    const [channel, rawHighlights] = await Promise.all([
+      prisma.drChannel.findUnique({
+        where: { channelId: article.channelId },
+        select: { channelId: true, name: true },
+      }),
+      prisma.drEditorHighlight.findMany({
+        where: { articleId: article.articleId },
+        orderBy: { sortOrder: "asc" },
+        select: { highlightId: true, text: true, color: true, note: true, sortOrder: true, contextBefore: true, contextAfter: true },
+      }),
+    ]);
+
+    const highlights = rawHighlights;
 
     res.json({
       code: 200,
@@ -1318,8 +1312,9 @@ router.get("/daily-article", async (req: DrAuthRequest, res: Response): Promise<
           readTimeMinutes: Math.max(1, Math.ceil(article.content.length / 500)),
           channelId: article.channelId,
           channelName: channel?.name ?? "",
+          highlights,
         },
-        reason: "根据您的阅读偏好推荐",
+        reason: selectedPick.reason || "",
       },
     });
   } catch (error) {

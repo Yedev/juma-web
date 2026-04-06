@@ -56,13 +56,27 @@
 
 ### GET /api/v1/dr/spaces/:spaceId/homepage
 
-获取空间首页模块列表（含资源详情）。需要用户 JWT。
+获取空间首页模块列表。需要用户 JWT。
 
 **路径参数：**
 
 | 参数 | 说明 |
 |------|------|
 | `spaceId` | 空间 ID |
+
+每个模块包含 `moduleType` 字段，客户端根据类型做不同渲染。`load_list` 类型模块固定排在其他模块之后。
+
+**模块类型（`moduleType`）说明：**
+
+| 类型 | 说明 | 返回字段 |
+|------|------|------|
+| `standard` | 标准模块，手动绑定资源 | moduleId, moduleType, title, subtitle, layoutType, resources |
+| `title_desc` | 标题描述模块，纯文本展示 | moduleId, moduleType, title, description |
+| `load_list` | 加载列表模块，客户端自行拉取数据 | moduleId, moduleType, title, subtitle, sourceType, sourceId |
+
+**`load_list` 说明：** 仅返回来源信息，客户端收到后根据 `sourceType` 调用对应接口加载文章列表：
+- `sourceType: "channel"` → 调用 `GET /api/v1/dr/articles?space_id=&channel_id={sourceId}`
+- `sourceType: "collection"` → 调用 `GET /api/v1/dr/articles?space_id=&collection_id={sourceId}`
 
 **响应示例：**
 ```json
@@ -72,10 +86,10 @@
   "data": [
     {
       "moduleId": "HM1000001",
+      "moduleType": "standard",
       "title": "编辑推荐",
       "subtitle": "本周精选",
-      "layoutType": "large_card",
-      "sortOrder": 0,
+      "layoutType": "large_horizontal",
       "resources": [
         {
           "resourceType": "article",
@@ -103,6 +117,7 @@
             "channelId": "C1000001",
             "spaceId": "S1000001",
             "name": "科技前沿",
+            "coverUrl": "https://example.com/channel-cover.jpg",
             "sortOrder": 0
           }
         },
@@ -120,19 +135,41 @@
           }
         }
       ]
+    },
+    {
+      "moduleId": "HM1000002",
+      "moduleType": "title_desc",
+      "title": "关于本空间",
+      "description": "这里汇聚了 AI 领域最前沿的深度内容，每周更新。"
+    },
+    {
+      "moduleId": "HM1000003",
+      "moduleType": "load_list",
+      "title": "科技前沿",
+      "subtitle": "频道全部文章",
+      "sourceType": "channel",
+      "sourceId": "C1000001"
     }
   ]
 }
 ```
 
-`layoutType` 决定客户端渲染样式，取值由管理员在后台配置（如 `large_card`、`small_card` 等）。
+`layoutType`（仅 `standard` 模块）取值：
 
-资源类型（`resourceType`）说明：
+| 值 | 说明 |
+|----|------|
+| `large_horizontal` | 大图横向（默认） |
+| `small_horizontal` | 小图横向 |
+| `large_vertical` | 大图纵向 |
+| `small_vertical` | 小图纵向 |
+| `plain_text` | 纯文本 |
+
+`standard` 模块资源类型（`resourceType`）说明：
 
 | 类型 | `detail` 字段 |
 |------|------|
 | `article` | articleId, channelId, title, summary, coverUrl, layoutType, author, readCount, publishedAt, bookmarked, readProgress |
-| `channel` | channelId, spaceId, name, sortOrder |
+| `channel` | channelId, spaceId, name, coverUrl, sortOrder |
 | `collection` | collectionId, spaceId, name, description, coverUrl, sortOrder |
 
 ---
@@ -172,14 +209,15 @@
 
 ### GET /api/v1/dr/articles
 
-获取文章列表。需要用户 JWT。
+获取文章列表（频道或合集）。需要用户 JWT。
 
 **查询参数：**
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `space_id` | string | 是 | 空间 ID |
-| `channel_id` | string | 否 | 频道 ID 筛选 |
+| `channel_id` | string | 否 | 频道 ID，与 `collection_id` 二选一 |
+| `collection_id` | string | 否 | 合集 ID，与 `channel_id` 二选一；文章按 `sortOrder` 升序排列 |
 | `page` | number | 否 | 页码（默认 1） |
 | `page_size` | number | 否 | 每页数量（默认 20） |
 
@@ -494,56 +532,6 @@
 
 > 空间合集由管理员创建并维护，用户加入空间后可通过首页模块入口访问合集内的文章。所有接口需要用户 JWT，且用户必须是对应空间的成员。
 
-### GET /api/v1/dr/spaces/:spaceId/collections/:collectionId/articles
-
-获取空间合集内的文章列表（按 sortOrder 升序）。
-
-**路径参数：**
-
-| 参数 | 说明 |
-|------|------|
-| `spaceId` | 空间 ID |
-| `collectionId` | 合集 ID（首页 homepage 接口中 `resourceType: "collection"` 对应的 `resourceId`） |
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "collectionId": "SC1000001",
-    "name": "AI 专题精选",
-    "description": "精选 AI 领域深度好文",
-    "coverUrl": "https://example.com/cover.jpg",
-    "articles": [
-      {
-        "sortOrder": 0,
-        "addedAt": "2026-03-20T08:00:00.000Z",
-        "article": {
-          "articleId": "A1000001",
-          "channelId": "CH1000001",
-          "title": "大模型的未来",
-          "summary": "深度解析大语言模型的发展趋势",
-          "coverUrl": "https://example.com/article-cover.jpg",
-          "layoutType": "standard",
-          "author": "张三",
-          "readCount": 1200,
-          "publishedAt": "2026-03-18T10:00:00.000Z"
-        }
-      }
-    ]
-  }
-}
-```
-
-**错误情况：**
-```json
-{ "code": 403, "message": "您不是该空间的成员" }
-{ "code": 404, "message": "合集不存在" }
-```
-
----
-
 ## 每日精选
 
 > 每日精选根据日期和空间自动轮换，每天显示 1-3 篇精选文章。管理员可预先标注编辑高亮，引导用户阅读重点内容。
@@ -619,9 +607,15 @@
 
 ## 阅读统计
 
-### POST /api/v1/dr/stats/reading
+### POST /api/v1/dr/reading-stats
 
-上报阅读统计数据。需要用户 JWT。
+上报单条阅读统计数据。需要用户 JWT。
+
+**查询参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `include_today_summary` | string | 否 | 设为 `true` 时响应中附带当日阅读汇总 |
 
 **请求体：**
 ```json
@@ -630,32 +624,102 @@
   "reading_time_seconds": 180,
   "scroll_depth": 85,
   "session_start": "2026-03-25T10:00:00.000Z",
-  "session_end": "2026-03-25T10:03:00.000Z",
-  "highlight_count": 3,
-  "note_count": 1
+  "session_end": "2026-03-25T10:03:00.000Z"
 }
 ```
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `article_id` | string | 是 | 文章 ID |
-| `reading_time_seconds` | int | 是 | 有效阅读时长（秒） |
-| `scroll_depth` | int | 是 | 滚动深度 (0-100) |
-| `session_start` | string | 是 | 阅读开始时间 |
-| `session_end` | string | 是 | 阅读结束时间 |
-| `highlight_count` | int | 否 | 本次创建批注数 |
-| `note_count` | int | 否 | 本次创建笔记数 |
+| `reading_time_seconds` | int | 否 | 有效阅读时长（秒），默认 0 |
+| `scroll_depth` | int | 否 | 滚动深度 (0-100)，默认 0 |
+| `session_start` | string | 否 | 阅读开始时间，默认当前时间 |
+| `session_end` | string | 否 | 阅读结束时间，默认当前时间 |
 
-**响应示例：**
+**响应示例（不含汇总）：**
+```json
+{
+  "code": 200,
+  "message": "统计已上报",
+  "data": {
+    "statsId": "RS17429088000001234",
+    "articleId": "A1000001",
+    "readingTimeSeconds": 180,
+    "scrollDepth": 85,
+    "createdAt": "2026-03-25T10:03:00.000Z"
+  }
+}
+```
+
+**响应示例（`?include_today_summary=true`）：**
 ```json
 {
   "code": 200,
   "message": "统计已记录",
   "data": {
+    "statsId": "RS17429088000001234",
+    "articleId": "A1000001",
+    "readingTimeSeconds": 180,
+    "scrollDepth": 85,
+    "createdAt": "2026-03-25T10:03:00.000Z",
     "total_reading_time_today": 3600,
     "articles_read_today": 5
   }
 }
+```
+
+---
+
+### POST /api/v1/dr/reading-stats/batch
+
+批量上报阅读统计数据（最多 100 条）。需要用户 JWT。
+
+**请求体：**
+```json
+{
+  "stats": [
+    {
+      "article_id": "A1000001",
+      "reading_time_seconds": 180,
+      "scroll_depth": 85,
+      "session_start": "2026-03-25T10:00:00.000Z",
+      "session_end": "2026-03-25T10:03:00.000Z"
+    },
+    {
+      "article_id": "A1000002",
+      "reading_time_seconds": 60,
+      "scroll_depth": 50,
+      "session_start": "2026-03-25T10:05:00.000Z",
+      "session_end": "2026-03-25T10:06:00.000Z"
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `stats` | array | 是 | 阅读统计数组，最多 100 条 |
+| `stats[].article_id` | string | 是 | 文章 ID |
+| `stats[].reading_time_seconds` | int | 否 | 有效阅读时长（秒），默认 0 |
+| `stats[].scroll_depth` | int | 否 | 滚动深度 (0-100)，默认 0 |
+| `stats[].session_start` | string | 否 | 阅读开始时间 |
+| `stats[].session_end` | string | 否 | 阅读结束时间 |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "统计已批量上报",
+  "data": {
+    "count": 2
+  }
+}
+```
+
+**错误情况：**
+```json
+{ "code": 400, "message": "stats 不能为空" }
+{ "code": 400, "message": "单次最多上报 100 条统计" }
 ```
 
 ---
@@ -729,7 +793,7 @@
 
 ### GET /api/v1/dr/daily-article
 
-获取每日推荐文章。需要用户 JWT。
+获取每日推荐文章（含编辑高亮及上下文）。需要用户 JWT。
 
 **响应示例：**
 ```json
@@ -737,7 +801,7 @@
   "code": 200,
   "message": "success",
   "data": {
-    "date": "2026-03-25",
+    "date": "2026-04-06",
     "article": {
       "articleId": "A1000001",
       "title": "AI 时代的教育变革",
@@ -746,12 +810,54 @@
       "author": "李四",
       "readTimeMinutes": 8,
       "channelId": "C1000001",
-      "channelName": "科技前沿"
+      "channelName": "科技前沿",
+      "highlights": [
+        {
+          "highlightId": "EH1000001",
+          "text": "AI 将从根本上改变软件开发的范式",
+          "color": "#FFD700",
+          "note": "核心论点",
+          "sortOrder": 0,
+          "contextBefore": "在过去的十年里，有研究者指出，",
+          "contextAfter": "。这一判断已在多个领域得到印证，尤其是代码生成和文档撰写。"
+        }
+      ]
     },
     "reason": "根据您的阅读偏好推荐"
   }
 }
 ```
+
+**字段说明：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `date` | string | 当日日期（YYYY-MM-DD） |
+| `article` | object \| null | 推荐文章，无精选时为 `null` |
+| `article.readTimeMinutes` | number | 预估阅读时长（分钟），基于正文字数计算 |
+| `article.highlights` | array | 编辑标注的高亮列表，无高亮时为 `[]` |
+| `highlights[].text` | string | 高亮文本内容 |
+| `highlights[].color` | string | 高亮颜色（十六进制） |
+| `highlights[].note` | string | 编辑备注 |
+| `highlights[].sortOrder` | number | 排序序号 |
+| `highlights[].contextBefore` | string | 高亮文字前的原文片段，由管理员手动填写，未填时为空字符串 |
+| `highlights[].contextAfter` | string | 高亮文字后的原文片段，由管理员手动填写，未填时为空字符串 |
+| `reason` | string | 管理员填写的推荐语，未填写时为空字符串 |
+
+**`article` 为 `null` 时，`reason` 为固定说明：**
+
+| `reason` | 说明 |
+|----------|------|
+| `您还没有加入任何空间` | 用户未加入任何空间 |
+| `暂无精选文章` | 空间精选池为空 |
+| `文章不存在` | 精选文章已被删除 |
+
+**轮换规则：**
+- 基于日期索引 + 空间 ID 哈希选取精选池中的文章
+- 同一天内多次请求返回相同结果
+- 取用户所在的第一个空间
+
+> `contextBefore` 和 `contextAfter` 由管理员在后台手动填写，客户端可直接拼接展示「前文 + **高亮** + 后文」的效果。
 
 ---
 
