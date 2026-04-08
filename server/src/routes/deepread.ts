@@ -1,5 +1,6 @@
 import { Router, Response } from "express";
 import { PrismaClient } from "@prisma/client";
+import OpenAI from "openai";
 import { signMiddleware } from "../middleware/sign";
 import { drAuthMiddleware, DrAuthRequest, signDrToken } from "../middleware/drAuth";
 
@@ -803,6 +804,47 @@ router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response
 
 // ── 每日精选 (Phase 7) ────────────────────────────────────
 
+// 获取思维格栅数据
+async function fetchLatticeData(spaceId: string) {
+  const lattice = await prisma.drDailyPickLattice.findUnique({ where: { spaceId } });
+  if (!lattice || !lattice.enabled) return null;
+
+  const collection = await prisma.drSpaceCollection.findUnique({ where: { collectionId: lattice.collectionId } });
+  if (!collection) return null;
+
+  const collectionArticles = await prisma.drSpaceCollectionArticle.findMany({
+    where: { collectionId: lattice.collectionId },
+    orderBy: { sortOrder: "asc" },
+  });
+
+  const articleIds = collectionArticles.map((ca) => ca.articleId);
+  const articles = articleIds.length > 0
+    ? await prisma.drArticle.findMany({ where: { articleId: { in: articleIds } } })
+    : [];
+  const articleMap = new Map(articles.map((a) => [a.articleId, a]));
+
+  return {
+    collectionId: collection.collectionId,
+    collectionName: collection.name,
+    description: collection.description,
+    coverUrl: collection.coverUrl,
+    recommendation: lattice.recommendation,
+    articles: collectionArticles
+      .filter((ca) => articleMap.has(ca.articleId))
+      .map((ca) => {
+        const a = articleMap.get(ca.articleId)!;
+        return {
+          articleId: a.articleId,
+          title: a.title,
+          summary: a.summary,
+          coverUrl: a.coverUrl,
+          author: a.author,
+          publishedAt: a.publishedAt,
+        };
+      }),
+  };
+}
+
 // 简单字符串哈希函数
 function hashString(str: string): number {
   let hash = 0;
@@ -812,123 +854,6 @@ function hashString(str: string): number {
   }
   return Math.abs(hash);
 }
-
-// 获取当日精选文章
-router.get("/spaces/:spaceId/daily-picks", async (req: DrAuthRequest, res: Response): Promise<void> => {
-  try {
-    const spaceId = req.params.spaceId as string;
-
-    // 验证成员身份
-    const member = await prisma.drSpaceMember.findUnique({
-      where: { spaceId_userId: { spaceId, userId: req.drUserId! } },
-    });
-    if (!member) {
-      res.status(403).json({ code: 403, message: "您不是该空间的成员" });
-      return;
-    }
-
-    // 获取启用的精选文章池
-    const pickArticles = await prisma.drDailyPickArticle.findMany({
-      where: { spaceId, enabled: true },
-      orderBy: { sortOrder: "asc" },
-    });
-
-    if (pickArticles.length === 0) {
-      res.json({
-        code: 200,
-        message: "success",
-        data: { date: new Date().toISOString().split("T")[0], articles: [] },
-      });
-      return;
-    }
-
-    // 计算日期索引（基于 UTC 时间）
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dayIndex = Math.floor(today.getTime() / 86400000);
-
-    // 计算起始位置（基于空间ID的哈希，确保不同空间同一天不同内容）
-    const spaceHash = hashString(spaceId);
-    const startIndex = (dayIndex + spaceHash) % pickArticles.length;
-
-    // 循环选取最多 3 篇文章
-    const pickCount = Math.min(3, pickArticles.length);
-    const selectedPicks: typeof pickArticles = [];
-
-    for (let i = 0; i < pickCount; i++) {
-      const idx = (startIndex + i) % pickArticles.length;
-      selectedPicks.push(pickArticles[idx]);
-    }
-
-    const articleIds = selectedPicks.map((p) => p.articleId);
-
-    // 获取文章详情
-    const articles = await prisma.drArticle.findMany({
-      where: { articleId: { in: articleIds } },
-    });
-    const articleMap = new Map(articles.map((a) => [a.articleId, a]));
-
-    // 获取编辑高亮
-    const highlights = await prisma.drEditorHighlight.findMany({
-      where: { articleId: { in: articleIds } },
-      orderBy: { sortOrder: "asc" },
-    });
-
-    // 按文章分组高亮
-    const highlightsByArticle = new Map<string, typeof highlights>();
-    for (const h of highlights) {
-      if (!highlightsByArticle.has(h.articleId)) {
-        highlightsByArticle.set(h.articleId, []);
-      }
-      highlightsByArticle.get(h.articleId)!.push(h);
-    }
-
-    // 获取用户阅读状态
-    const readStatuses = await prisma.drReadStatus.findMany({
-      where: { userId: req.drUserId!, articleId: { in: articleIds } },
-    });
-    const readMap = new Map(readStatuses.map((r) => [r.articleId, r.progress]));
-
-    // 获取用户书签状态
-    const bookmarks = await prisma.drBookmark.findMany({
-      where: { userId: req.drUserId!, articleId: { in: articleIds } },
-    });
-    const bookmarkSet = new Set(bookmarks.map((b) => b.articleId));
-
-    res.json({
-      code: 200,
-      message: "success",
-      data: {
-        date: new Date().toISOString().split("T")[0],
-        articles: selectedPicks
-          .filter((p) => articleMap.has(p.articleId))
-          .map((p) => {
-            const article = articleMap.get(p.articleId)!;
-            return {
-              articleId: article.articleId,
-              title: article.title,
-              summary: article.summary,
-              coverUrl: article.coverUrl,
-              author: article.author,
-              readCount: article.readCount,
-              publishedAt: article.publishedAt,
-              readProgress: readMap.get(article.articleId) ?? 0,
-              isBookmarked: bookmarkSet.has(article.articleId),
-              editorHighlights: (highlightsByArticle.get(article.articleId) ?? []).map((h) => ({
-                highlightId: h.highlightId,
-                text: h.text,
-                color: h.color,
-                note: h.note,
-              })),
-            };
-          }),
-      },
-    });
-  } catch (error) {
-    console.error("Get daily picks error:", error);
-    res.status(500).json({ code: 500, message: "服务器内部错误" });
-  }
-});
 
 // ── 阅读统计 ───────────────────────────────────────────────────
 
@@ -1283,8 +1208,8 @@ router.get("/daily-article", async (req: DrAuthRequest, res: Response): Promise<
       return;
     }
 
-    // 获取频道信息和编辑高亮
-    const [channel, rawHighlights] = await Promise.all([
+    // 获取频道信息、编辑高亮和思维格栅
+    const [channel, rawHighlights, lattice] = await Promise.all([
       prisma.drChannel.findUnique({
         where: { channelId: article.channelId },
         select: { channelId: true, name: true },
@@ -1294,6 +1219,7 @@ router.get("/daily-article", async (req: DrAuthRequest, res: Response): Promise<
         orderBy: { sortOrder: "asc" },
         select: { highlightId: true, text: true, color: true, note: true, sortOrder: true, contextBefore: true, contextAfter: true },
       }),
+      fetchLatticeData(spaceId),
     ]);
 
     const highlights = rawHighlights;
@@ -1315,6 +1241,7 @@ router.get("/daily-article", async (req: DrAuthRequest, res: Response): Promise<
           highlights,
         },
         reason: selectedPick.reason || "",
+        lattice,
       },
     });
   } catch (error) {
@@ -1627,6 +1554,59 @@ router.get("/sync/changes", async (req: DrAuthRequest, res: Response): Promise<v
   } catch (error) {
     console.error("Get sync changes error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── AI 对话 ───────────────────────────────────────────────────
+
+router.post("/ai/chat", async (req: DrAuthRequest, res: Response): Promise<void> => {
+  try {
+    const { article_id, message } = req.body as { article_id?: string; message?: string };
+
+    if (!message?.trim()) {
+      res.status(400).json({ code: 400, message: "message 不能为空" });
+      return;
+    }
+
+    const aiConfig = await prisma.drAiConfig.findFirst();
+    if (!aiConfig || !aiConfig.enabled) {
+      res.status(503).json({ code: 503, message: "AI 功能未启用" });
+      return;
+    }
+    if (!aiConfig.baseUrl || !aiConfig.apiKey || !aiConfig.model) {
+      res.status(503).json({ code: 503, message: "AI 配置不完整" });
+      return;
+    }
+
+    const client = new OpenAI({
+      baseURL: aiConfig.baseUrl,
+      apiKey: aiConfig.apiKey,
+    });
+
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+
+    if (article_id) {
+      const article = await prisma.drArticle.findUnique({ where: { articleId: article_id } });
+      if (article) {
+        messages.push({
+          role: "system",
+          content: `你是一个阅读助手，正在帮助用户理解以下文章。\n\n标题：${article.title}\n作者：${article.author}\n\n正文：\n${article.content}`,
+        });
+      }
+    }
+
+    messages.push({ role: "user", content: message.trim() });
+
+    const completion = await client.chat.completions.create({
+      model: aiConfig.model,
+      messages,
+    });
+
+    const reply = completion.choices[0]?.message?.content ?? "";
+    res.json({ code: 200, message: "success", data: { reply } });
+  } catch (error) {
+    console.error("AI chat error:", error);
+    res.status(500).json({ code: 500, message: "AI 请求失败" });
   }
 });
 

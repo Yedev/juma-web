@@ -1846,6 +1846,133 @@ router.put("/dr/daily-picks/:pickId", async (req: AuthRequest, res: Response): P
   }
 });
 
+// ── 思维格栅配置 ────────────────────────────────────────────────
+
+// 获取空间的思维格栅配置
+router.get("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const space = await prisma.drSpace.findUnique({ where: { spaceId } });
+    if (!space) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
+      return;
+    }
+
+    const lattice = await prisma.drDailyPickLattice.findUnique({ where: { spaceId } });
+    if (!lattice) {
+      res.json({ code: 200, message: "success", data: null });
+      return;
+    }
+
+    const collection = await prisma.drSpaceCollection.findUnique({ where: { collectionId: lattice.collectionId } });
+    const articleCount = await prisma.drSpaceCollectionArticle.count({ where: { collectionId: lattice.collectionId } });
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        ...lattice,
+        collection: collection
+          ? { collectionId: collection.collectionId, name: collection.name, description: collection.description, coverUrl: collection.coverUrl }
+          : null,
+        articleCount,
+      },
+    });
+  } catch (error) {
+    console.error("Admin get daily pick lattice error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 创建或更新思维格栅配置（upsert）
+router.put("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const { collectionId, recommendation, enabled } = req.body as {
+      collectionId?: string;
+      recommendation?: string;
+      enabled?: boolean;
+    };
+
+    const space = await prisma.drSpace.findUnique({ where: { spaceId } });
+    if (!space) {
+      res.status(404).json({ code: 404, message: "空间不存在" });
+      return;
+    }
+
+    if (!collectionId || !collectionId.trim()) {
+      res.status(400).json({ code: 400, message: "collectionId 不能为空" });
+      return;
+    }
+
+    const collection = await prisma.drSpaceCollection.findUnique({ where: { collectionId } });
+    if (!collection || collection.spaceId !== spaceId) {
+      res.status(404).json({ code: 404, message: "合集不存在或不属于该空间" });
+      return;
+    }
+
+    const lattice = await prisma.drDailyPickLattice.upsert({
+      where: { spaceId },
+      create: {
+        latticeId: generateDrId("LT"),
+        spaceId,
+        collectionId,
+        recommendation: recommendation?.trim() ?? "",
+        enabled: enabled ?? true,
+      },
+      update: {
+        collectionId,
+        recommendation: recommendation?.trim() ?? "",
+        ...(enabled !== undefined ? { enabled } : {}),
+      },
+    });
+
+    res.json({ code: 200, message: "已保存", data: lattice });
+  } catch (error) {
+    console.error("Admin upsert daily pick lattice error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 切换思维格栅启用状态
+router.put("/dr/spaces/:spaceId/daily-pick-lattice/toggle", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const existing = await prisma.drDailyPickLattice.findUnique({ where: { spaceId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "思维格栅配置不存在" });
+      return;
+    }
+
+    const updated = await prisma.drDailyPickLattice.update({
+      where: { spaceId },
+      data: { enabled: !existing.enabled },
+    });
+    res.json({ code: 200, message: updated.enabled ? "已启用" : "已禁用", data: updated });
+  } catch (error) {
+    console.error("Admin toggle daily pick lattice error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 删除思维格栅配置
+router.delete("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const existing = await prisma.drDailyPickLattice.findUnique({ where: { spaceId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "思维格栅配置不存在" });
+      return;
+    }
+
+    await prisma.drDailyPickLattice.delete({ where: { spaceId } });
+    res.json({ code: 200, message: "已删除" });
+  } catch (error) {
+    console.error("Admin delete daily pick lattice error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
 // ── 编辑高亮 ──────────────────────────────────────────────────
 
 // 获取文章的编辑高亮列表
@@ -2020,6 +2147,46 @@ router.get("/upload/images", (_req: AuthRequest, res: Response): void => {
       .sort((a, b) => b.createdAt - a.createdAt);
     res.json({ code: 200, message: "success", data: files });
   } catch {
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// ── AI 配置 ──────────────────────────────────────────────────
+
+router.get("/dr/ai-config", async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const config = await prisma.drAiConfig.findFirst();
+    res.json({ code: 200, message: "success", data: config ?? null });
+  } catch (error) {
+    console.error("Get AI config error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.put("/dr/ai-config", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { baseUrl, apiKey, model, enabled } = req.body as {
+      baseUrl?: string;
+      apiKey?: string;
+      model?: string;
+      enabled?: boolean;
+    };
+
+    const existing = await prisma.drAiConfig.findFirst();
+    const data = {
+      baseUrl: baseUrl?.trim() ?? existing?.baseUrl ?? "",
+      apiKey: apiKey?.trim() ?? existing?.apiKey ?? "",
+      model: model?.trim() ?? existing?.model ?? "",
+      ...(enabled !== undefined ? { enabled } : {}),
+    };
+
+    const config = existing
+      ? await prisma.drAiConfig.update({ where: { id: existing.id }, data })
+      : await prisma.drAiConfig.create({ data: { ...data, enabled: enabled ?? false } });
+
+    res.json({ code: 200, message: "已保存", data: config });
+  } catch (error) {
+    console.error("Update AI config error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });

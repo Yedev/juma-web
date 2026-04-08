@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { message, Table, Modal, Select, Spin, Button, Tag, Drawer, Space, Popconfirm, Input, Card } from "antd";
-import { PlusOutlined, EditOutlined, DeleteOutlined, StarOutlined, HighlightOutlined } from "@ant-design/icons";
+import { message, Table, Modal, Select, Spin, Button, Tag, Drawer, Space, Popconfirm, Input, Card, Switch, Avatar } from "antd";
+import { PlusOutlined, EditOutlined, DeleteOutlined, StarOutlined, HighlightOutlined, AppstoreOutlined } from "@ant-design/icons";
 import { adminClient } from "../api/client";
 
 interface SpaceOption {
@@ -48,6 +48,23 @@ interface ArticleOption {
   author: string;
 }
 
+interface CollectionOption {
+  collectionId: string;
+  name: string;
+  description: string;
+  coverUrl: string;
+}
+
+interface LatticeConfig {
+  latticeId: string;
+  spaceId: string;
+  collectionId: string;
+  recommendation: string;
+  enabled: boolean;
+  collection: { collectionId: string; name: string; description: string; coverUrl: string } | null;
+  articleCount: number;
+}
+
 export default function DrDailyPicksManagement() {
   const [spaces, setSpaces] = useState<SpaceOption[]>([]);
   const [selectedSpaceId, setSelectedSpaceId] = useState<string | undefined>(undefined);
@@ -87,6 +104,15 @@ export default function DrDailyPicksManagement() {
   // Preview
   const [previewDate] = useState(new Date().toISOString().split("T")[0]);
 
+  // 思维格栅
+  const [lattice, setLattice] = useState<LatticeConfig | null>(null);
+  const [latticeLoading, setLatticeLoading] = useState(false);
+  const [latticeModalOpen, setLatticeModalOpen] = useState(false);
+  const [collectionOptions, setCollectionOptions] = useState<CollectionOption[]>([]);
+  const [latticeCollectionId, setLatticeCollectionId] = useState<string>("");
+  const [latticeRecommendation, setLatticeRecommendation] = useState("");
+  const [latticeSaving, setLatticeSaving] = useState(false);
+
   const fetchSpaces = useCallback(async () => {
     try {
       const res = await adminClient.get("/api/admin/dr/spaces");
@@ -116,13 +142,27 @@ export default function DrDailyPicksManagement() {
     }
   }, []);
 
+  const fetchLattice = useCallback(async (spaceId?: string) => {
+    if (!spaceId) { setLattice(null); return; }
+    setLatticeLoading(true);
+    try {
+      const res = await adminClient.get(`/api/admin/dr/spaces/${spaceId}/daily-pick-lattice`);
+      if (res.data.code === 200) setLattice(res.data.data);
+    } catch {
+      message.error("加载思维格栅配置失败");
+    } finally {
+      setLatticeLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchSpaces();
   }, [fetchSpaces]);
 
   useEffect(() => {
     fetchPicks(selectedSpaceId);
-  }, [selectedSpaceId, fetchPicks]);
+    fetchLattice(selectedSpaceId);
+  }, [selectedSpaceId, fetchPicks, fetchLattice]);
 
   const openAddModal = async () => {
     if (!selectedSpaceId) return;
@@ -222,6 +262,78 @@ export default function DrDailyPicksManagement() {
           }
         } catch {
           message.error("移除失败");
+        }
+      },
+    });
+  };
+
+  const openLatticeModal = async () => {
+    if (!selectedSpaceId) return;
+    setLatticeCollectionId(lattice?.collectionId ?? "");
+    setLatticeRecommendation(lattice?.recommendation ?? "");
+    setLatticeModalOpen(true);
+    try {
+      const res = await adminClient.get(`/api/admin/dr/spaces/${selectedSpaceId}/collections`);
+      if (res.data.code === 200) setCollectionOptions(res.data.data ?? []);
+    } catch {
+      message.error("加载合集列表失败");
+    }
+  };
+
+  const handleSaveLattice = async () => {
+    if (!selectedSpaceId || !latticeCollectionId) {
+      message.error("请选择合集");
+      return;
+    }
+    setLatticeSaving(true);
+    try {
+      const res = await adminClient.put(`/api/admin/dr/spaces/${selectedSpaceId}/daily-pick-lattice`, {
+        collectionId: latticeCollectionId,
+        recommendation: latticeRecommendation.trim(),
+      });
+      if (res.data.code === 200) {
+        message.success("思维格栅已保存");
+        setLatticeModalOpen(false);
+        fetchLattice(selectedSpaceId);
+      } else {
+        message.error(res.data.message || "保存失败");
+      }
+    } catch {
+      message.error("保存失败");
+    } finally {
+      setLatticeSaving(false);
+    }
+  };
+
+  const handleToggleLattice = async () => {
+    if (!selectedSpaceId) return;
+    try {
+      const res = await adminClient.put(`/api/admin/dr/spaces/${selectedSpaceId}/daily-pick-lattice/toggle`);
+      if (res.data.code === 200) {
+        message.success(res.data.message);
+        fetchLattice(selectedSpaceId);
+      }
+    } catch {
+      message.error("操作失败");
+    }
+  };
+
+  const handleDeleteLattice = () => {
+    Modal.confirm({
+      title: "确认删除",
+      content: "确定要删除思维格栅配置吗？",
+      okText: "删除",
+      cancelText: "取消",
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          const res = await adminClient.delete(`/api/admin/dr/spaces/${selectedSpaceId}/daily-pick-lattice`);
+          if (res.data.code === 200) {
+            message.success("已删除");
+            setLattice(null);
+          }
+        } catch {
+          message.error("删除失败");
         }
       },
     });
@@ -523,6 +635,61 @@ export default function DrDailyPicksManagement() {
               </div>
             )}
           </Card>
+
+          {/* 思维格栅 */}
+          <Card
+            title={
+              <Space>
+                <AppstoreOutlined style={{ color: "#722ed1" }} />
+                <span>思维格栅</span>
+              </Space>
+            }
+            size="small"
+            style={{ marginTop: 16 }}
+            extra={
+              <Space>
+                {lattice && (
+                  <>
+                    <Switch
+                      size="small"
+                      checked={lattice.enabled}
+                      onChange={handleToggleLattice}
+                      checkedChildren="启用"
+                      unCheckedChildren="禁用"
+                    />
+                    <Button size="small" icon={<DeleteOutlined />} danger onClick={handleDeleteLattice} />
+                  </>
+                )}
+                <Button size="small" type="primary" icon={lattice ? <EditOutlined /> : <PlusOutlined />} onClick={openLatticeModal}>
+                  {lattice ? "编辑" : "配置"}
+                </Button>
+              </Space>
+            }
+          >
+            {latticeLoading ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 12 }}><Spin size="small" /></div>
+            ) : !lattice ? (
+              <div style={{ color: "#999", textAlign: "center", padding: 12 }}>
+                暂未配置思维格栅，点击右上角「配置」关联一个合集
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                {lattice.collection?.coverUrl && (
+                  <Avatar shape="square" size={56} src={lattice.collection.coverUrl} />
+                )}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500, fontSize: 14 }}>{lattice.collection?.name ?? lattice.collectionId}</div>
+                  {lattice.collection?.description && (
+                    <div style={{ color: "#666", fontSize: 12, marginTop: 2 }}>{lattice.collection.description}</div>
+                  )}
+                  {lattice.recommendation && (
+                    <div style={{ color: "#722ed1", fontSize: 12, marginTop: 4 }}>推荐语：{lattice.recommendation}</div>
+                  )}
+                  <div style={{ color: "#999", fontSize: 12, marginTop: 4 }}>共 {lattice.articleCount} 篇资源</div>
+                </div>
+              </div>
+            )}
+          </Card>
         </>
       )}
 
@@ -679,6 +846,39 @@ export default function DrDailyPicksManagement() {
                 { value: "#2196F3", label: "蓝色" },
                 { value: "#FF5722", label: "橙红色" },
               ]}
+            />
+          </div>
+        </div>
+      </Modal>
+      {/* 思维格栅配置 Modal */}
+      <Modal
+        title="配置思维格栅"
+        open={latticeModalOpen}
+        onCancel={() => setLatticeModalOpen(false)}
+        onOk={handleSaveLattice}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={latticeSaving}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "12px 0" }}>
+          <div>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>关联合集 *</div>
+            <Select
+              value={latticeCollectionId || undefined}
+              onChange={(v) => setLatticeCollectionId(v)}
+              style={{ width: "100%" }}
+              placeholder="请选择合集"
+              showSearch
+              optionFilterProp="label"
+              options={collectionOptions.map((c) => ({ value: c.collectionId, label: c.name }))}
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>一句话推荐（可选）</div>
+            <Input
+              value={latticeRecommendation}
+              onChange={(e) => setLatticeRecommendation(e.target.value)}
+              placeholder="填写对该合集的一句话推荐，展示给用户"
             />
           </div>
         </div>

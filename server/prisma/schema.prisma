@@ -260,7 +260,34 @@ model DrSpaceCollectionArticle {
   @@map("dr_space_collection_articles")
 }
 
+// ── AI 配置 ────────────────────────────────────────────────
+
+model DrAiConfig {
+  id        Int      @id @default(autoincrement())
+  baseUrl   String   @default("") @map("base_url")
+  apiKey    String   @default("") @map("api_key")
+  model     String   @default("")
+  enabled   Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("dr_ai_configs")
+}
+
 // ── 每日精选 ──────────────────────────────────────────────
+
+model DrDailyPickLattice {
+  id             Int      @id @default(autoincrement())
+  latticeId      String   @unique @map("lattice_id")
+  spaceId        String   @unique @map("space_id")
+  collectionId   String   @map("collection_id")
+  recommendation String   @default("")
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("dr_daily_pick_lattices")
+}
 
 model DrDailyPickArticle {
   id        Int      @id @default(autoincrement())

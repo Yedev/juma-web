@@ -532,79 +532,6 @@
 
 > 空间合集由管理员创建并维护，用户加入空间后可通过首页模块入口访问合集内的文章。所有接口需要用户 JWT，且用户必须是对应空间的成员。
 
-## 每日精选
-
-> 每日精选根据日期和空间自动轮换，每天显示 1-3 篇精选文章。管理员可预先标注编辑高亮，引导用户阅读重点内容。
-
-### GET /api/v1/dr/spaces/:spaceId/daily-picks
-
-获取当日精选文章列表（含编辑高亮）。需要用户 JWT。
-
-**路径参数：**
-
-| 参数 | 说明 |
-|------|------|
-| `spaceId` | 空间 ID |
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "date": "2026-03-25",
-    "articles": [
-      {
-        "articleId": "A1000001",
-        "title": "大模型的未来",
-        "summary": "深度解析大语言模型的发展趋势",
-        "coverUrl": "https://example.com/cover.jpg",
-        "author": "张三",
-        "readCount": 1200,
-        "publishedAt": "2026-03-18T10:00:00.000Z",
-        "readProgress": 75,
-        "isBookmarked": true,
-        "editorHighlights": [
-          {
-            "highlightId": "EH1000001",
-            "text": "这是文章中最关键的观点，大模型将从根本上改变软件开发的范式...",
-            "color": "#FFD700",
-            "note": "核心论点"
-          },
-          {
-            "highlightId": "EH1000002",
-            "text": "预计到 2030 年，90% 的代码将由 AI 辅助生成...",
-            "color": "#FFD700",
-            "note": "数据预测"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-**字段说明：**
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `date` | string | 当日日期（YYYY-MM-DD） |
-| `articles` | array | 精选文章列表（最多 3 篇） |
-| `readProgress` | number | 当前用户的阅读进度（0-100） |
-| `isBookmarked` | boolean | 当前用户是否已收藏 |
-| `editorHighlights` | array | 编辑预标注的高亮列表 |
-| `editorHighlights[].text` | string | 高亮文本内容 |
-| `editorHighlights[].color` | string | 高亮颜色（十六进制） |
-| `editorHighlights[].note` | string | 编辑备注/推荐理由 |
-
-**轮换规则：**
-- 基于日期索引 + 空间 ID 哈希计算起始位置
-- 同一天内多次请求返回相同结果
-- 不同空间同一天可能显示不同文章
-- 从精选池中循环选取最多 3 篇启用的文章
-
----
-
 ## 阅读统计
 
 ### POST /api/v1/dr/reading-stats
@@ -793,7 +720,7 @@
 
 ### GET /api/v1/dr/daily-article
 
-获取每日推荐文章（含编辑高亮及上下文）。需要用户 JWT。
+获取每日推荐文章（含编辑高亮及上下文）及思维格栅合集模块。需要用户 JWT。
 
 **响应示例：**
 ```json
@@ -823,7 +750,24 @@
         }
       ]
     },
-    "reason": "根据您的阅读偏好推荐"
+    "reason": "根据您的阅读偏好推荐",
+    "lattice": {
+      "collectionId": "SC1000001",
+      "collectionName": "思维方式精选",
+      "description": "帮你建立更清晰的思考框架",
+      "coverUrl": "https://example.com/collection-cover.jpg",
+      "recommendation": "这个合集会让你重新审视自己的思维方式",
+      "articles": [
+        {
+          "articleId": "A1000010",
+          "title": "第一性原理思考法",
+          "summary": "从基本假设出发，重构解决方案",
+          "coverUrl": "https://example.com/cover2.jpg",
+          "author": "王五",
+          "publishedAt": "2026-03-10T10:00:00.000Z"
+        }
+      ]
+    }
   }
 }
 ```
@@ -843,6 +787,13 @@
 | `highlights[].contextBefore` | string | 高亮文字前的原文片段，由管理员手动填写，未填时为空字符串 |
 | `highlights[].contextAfter` | string | 高亮文字后的原文片段，由管理员手动填写，未填时为空字符串 |
 | `reason` | string | 管理员填写的推荐语，未填写时为空字符串 |
+| `lattice` | object \| null | 思维格栅模块，未配置或已禁用时为 `null` |
+| `lattice.collectionId` | string | 合集 ID |
+| `lattice.collectionName` | string | 合集名称 |
+| `lattice.description` | string | 合集描述 |
+| `lattice.coverUrl` | string | 合集封面图 URL |
+| `lattice.recommendation` | string | 管理员填写的一句话推荐，未填时为空字符串 |
+| `lattice.articles` | array | 合集下的全部资源文章列表 |
 
 **`article` 为 `null` 时，`reason` 为固定说明：**
 

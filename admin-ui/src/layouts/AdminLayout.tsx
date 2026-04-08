@@ -11,6 +11,7 @@ import {
   FolderOutlined,
   StarOutlined,
   PictureOutlined,
+  RobotOutlined,
 } from "@ant-design/icons";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 
@@ -28,6 +29,7 @@ const menuItems: MenuItem[] = [
   { key: "/dr/articles", icon: <ReadOutlined />, label: "文章管理" },
   { key: "/dr/daily-picks", icon: <StarOutlined />, label: "每日精选" },
   { key: "/dr/users", icon: <TeamOutlined />, label: "用户管理" },
+  { key: "/dr/ai-config", icon: <RobotOutlined />, label: "AI 配置" },
 ];
 
 const pageTitle: Record<string, string> = {
@@ -41,6 +43,7 @@ const pageTitle: Record<string, string> = {
   "/dr/articles": "文章管理",
   "/dr/daily-picks": "每日精选",
   "/dr/users": "用户管理",
+  "/dr/ai-config": "AI 配置",
 };
 
 export default function AdminLayout() {
