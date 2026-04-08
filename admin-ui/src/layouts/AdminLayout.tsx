@@ -30,6 +30,7 @@ const menuItems: MenuItem[] = [
   { key: "/dr/daily-picks", icon: <StarOutlined />, label: "每日精选" },
   { key: "/dr/users", icon: <TeamOutlined />, label: "用户管理" },
   { key: "/dr/ai-config", icon: <RobotOutlined />, label: "AI 配置" },
+  { key: "/dr/ai-quotas", icon: <RobotOutlined />, label: "AI 配额" },
 ];
 
 const pageTitle: Record<string, string> = {
@@ -44,6 +45,7 @@ const pageTitle: Record<string, string> = {
   "/dr/daily-picks": "每日精选",
   "/dr/users": "用户管理",
   "/dr/ai-config": "AI 配置",
+  "/dr/ai-quotas": "AI 配额管理",
 };
 
 export default function AdminLayout() {

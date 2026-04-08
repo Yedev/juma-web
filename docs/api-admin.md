@@ -575,3 +575,155 @@ curl -X POST "http://localhost:3001/api/admin/dr/articles/A1000001/editor-highli
   }
 }
 ```
+
+---
+
+### AI 配置与配额管理
+
+#### GET /api/admin/dr/ai-config
+
+获取 AI 服务配置。
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "data": {
+    "id": 1,
+    "baseUrl": "https://api.openai.com/v1",
+    "apiKey": "sk-***",
+    "model": "gpt-4o",
+    "enabled": true,
+    "defaultDailyLimit": 10,
+    "createdAt": "2026-04-08T10:00:00.000Z",
+    "updatedAt": "2026-04-08T10:00:00.000Z"
+  }
+}
+```
+
+#### PUT /api/admin/dr/ai-config
+
+更新 AI 服务配置。所有字段可选，仅传入的字段会被更新。
+
+**请求体：**
+```json
+{
+  "baseUrl": "https://api.openai.com/v1",
+  "apiKey": "sk-xxx",
+  "model": "gpt-4o",
+  "enabled": true,
+  "defaultDailyLimit": 10
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `baseUrl` | string | OpenAI 兼容 API 地址 |
+| `apiKey` | string | API 密钥 |
+| `model` | string | 模型名称 |
+| `enabled` | boolean | 是否启用 AI 功能 |
+| `defaultDailyLimit` | number \| null | 新用户默认每日调用上限，`null` 表示不限制 |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "已保存",
+  "data": { "id": 1, "baseUrl": "...", "model": "gpt-4o", "enabled": true, "defaultDailyLimit": 10, "..." : "..." }
+}
+```
+
+---
+
+#### GET /api/admin/dr/ai-quotas
+
+获取所有 AI 配额配置（含用户信息）。
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "data": [
+    {
+      "id": 1,
+      "userId": 1,
+      "model": "gpt-4o",
+      "dailyLimit": 20,
+      "createdAt": "2026-04-08T10:00:00.000Z",
+      "updatedAt": "2026-04-08T10:00:00.000Z",
+      "user": { "id": 1, "phone": "13800138000", "nickname": "测试用户" }
+    }
+  ]
+}
+```
+
+#### POST /api/admin/dr/ai-quotas
+
+创建或更新某用户对某模型的每日配额（upsert）。
+
+**请求体：**
+```json
+{
+  "userId": 1,
+  "model": "gpt-4o",
+  "dailyLimit": 20
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `userId` | number | 是 | DeepRead 用户 ID |
+| `model` | string | 是 | 模型名称 |
+| `dailyLimit` | number | 是 | 每日调用上限（≥0） |
+
+**配额优先级：** 个人配额（DrAiQuota） > 全局默认（DrAiConfig.defaultDailyLimit） > 无限制
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "已保存",
+  "data": { "id": 1, "userId": 1, "model": "gpt-4o", "dailyLimit": 20, "..." : "..." }
+}
+```
+
+#### DELETE /api/admin/dr/ai-quotas/:id
+
+删除指定配额配置。删除后该用户将回退到全局默认配额。
+
+**响应示例：**
+```json
+{ "code": 200, "message": "已删除" }
+```
+
+---
+
+#### GET /api/admin/dr/ai-usages
+
+查看 AI 用量记录，支持按用户和日期筛选。最多返回 200 条。
+
+**查询参数：**
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `userId` | number | 可选，按用户 ID 筛选 |
+| `date` | string | 可选，按日期筛选（格式 `YYYY-MM-DD`） |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "data": [
+    {
+      "id": 1,
+      "userId": 1,
+      "model": "gpt-4o",
+      "date": "2026-04-08",
+      "count": 5,
+      "createdAt": "2026-04-08T02:00:00.000Z",
+      "updatedAt": "2026-04-08T08:30:00.000Z",
+      "user": { "id": 1, "phone": "13800138000", "nickname": "测试用户" }
+    }
+  ]
+}
+```

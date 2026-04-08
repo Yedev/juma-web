@@ -948,3 +948,62 @@
   }
 }
 ```
+
+---
+
+## AI 对话
+
+### POST /api/v1/dr/ai/chat
+
+与 AI 进行对话。客户端自行构建完整的 messages 上下文（包括 system prompt、历史对话等），服务端透传给 AI 模型。
+
+**请求头：** 需要 `x-timestamp` + `x-sign` 签名，以及 `Authorization: Bearer <token>`。
+
+**请求体：**
+```json
+{
+  "messages": [
+    { "role": "system", "content": "你是一个阅读助手，帮助用户理解文章内容。" },
+    { "role": "user", "content": "这篇文章的核心观点是什么？" },
+    { "role": "assistant", "content": "这篇文章主要讨论了..." },
+    { "role": "user", "content": "能再详细展开说说吗？" }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `messages` | array | 是 | OpenAI 格式的消息数组，role 可为 `system`/`user`/`assistant` |
+
+**成功响应：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "reply": "AI 的回复内容..."
+  }
+}
+```
+
+**配额超限响应（429）：**
+```json
+{
+  "code": 429,
+  "message": "今日 AI 使用次数已达上限"
+}
+```
+
+**AI 未启用响应（503）：**
+```json
+{
+  "code": 503,
+  "message": "AI 功能未启用"
+}
+```
+
+**配额规则：**
+- 管理员可为每个用户设置针对特定模型的每日调用上限
+- 无个人配额的用户使用全局默认配额（`defaultDailyLimit`）
+- 全局默认也未设置时不限制调用次数
+- 配额按自然日（东八区）重置

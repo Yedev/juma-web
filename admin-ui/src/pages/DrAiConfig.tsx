@@ -1,142 +1,325 @@
 import { useState, useEffect } from "react";
-import { message, Button, Input, Switch, Card, Space, Tag } from "antd";
-import { SaveOutlined, RobotOutlined } from "@ant-design/icons";
+import { message, Button, Table, Tag, Modal, Form, Input, Switch, InputNumber, Space, Popconfirm, Typography } from "antd";
+import { PlusOutlined, EditOutlined, DeleteOutlined, RobotOutlined } from "@ant-design/icons";
 import { adminClient } from "../api/client";
 
-interface AiConfig {
+interface AiModel {
   id: number;
-  baseUrl: string;
-  apiKey: string;
+  providerId: number;
   model: string;
   enabled: boolean;
+  defaultDailyLimit: number | null;
+}
+
+interface AiProvider {
+  id: number;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  enabled: boolean;
+  models: AiModel[];
 }
 
 export default function DrAiConfig() {
-  const [config, setConfig] = useState<AiConfig | null>(null);
+  const [providers, setProviders] = useState<AiProvider[]>([]);
   const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<AiProvider | null>(null);
 
-  const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState("");
-  const [enabled, setEnabled] = useState(false);
+  const [providerModalOpen, setProviderModalOpen] = useState(false);
+  const [editingProvider, setEditingProvider] = useState<AiProvider | null>(null);
+  const [providerForm] = Form.useForm();
+  const [providerSaving, setProviderSaving] = useState(false);
+
+  const [modelModalOpen, setModelModalOpen] = useState(false);
+  const [editingModel, setEditingModel] = useState<AiModel | null>(null);
+  const [modelForm] = Form.useForm();
+  const [modelSaving, setModelSaving] = useState(false);
 
   useEffect(() => {
-    fetchConfig();
+    fetchProviders();
   }, []);
 
-  const fetchConfig = async () => {
+  const fetchProviders = async () => {
     setLoading(true);
     try {
-      const res = await adminClient.get("/api/admin/dr/ai-config");
-      if (res.data.code === 200 && res.data.data) {
-        const c: AiConfig = res.data.data;
-        setConfig(c);
-        setBaseUrl(c.baseUrl);
-        setApiKey(c.apiKey);
-        setModel(c.model);
-        setEnabled(c.enabled);
+      const res = await adminClient.get("/api/admin/dr/ai-providers");
+      if (res.data.code === 200) {
+        const list: AiProvider[] = res.data.data;
+        setProviders(list);
+        if (selectedProvider) {
+          const updated = list.find((p) => p.id === selectedProvider.id);
+          setSelectedProvider(updated ?? list[0] ?? null);
+        } else {
+          setSelectedProvider(list[0] ?? null);
+        }
       }
     } catch {
-      message.error("加载配置失败");
+      message.error("加载失败");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSave = async () => {
-    if (!baseUrl.trim() || !apiKey.trim() || !model.trim()) {
-      message.error("Base URL、API Key、模型名称均不能为空");
-      return;
-    }
-    setSaving(true);
+  // ── Provider CRUD ──────────────────────────────────────────
+
+  const openProviderModal = (provider?: AiProvider) => {
+    setEditingProvider(provider ?? null);
+    providerForm.setFieldsValue(
+      provider
+        ? { name: provider.name, baseUrl: provider.baseUrl, apiKey: provider.apiKey, enabled: provider.enabled }
+        : { name: "", baseUrl: "", apiKey: "", enabled: true }
+    );
+    setProviderModalOpen(true);
+  };
+
+  const handleProviderSave = async () => {
+    const values = await providerForm.validateFields();
+    setProviderSaving(true);
     try {
-      const res = await adminClient.put("/api/admin/dr/ai-config", {
-        baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim(),
-        model: model.trim(),
-        enabled,
-      });
-      if (res.data.code === 200) {
-        message.success("配置已保存");
-        setConfig(res.data.data);
+      if (editingProvider) {
+        await adminClient.put(`/api/admin/dr/ai-providers/${editingProvider.id}`, values);
+        message.success("已更新");
+      } else {
+        await adminClient.post("/api/admin/dr/ai-providers", values);
+        message.success("已创建");
       }
+      setProviderModalOpen(false);
+      fetchProviders();
     } catch {
       message.error("保存失败");
     } finally {
-      setSaving(false);
+      setProviderSaving(false);
     }
   };
 
-  return (
-    <div style={{ maxWidth: 640 }}>
-      <div style={{ marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+  const handleDeleteProvider = async (id: number) => {
+    try {
+      await adminClient.delete(`/api/admin/dr/ai-providers/${id}`);
+      message.success("已删除");
+      if (selectedProvider?.id === id) setSelectedProvider(null);
+      fetchProviders();
+    } catch {
+      message.error("删除失败");
+    }
+  };
+
+  // ── Model CRUD ─────────────────────────────────────────────
+
+  const openModelModal = (model?: AiModel) => {
+    setEditingModel(model ?? null);
+    modelForm.setFieldsValue(
+      model
+        ? { model: model.model, enabled: model.enabled, defaultDailyLimit: model.defaultDailyLimit }
+        : { model: "", enabled: true, defaultDailyLimit: null }
+    );
+    setModelModalOpen(true);
+  };
+
+  const handleModelSave = async () => {
+    if (!selectedProvider) return;
+    const values = await modelForm.validateFields();
+    setModelSaving(true);
+    try {
+      if (editingModel) {
+        await adminClient.put(`/api/admin/dr/ai-models/${editingModel.id}`, values);
+        message.success("已更新");
+      } else {
+        await adminClient.post(`/api/admin/dr/ai-providers/${selectedProvider.id}/models`, values);
+        message.success("已创建");
+      }
+      setModelModalOpen(false);
+      fetchProviders();
+    } catch {
+      message.error("保存失败");
+    } finally {
+      setModelSaving(false);
+    }
+  };
+
+  const handleDeleteModel = async (id: number) => {
+    try {
+      await adminClient.delete(`/api/admin/dr/ai-models/${id}`);
+      message.success("已删除");
+      fetchProviders();
+    } catch {
+      message.error("删除失败");
+    }
+  };
+
+  // ── Provider Table columns ─────────────────────────────────
+
+  const providerColumns = [
+    { title: "名称", dataIndex: "name", key: "name", render: (v: string) => <b>{v}</b> },
+    { title: "Base URL", dataIndex: "baseUrl", key: "baseUrl", ellipsis: true },
+    {
+      title: "API Key",
+      dataIndex: "apiKey",
+      key: "apiKey",
+      render: (v: string) => <Typography.Text copyable={{ text: v }}>{v.slice(0, 6) + "****" + v.slice(-4)}</Typography.Text>,
+    },
+    {
+      title: "状态",
+      dataIndex: "enabled",
+      key: "enabled",
+      render: (v: boolean) => <Tag color={v ? "green" : "default"}>{v ? "启用" : "禁用"}</Tag>,
+    },
+    {
+      title: "操作",
+      key: "action",
+      render: (_: unknown, record: AiProvider) => (
         <Space>
-          <RobotOutlined style={{ fontSize: 16 }} />
-          <span style={{ fontSize: 15, fontWeight: 500 }}>AI 模型配置</span>
-          {config && (
-            <Tag color={config.enabled ? "green" : "default"}>{config.enabled ? "已启用" : "已禁用"}</Tag>
-          )}
+          <Button size="small" icon={<EditOutlined />} onClick={() => openProviderModal(record)}>编辑</Button>
+          <Popconfirm title="删除后该 Provider 下所有模型一并删除，确认？" onConfirm={() => handleDeleteProvider(record.id)} okText="删除" cancelText="取消">
+            <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
         </Space>
+      ),
+    },
+  ];
+
+  // ── Model Table columns ────────────────────────────────────
+
+  const modelColumns = [
+    {
+      title: "模型名",
+      dataIndex: "model",
+      key: "model",
+      render: (v: string) => {
+        const key = selectedProvider ? `${selectedProvider.name}-${v}` : v;
+        return (
+          <Space>
+            <b>{v}</b>
+            <Typography.Text type="secondary" copyable={{ text: key }} style={{ fontSize: 12 }}>
+              {key}
+            </Typography.Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: "状态",
+      dataIndex: "enabled",
+      key: "enabled",
+      render: (v: boolean) => <Tag color={v ? "green" : "default"}>{v ? "启用" : "禁用"}</Tag>,
+    },
+    {
+      title: "默认每日限额",
+      dataIndex: "defaultDailyLimit",
+      key: "defaultDailyLimit",
+      render: (v: number | null) => (v == null ? <Tag>不限制</Tag> : <Tag color="blue">{v} 次/天</Tag>),
+    },
+    {
+      title: "操作",
+      key: "action",
+      render: (_: unknown, record: AiModel) => (
+        <Space>
+          <Button size="small" icon={<EditOutlined />} onClick={() => openModelModal(record)}>编辑</Button>
+          <Popconfirm title="确认删除此模型？" onConfirm={() => handleDeleteModel(record.id)} okText="删除" cancelText="取消">
+            <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <div>
+      {/* Provider 列表 */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <Space>
+          <RobotOutlined />
+          <span style={{ fontWeight: 500 }}>AI Provider</span>
+        </Space>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => openProviderModal()}>新建 Provider</Button>
       </div>
 
-      <Card size="small" loading={loading}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 6 }}>Base URL</div>
-            <Input
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="例如：https://ark.cn-beijing.volces.com/api/v3"
-            />
-            <div style={{ fontSize: 12, color: "#bbb", marginTop: 4 }}>
-              兼容 OpenAI 格式的接口地址，豆包填火山引擎 ARK 地址
-            </div>
-          </div>
+      <Table
+        rowKey="id"
+        dataSource={providers}
+        columns={providerColumns}
+        loading={loading}
+        size="small"
+        pagination={false}
+        rowClassName={(record) => record.id === selectedProvider?.id ? "ant-table-row-selected" : ""}
+        onRow={(record) => ({ onClick: () => setSelectedProvider(record), style: { cursor: "pointer" } })}
+        style={{ marginBottom: 32 }}
+      />
 
-          <div>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 6 }}>API Key</div>
-            <Input.Password
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="填写对应平台的 API Key"
-            />
-          </div>
+      {/* Model 列表 */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <Space>
+          <span style={{ fontWeight: 500 }}>
+            模型列表
+            {selectedProvider && <Tag style={{ marginLeft: 8 }}>{selectedProvider.name}</Tag>}
+          </span>
+        </Space>
+        <Button
+          type="default"
+          icon={<PlusOutlined />}
+          disabled={!selectedProvider}
+          onClick={() => openModelModal()}
+        >
+          添加模型
+        </Button>
+      </div>
 
-          <div>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 6 }}>模型名称</div>
-            <Input
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="例如：doubao-pro-32k、gpt-4o、ep-xxxxxxxx"
-            />
-            <div style={{ fontSize: 12, color: "#bbb", marginTop: 4 }}>
-              填写模型 ID，豆包推理接入点填 ep- 开头的接入点 ID
-            </div>
-          </div>
+      <Table
+        rowKey="id"
+        dataSource={selectedProvider?.models ?? []}
+        columns={modelColumns}
+        size="small"
+        pagination={false}
+        locale={{ emptyText: selectedProvider ? "暂无模型，点击「添加模型」" : "请先在上方选择一个 Provider" }}
+      />
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <Switch
-              checked={enabled}
-              onChange={setEnabled}
-              checkedChildren="启用"
-              unCheckedChildren="禁用"
-            />
-            <span style={{ fontSize: 13, color: "#666" }}>AI 对话功能开关</span>
-          </div>
+      {/* Provider Modal */}
+      <Modal
+        title={editingProvider ? "编辑 Provider" : "新建 Provider"}
+        open={providerModalOpen}
+        onOk={handleProviderSave}
+        onCancel={() => setProviderModalOpen(false)}
+        confirmLoading={providerSaving}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Form form={providerForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item name="name" label="名称（slug）" rules={[{ required: true, message: "必填" }]}>
+            <Input placeholder="如：openai、anthropic、volcengine" disabled={!!editingProvider} />
+          </Form.Item>
+          <Form.Item name="baseUrl" label="Base URL" rules={[{ required: true, message: "必填" }]}>
+            <Input placeholder="https://api.openai.com/v1" />
+          </Form.Item>
+          <Form.Item name="apiKey" label="API Key" rules={[{ required: true, message: "必填" }]}>
+            <Input.Password placeholder="sk-xxx" />
+          </Form.Item>
+          <Form.Item name="enabled" label="状态" valuePropName="checked">
+            <Switch checkedChildren="启用" unCheckedChildren="禁用" />
+          </Form.Item>
+        </Form>
+      </Modal>
 
-          <div style={{ paddingTop: 8 }}>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              onClick={handleSave}
-              loading={saving}
-            >
-              保存配置
-            </Button>
-          </div>
-        </div>
-      </Card>
+      {/* Model Modal */}
+      <Modal
+        title={editingModel ? "编辑模型" : `添加模型${selectedProvider ? ` — ${selectedProvider.name}` : ""}`}
+        open={modelModalOpen}
+        onOk={handleModelSave}
+        onCancel={() => setModelModalOpen(false)}
+        confirmLoading={modelSaving}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Form form={modelForm} layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item name="model" label="模型名称" rules={[{ required: true, message: "必填" }]}>
+            <Input placeholder="如：gpt-4o、claude-3-5-sonnet、doubao-pro-32k" disabled={!!editingModel} />
+          </Form.Item>
+          <Form.Item name="defaultDailyLimit" label="默认每日限额（留空表示不限制）">
+            <InputNumber min={0} style={{ width: "100%" }} placeholder="留空 = 不限制" />
+          </Form.Item>
+          <Form.Item name="enabled" label="状态" valuePropName="checked">
+            <Switch checkedChildren="启用" unCheckedChildren="禁用" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

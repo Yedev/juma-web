@@ -1559,50 +1559,92 @@ router.get("/sync/changes", async (req: DrAuthRequest, res: Response): Promise<v
 
 // ── AI 对话 ───────────────────────────────────────────────────
 
+function getTodayDateString(): string {
+  const d = new Date(Date.now() + 8 * 3600_000);
+  return d.toISOString().slice(0, 10);
+}
+
 router.post("/ai/chat", async (req: DrAuthRequest, res: Response): Promise<void> => {
   try {
-    const { article_id, message } = req.body as { article_id?: string; message?: string };
+    const { provider_model, messages } = req.body as {
+      provider_model?: string;
+      messages?: OpenAI.Chat.ChatCompletionMessageParam[];
+    };
 
-    if (!message?.trim()) {
-      res.status(400).json({ code: 400, message: "message 不能为空" });
+    if (!provider_model?.trim()) {
+      res.status(400).json({ code: 400, message: "provider_model 不能为空，格式：providerName-modelName" });
+      return;
+    }
+    if (!Array.isArray(messages) || messages.length === 0) {
+      res.status(400).json({ code: 400, message: "messages 不能为空" });
       return;
     }
 
-    const aiConfig = await prisma.drAiConfig.findFirst();
-    if (!aiConfig || !aiConfig.enabled) {
-      res.status(503).json({ code: 503, message: "AI 功能未启用" });
+    // 按第一个 "-" 分割，支持模型名含连字符（如 gpt-4o）
+    const idx = provider_model.indexOf("-");
+    if (idx === -1) {
+      res.status(400).json({ code: 400, message: "provider_model 格式错误，应为 providerName-modelName" });
       return;
     }
-    if (!aiConfig.baseUrl || !aiConfig.apiKey || !aiConfig.model) {
-      res.status(503).json({ code: 503, message: "AI 配置不完整" });
+    const providerName = provider_model.slice(0, idx);
+    const modelName = provider_model.slice(idx + 1);
+
+    const provider = await prisma.drAiProvider.findUnique({ where: { name: providerName } });
+    if (!provider || !provider.enabled) {
+      res.status(503).json({ code: 503, message: "AI Provider 不存在或未启用" });
       return;
     }
 
-    const client = new OpenAI({
-      baseURL: aiConfig.baseUrl,
-      apiKey: aiConfig.apiKey,
+    const aiModel = await prisma.drAiModel.findFirst({
+      where: { providerId: provider.id, model: modelName, enabled: true },
     });
+    if (!aiModel) {
+      res.status(503).json({ code: 503, message: "AI 模型不存在或未启用" });
+      return;
+    }
 
-    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+    const today = getTodayDateString();
+    const userId = req.drUserId!;
+    const modelKey = provider_model.trim();
 
-    if (article_id) {
-      const article = await prisma.drArticle.findUnique({ where: { articleId: article_id } });
-      if (article) {
-        messages.push({
-          role: "system",
-          content: `你是一个阅读助手，正在帮助用户理解以下文章。\n\n标题：${article.title}\n作者：${article.author}\n\n正文：\n${article.content}`,
-        });
+    // 确定 dailyLimit：个人配额 > 模型默认 > 无限制
+    const quota = await prisma.drAiQuota.findUnique({
+      where: { userId_model: { userId, model: modelKey } },
+    });
+    const dailyLimit = quota?.dailyLimit ?? aiModel.defaultDailyLimit ?? null;
+
+    // 有配额限制时，原子检查+递增
+    if (dailyLimit !== null) {
+      await prisma.drAiUsage.upsert({
+        where: { userId_model_date: { userId, model: modelKey, date: today } },
+        create: { userId, model: modelKey, date: today, count: 0 },
+        update: {},
+      });
+      const result = await prisma.$executeRawUnsafe(
+        `UPDATE dr_ai_usages SET count = count + 1, updated_at = datetime('now')
+         WHERE user_id = ? AND model = ? AND date = ? AND count < ?`,
+        userId, modelKey, today, dailyLimit,
+      );
+      if (result === 0) {
+        res.status(429).json({ code: 429, message: "今日 AI 使用次数已达上限" });
+        return;
       }
     }
 
-    messages.push({ role: "user", content: message.trim() });
-
-    const completion = await client.chat.completions.create({
-      model: aiConfig.model,
-      messages,
-    });
-
+    // 透传调用
+    const client = new OpenAI({ baseURL: provider.baseUrl, apiKey: provider.apiKey });
+    const completion = await client.chat.completions.create({ model: modelName, messages });
     const reply = completion.choices[0]?.message?.content ?? "";
+
+    // 无配额限制时也记录用量
+    if (dailyLimit === null) {
+      await prisma.drAiUsage.upsert({
+        where: { userId_model_date: { userId, model: modelKey, date: today } },
+        create: { userId, model: modelKey, date: today, count: 1 },
+        update: { count: { increment: 1 } },
+      });
+    }
+
     res.json({ code: 200, message: "success", data: { reply } });
   } catch (error) {
     console.error("AI chat error:", error);

@@ -13,6 +13,7 @@ import DrUserManagement from "./pages/DrUserManagement";
 import DrCollectionManagement from "./pages/DrCollectionManagement";
 import DrDailyPicksManagement from "./pages/DrDailyPicksManagement";
 import DrAiConfig from "./pages/DrAiConfig";
+import DrAiQuotaManagement from "./pages/DrAiQuotaManagement";
 import ImageHosting from "./pages/ImageHosting";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -81,6 +82,7 @@ function App() {
             <Route path="dr/users" element={<DrUserManagement />} />
             <Route path="dr/daily-picks" element={<DrDailyPicksManagement />} />
             <Route path="dr/ai-config" element={<DrAiConfig />} />
+            <Route path="dr/ai-quotas" element={<DrAiQuotaManagement />} />
             <Route path="media" element={<ImageHosting />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

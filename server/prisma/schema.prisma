@@ -262,16 +262,56 @@ model DrSpaceCollectionArticle {
 
 // ── AI 配置 ────────────────────────────────────────────────
 
-model DrAiConfig {
+model DrAiProvider {
+  id        Int         @id @default(autoincrement())
+  name      String      @unique
+  baseUrl   String      @map("base_url")
+  apiKey    String      @map("api_key")
+  enabled   Boolean     @default(true)
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @default(now()) @updatedAt @map("updated_at")
+  models    DrAiModel[]
+
+  @@map("dr_ai_providers")
+}
+
+model DrAiModel {
+  id                Int          @id @default(autoincrement())
+  providerId        Int          @map("provider_id")
+  model             String
+  enabled           Boolean      @default(true)
+  defaultDailyLimit Int?         @map("default_daily_limit")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at")
+  provider          DrAiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, model])
+  @@map("dr_ai_models")
+}
+
+model DrAiQuota {
+  id         Int      @id @default(autoincrement())
+  userId     Int      @map("user_id")
+  model      String
+  dailyLimit Int      @map("daily_limit")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([userId, model])
+  @@map("dr_ai_quotas")
+}
+
+model DrAiUsage {
   id        Int      @id @default(autoincrement())
-  baseUrl   String   @default("") @map("base_url")
-  apiKey    String   @default("") @map("api_key")
-  model     String   @default("")
-  enabled   Boolean  @default(false)
+  userId    Int      @map("user_id")
+  model     String
+  date      String
+  count     Int      @default(0)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
-  @@map("dr_ai_configs")
+  @@unique([userId, model, date])
+  @@map("dr_ai_usages")
 }
 
 // ── 每日精选 ──────────────────────────────────────────────

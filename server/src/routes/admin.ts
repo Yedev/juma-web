@@ -2151,42 +2151,117 @@ router.get("/upload/images", (_req: AuthRequest, res: Response): void => {
   }
 });
 
-// ── AI 配置 ──────────────────────────────────────────────────
+// ── AI Provider / Model 管理 ─────────────────────────────────
 
-router.get("/dr/ai-config", async (_req: AuthRequest, res: Response): Promise<void> => {
+router.get("/dr/ai-providers", async (_req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const config = await prisma.drAiConfig.findFirst();
-    res.json({ code: 200, message: "success", data: config ?? null });
+    const providers = await prisma.drAiProvider.findMany({
+      include: { models: { orderBy: { id: "asc" } } },
+      orderBy: { id: "asc" },
+    });
+    res.json({ code: 200, message: "success", data: providers });
   } catch (error) {
-    console.error("Get AI config error:", error);
+    console.error("Get AI providers error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
 
-router.put("/dr/ai-config", async (req: AuthRequest, res: Response): Promise<void> => {
+router.post("/dr/ai-providers", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { baseUrl, apiKey, model, enabled } = req.body as {
-      baseUrl?: string;
-      apiKey?: string;
-      model?: string;
-      enabled?: boolean;
+    const { name, baseUrl, apiKey, enabled } = req.body as {
+      name?: string; baseUrl?: string; apiKey?: string; enabled?: boolean;
     };
-
-    const existing = await prisma.drAiConfig.findFirst();
-    const data = {
-      baseUrl: baseUrl?.trim() ?? existing?.baseUrl ?? "",
-      apiKey: apiKey?.trim() ?? existing?.apiKey ?? "",
-      model: model?.trim() ?? existing?.model ?? "",
-      ...(enabled !== undefined ? { enabled } : {}),
-    };
-
-    const config = existing
-      ? await prisma.drAiConfig.update({ where: { id: existing.id }, data })
-      : await prisma.drAiConfig.create({ data: { ...data, enabled: enabled ?? false } });
-
-    res.json({ code: 200, message: "已保存", data: config });
+    if (!name?.trim() || !baseUrl?.trim() || !apiKey?.trim()) {
+      res.status(400).json({ code: 400, message: "name / baseUrl / apiKey 必填" });
+      return;
+    }
+    const provider = await prisma.drAiProvider.create({
+      data: { name: name.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), enabled: enabled ?? true },
+    });
+    res.json({ code: 200, message: "已创建", data: provider });
   } catch (error) {
-    console.error("Update AI config error:", error);
+    console.error("Create AI provider error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.put("/dr/ai-providers/:id", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) { res.status(400).json({ code: 400, message: "无效 ID" }); return; }
+    const { name, baseUrl, apiKey, enabled } = req.body as {
+      name?: string; baseUrl?: string; apiKey?: string; enabled?: boolean;
+    };
+    const data: Record<string, unknown> = {};
+    if (name !== undefined) data.name = name.trim();
+    if (baseUrl !== undefined) data.baseUrl = baseUrl.trim();
+    if (apiKey !== undefined) data.apiKey = apiKey.trim();
+    if (enabled !== undefined) data.enabled = enabled;
+    const provider = await prisma.drAiProvider.update({ where: { id }, data });
+    res.json({ code: 200, message: "已更新", data: provider });
+  } catch (error) {
+    console.error("Update AI provider error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/dr/ai-providers/:id", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) { res.status(400).json({ code: 400, message: "无效 ID" }); return; }
+    await prisma.drAiProvider.delete({ where: { id } });
+    res.json({ code: 200, message: "已删除" });
+  } catch (error) {
+    console.error("Delete AI provider error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.post("/dr/ai-providers/:providerId/models", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const providerId = Number(req.params.providerId);
+    if (isNaN(providerId)) { res.status(400).json({ code: 400, message: "无效 providerId" }); return; }
+    const { model, enabled, defaultDailyLimit } = req.body as {
+      model?: string; enabled?: boolean; defaultDailyLimit?: number | null;
+    };
+    if (!model?.trim()) { res.status(400).json({ code: 400, message: "model 必填" }); return; }
+    const aiModel = await prisma.drAiModel.create({
+      data: { providerId, model: model.trim(), enabled: enabled ?? true, defaultDailyLimit: defaultDailyLimit ?? null },
+    });
+    res.json({ code: 200, message: "已创建", data: aiModel });
+  } catch (error) {
+    console.error("Create AI model error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.put("/dr/ai-models/:id", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) { res.status(400).json({ code: 400, message: "无效 ID" }); return; }
+    const { model, enabled, defaultDailyLimit } = req.body as {
+      model?: string; enabled?: boolean; defaultDailyLimit?: number | null;
+    };
+    const data: Record<string, unknown> = {};
+    if (model !== undefined) data.model = model.trim();
+    if (enabled !== undefined) data.enabled = enabled;
+    if (defaultDailyLimit !== undefined) data.defaultDailyLimit = defaultDailyLimit;
+    const aiModel = await prisma.drAiModel.update({ where: { id }, data });
+    res.json({ code: 200, message: "已更新", data: aiModel });
+  } catch (error) {
+    console.error("Update AI model error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/dr/ai-models/:id", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) { res.status(400).json({ code: 400, message: "无效 ID" }); return; }
+    await prisma.drAiModel.delete({ where: { id } });
+    res.json({ code: 200, message: "已删除" });
+  } catch (error) {
+    console.error("Delete AI model error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
@@ -2204,6 +2279,76 @@ router.delete("/upload/images/:filename", (req: AuthRequest, res: Response): voi
   }
   fs.unlinkSync(filepath);
   res.json({ code: 200, message: "已删除" });
+});
+
+// ── AI 配额管理 ──────────────────────────────────────────────
+
+router.get("/dr/ai-quotas", async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const quotas = await prisma.drAiQuota.findMany({ orderBy: { id: "desc" } });
+    const userIds = [...new Set(quotas.map((q) => q.userId))];
+    const users = userIds.length
+      ? await prisma.drUser.findMany({ where: { id: { in: userIds } }, select: { id: true, phone: true, nickname: true } })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    const data = quotas.map((q) => ({ ...q, user: userMap.get(q.userId) ?? null }));
+    res.json({ code: 200, message: "success", data });
+  } catch (error) {
+    console.error("Get AI quotas error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.post("/dr/ai-quotas", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { userId, model, dailyLimit } = req.body as { userId?: number; model?: string; dailyLimit?: number };
+    if (!userId || !model?.trim() || dailyLimit == null || dailyLimit < 0) {
+      res.status(400).json({ code: 400, message: "参数不完整" });
+      return;
+    }
+    const quota = await prisma.drAiQuota.upsert({
+      where: { userId_model: { userId, model: model.trim() } },
+      create: { userId, model: model.trim(), dailyLimit },
+      update: { dailyLimit },
+    });
+    res.json({ code: 200, message: "已保存", data: quota });
+  } catch (error) {
+    console.error("Upsert AI quota error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.delete("/dr/ai-quotas/:id", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const id = Number(req.params.id);
+    if (isNaN(id)) { res.status(400).json({ code: 400, message: "无效 ID" }); return; }
+    await prisma.drAiQuota.delete({ where: { id } });
+    res.json({ code: 200, message: "已删除" });
+  } catch (error) {
+    console.error("Delete AI quota error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.get("/dr/ai-usages", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.query.userId ? Number(req.query.userId) : undefined;
+    const date = req.query.date as string | undefined;
+    const where: Record<string, unknown> = {};
+    if (userId) where.userId = userId;
+    if (date) where.date = date;
+    const usages = await prisma.drAiUsage.findMany({ where, orderBy: { id: "desc" }, take: 200 });
+    const userIds = [...new Set(usages.map((u) => u.userId))];
+    const users = userIds.length
+      ? await prisma.drUser.findMany({ where: { id: { in: userIds } }, select: { id: true, phone: true, nickname: true } })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    const data = usages.map((u) => ({ ...u, user: userMap.get(u.userId) ?? null }));
+    res.json({ code: 200, message: "success", data });
+  } catch (error) {
+    console.error("Get AI usages error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
 });
 
 export default router;
