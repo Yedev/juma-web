@@ -679,3 +679,4 @@ docker run -d \
 | [docs/deployment.md](docs/deployment.md) | 生产部署（Docker、Nginx、HTTPS 配置） |
 | [PRD.md](PRD.md) | 产品需求文档 |
 | [AGENTS.md](AGENTS.md) | AI Agent 开发规范 |
+modify by android
