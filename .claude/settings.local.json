@@ -34,7 +34,12 @@
       "Bash(npx eslint:*)",
       "Bash(ls -la *.log *.out logs/)",
       "Bash(ADMIN_TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoianVtYSIsImlhdCI6MTc3NTcyODk4NiwiZXhwIjoxNzc1ODE1Mzg2fQ.z5fx3qD9rWf1peleCXkOHOT-mH4SrW_d-8rZd5d6ouQ\")",
-      "Bash(echo \"---\" echo $USERPROFILE echo $HOME)"
+      "Bash(echo \"---\" echo $USERPROFILE echo $HOME)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(git stash:*)"
     ]
   }
 }

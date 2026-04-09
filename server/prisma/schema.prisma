@@ -109,6 +109,7 @@ model DrSpaceMember {
   inviteCodeId String?  @map("invite_code_id")
   joinedAt     DateTime @default(now()) @map("joined_at")
   @@unique([spaceId, userId])
+  @@index([userId])
   @@map("dr_space_members")
 }
 
@@ -154,6 +155,8 @@ model DrArticle {
   publishedAt DateTime @default(now()) @map("published_at")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+  @@index([spaceId])
+  @@index([channelId])
   @@map("dr_articles")
 }
 
@@ -191,6 +194,7 @@ model DrBookmark {
   articleId String   @map("article_id")
   createdAt DateTime @default(now()) @map("created_at")
   @@unique([userId, articleId])
+  @@index([userId])
   @@map("dr_bookmarks")
 }
 
@@ -215,6 +219,8 @@ model DrHighlight {
   note         String   @default("")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  @@index([userId])
+  @@index([articleId])
   @@map("dr_highlights")
 }
 

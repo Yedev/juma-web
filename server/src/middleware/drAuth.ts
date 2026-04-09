@@ -1,6 +1,9 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
+if (!process.env.DR_JWT_SECRET) {
+  console.warn("Warning: DR_JWT_SECRET not set, using default (dev only)");
+}
 const DR_JWT_SECRET = process.env.DR_JWT_SECRET || "deepread_jwt_secret_2026";
 const DR_JWT_EXPIRES_IN = "30d";
 
