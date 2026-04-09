@@ -1729,7 +1729,7 @@ router.get("/dr/spaces/:spaceId/daily-picks", async (req: AuthRequest, res: Resp
   }
 });
 
-// 添加文章到精选池
+// 添加文章为当前每日精选（自动禁用该空间其他精选）
 router.post("/dr/spaces/:spaceId/daily-picks", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const spaceId = req.params.spaceId as string;
@@ -1752,14 +1752,11 @@ router.post("/dr/spaces/:spaceId/daily-picks", async (req: AuthRequest, res: Res
       return;
     }
 
-    // 检查是否已存在
-    const existing = await prisma.drDailyPickArticle.findUnique({
-      where: { spaceId_articleId: { spaceId, articleId } },
+    // 禁用该空间所有现有精选，然后创建新的
+    await prisma.drDailyPickArticle.updateMany({
+      where: { spaceId, enabled: true },
+      data: { enabled: false },
     });
-    if (existing) {
-      res.status(400).json({ code: 400, message: "该文章已在精选池中" });
-      return;
-    }
 
     const maxOrder = await prisma.drDailyPickArticle.findFirst({
       where: { spaceId },
@@ -1774,10 +1771,11 @@ router.post("/dr/spaces/:spaceId/daily-picks", async (req: AuthRequest, res: Res
         articleId,
         reason: reason?.trim() || "",
         sortOrder: (maxOrder?.sortOrder ?? -1) + 1,
+        enabled: true,
       },
     });
 
-    res.json({ code: 200, message: "文章已加入精选池", data: pick });
+    res.json({ code: 200, message: "已设为当前每日精选", data: pick });
   } catch (error) {
     console.error("Admin add daily pick error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
@@ -1802,8 +1800,8 @@ router.delete("/dr/daily-picks/:pickId", async (req: AuthRequest, res: Response)
   }
 });
 
-// 启用/禁用精选文章
-router.put("/dr/daily-picks/:pickId/toggle", async (req: AuthRequest, res: Response): Promise<void> => {
+// 激活某条精选为当前（禁用同空间其他精选）
+router.put("/dr/daily-picks/:pickId/activate", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const pickId = req.params.pickId as string;
     const existing = await prisma.drDailyPickArticle.findUnique({ where: { pickId } });
@@ -1812,13 +1810,19 @@ router.put("/dr/daily-picks/:pickId/toggle", async (req: AuthRequest, res: Respo
       return;
     }
 
+    // 禁用同空间所有精选，再启用当前这条
+    await prisma.drDailyPickArticle.updateMany({
+      where: { spaceId: existing.spaceId, enabled: true },
+      data: { enabled: false },
+    });
+
     const updated = await prisma.drDailyPickArticle.update({
       where: { pickId },
-      data: { enabled: !existing.enabled },
+      data: { enabled: true },
     });
-    res.json({ code: 200, message: updated.enabled ? "已启用" : "已禁用", data: updated });
+    res.json({ code: 200, message: "已设为当前每日精选", data: updated });
   } catch (error) {
-    console.error("Admin toggle daily pick error:", error);
+    console.error("Admin activate daily pick error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
@@ -1848,7 +1852,7 @@ router.put("/dr/daily-picks/:pickId", async (req: AuthRequest, res: Response): P
 
 // ── 思维格栅配置 ────────────────────────────────────────────────
 
-// 获取空间的思维格栅配置
+// 获取空间的思维格栅列表（当前 + 历史）
 router.get("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const spaceId = req.params.spaceId as string;
@@ -1858,40 +1862,45 @@ router.get("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, re
       return;
     }
 
-    const lattice = await prisma.drDailyPickLattice.findUnique({ where: { spaceId } });
-    if (!lattice) {
-      res.json({ code: 200, message: "success", data: null });
-      return;
-    }
-
-    const collection = await prisma.drSpaceCollection.findUnique({ where: { collectionId: lattice.collectionId } });
-    const articleCount = await prisma.drSpaceCollectionArticle.count({ where: { collectionId: lattice.collectionId } });
-
-    res.json({
-      code: 200,
-      message: "success",
-      data: {
-        ...lattice,
-        collection: collection
-          ? { collectionId: collection.collectionId, name: collection.name, description: collection.description, coverUrl: collection.coverUrl }
-          : null,
-        articleCount,
-      },
+    const lattices = await prisma.drDailyPickLattice.findMany({
+      where: { spaceId },
+      orderBy: { createdAt: "desc" },
     });
+
+    const collectionIds = [...new Set(lattices.map((l) => l.collectionId))];
+    const collections = collectionIds.length > 0
+      ? await prisma.drSpaceCollection.findMany({ where: { collectionId: { in: collectionIds } } })
+      : [];
+    const collectionMap = new Map(collections.map((c) => [c.collectionId, c]));
+
+    const articleCounts = collectionIds.length > 0
+      ? await prisma.drSpaceCollectionArticle.groupBy({ by: ["collectionId"], where: { collectionId: { in: collectionIds } }, _count: { id: true } })
+      : [];
+    const countMap = new Map(articleCounts.map((ac) => [ac.collectionId, ac._count.id]));
+
+    const data = lattices.map((l) => {
+      const col = collectionMap.get(l.collectionId);
+      return {
+        ...l,
+        collection: col ? { collectionId: col.collectionId, name: col.name, description: col.description, coverUrl: col.coverUrl } : null,
+        articleCount: countMap.get(l.collectionId) ?? 0,
+      };
+    });
+
+    res.json({ code: 200, message: "success", data });
   } catch (error) {
     console.error("Admin get daily pick lattice error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
 
-// 创建或更新思维格栅配置（upsert）
-router.put("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, res: Response): Promise<void> => {
+// 新增思维格栅（自动禁用该空间其他格栅）
+router.post("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const spaceId = req.params.spaceId as string;
-    const { collectionId, recommendation, enabled } = req.body as {
+    const { collectionId, recommendation } = req.body as {
       collectionId?: string;
       recommendation?: string;
-      enabled?: boolean;
     };
 
     const space = await prisma.drSpace.findUnique({ where: { spaceId } });
@@ -1911,61 +1920,66 @@ router.put("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, re
       return;
     }
 
-    const lattice = await prisma.drDailyPickLattice.upsert({
-      where: { spaceId },
-      create: {
+    // 禁用该空间所有现有格栅
+    await prisma.drDailyPickLattice.updateMany({
+      where: { spaceId, enabled: true },
+      data: { enabled: false },
+    });
+
+    const lattice = await prisma.drDailyPickLattice.create({
+      data: {
         latticeId: generateDrId("LT"),
         spaceId,
         collectionId,
         recommendation: recommendation?.trim() ?? "",
-        enabled: enabled ?? true,
-      },
-      update: {
-        collectionId,
-        recommendation: recommendation?.trim() ?? "",
-        ...(enabled !== undefined ? { enabled } : {}),
+        enabled: true,
       },
     });
 
-    res.json({ code: 200, message: "已保存", data: lattice });
+    res.json({ code: 200, message: "已设为当前思维格栅", data: lattice });
   } catch (error) {
-    console.error("Admin upsert daily pick lattice error:", error);
+    console.error("Admin create daily pick lattice error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
 
-// 切换思维格栅启用状态
-router.put("/dr/spaces/:spaceId/daily-pick-lattice/toggle", async (req: AuthRequest, res: Response): Promise<void> => {
+// 激活某条思维格栅为当前（禁用同空间其他格栅）
+router.put("/dr/daily-pick-lattice/:latticeId/activate", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const spaceId = req.params.spaceId as string;
-    const existing = await prisma.drDailyPickLattice.findUnique({ where: { spaceId } });
+    const latticeId = req.params.latticeId as string;
+    const existing = await prisma.drDailyPickLattice.findUnique({ where: { latticeId } });
     if (!existing) {
       res.status(404).json({ code: 404, message: "思维格栅配置不存在" });
       return;
     }
 
-    const updated = await prisma.drDailyPickLattice.update({
-      where: { spaceId },
-      data: { enabled: !existing.enabled },
+    await prisma.drDailyPickLattice.updateMany({
+      where: { spaceId: existing.spaceId, enabled: true },
+      data: { enabled: false },
     });
-    res.json({ code: 200, message: updated.enabled ? "已启用" : "已禁用", data: updated });
+
+    const updated = await prisma.drDailyPickLattice.update({
+      where: { latticeId },
+      data: { enabled: true },
+    });
+    res.json({ code: 200, message: "已设为当前思维格栅", data: updated });
   } catch (error) {
-    console.error("Admin toggle daily pick lattice error:", error);
+    console.error("Admin activate daily pick lattice error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
 
 // 删除思维格栅配置
-router.delete("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, res: Response): Promise<void> => {
+router.delete("/dr/daily-pick-lattice/:latticeId", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const spaceId = req.params.spaceId as string;
-    const existing = await prisma.drDailyPickLattice.findUnique({ where: { spaceId } });
+    const latticeId = req.params.latticeId as string;
+    const existing = await prisma.drDailyPickLattice.findUnique({ where: { latticeId } });
     if (!existing) {
       res.status(404).json({ code: 404, message: "思维格栅配置不存在" });
       return;
     }
 
-    await prisma.drDailyPickLattice.delete({ where: { spaceId } });
+    await prisma.drDailyPickLattice.delete({ where: { latticeId } });
     res.json({ code: 200, message: "已删除" });
   } catch (error) {
     console.error("Admin delete daily pick lattice error:", error);
@@ -2106,6 +2120,7 @@ router.delete("/dr/editor-highlights/:highlightId", async (req: AuthRequest, res
 // ── Image Hosting ─────────────────────────────────────────
 
 const UPLOADS_DIR = path.resolve(__dirname, "../../uploads/images");
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
@@ -2221,12 +2236,12 @@ router.post("/dr/ai-providers/:providerId/models", async (req: AuthRequest, res:
   try {
     const providerId = Number(req.params.providerId);
     if (isNaN(providerId)) { res.status(400).json({ code: 400, message: "无效 providerId" }); return; }
-    const { model, enabled, defaultDailyLimit } = req.body as {
-      model?: string; enabled?: boolean; defaultDailyLimit?: number | null;
+    const { model, enabled, costPerUse } = req.body as {
+      model?: string; enabled?: boolean; costPerUse?: number;
     };
     if (!model?.trim()) { res.status(400).json({ code: 400, message: "model 必填" }); return; }
     const aiModel = await prisma.drAiModel.create({
-      data: { providerId, model: model.trim(), enabled: enabled ?? true, defaultDailyLimit: defaultDailyLimit ?? null },
+      data: { providerId, model: model.trim(), enabled: enabled ?? true, costPerUse: costPerUse ?? 1 },
     });
     res.json({ code: 200, message: "已创建", data: aiModel });
   } catch (error) {
@@ -2239,13 +2254,13 @@ router.put("/dr/ai-models/:id", async (req: AuthRequest, res: Response): Promise
   try {
     const id = Number(req.params.id);
     if (isNaN(id)) { res.status(400).json({ code: 400, message: "无效 ID" }); return; }
-    const { model, enabled, defaultDailyLimit } = req.body as {
-      model?: string; enabled?: boolean; defaultDailyLimit?: number | null;
+    const { model, enabled, costPerUse } = req.body as {
+      model?: string; enabled?: boolean; costPerUse?: number;
     };
     const data: Record<string, unknown> = {};
     if (model !== undefined) data.model = model.trim();
     if (enabled !== undefined) data.enabled = enabled;
-    if (defaultDailyLimit !== undefined) data.defaultDailyLimit = defaultDailyLimit;
+    if (costPerUse !== undefined) data.costPerUse = costPerUse;
     const aiModel = await prisma.drAiModel.update({ where: { id }, data });
     res.json({ code: 200, message: "已更新", data: aiModel });
   } catch (error) {
@@ -2301,14 +2316,14 @@ router.get("/dr/ai-quotas", async (_req: AuthRequest, res: Response): Promise<vo
 
 router.post("/dr/ai-quotas", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { userId, model, dailyLimit } = req.body as { userId?: number; model?: string; dailyLimit?: number };
-    if (!userId || !model?.trim() || dailyLimit == null || dailyLimit < 0) {
+    const { userId, dailyLimit } = req.body as { userId?: number; dailyLimit?: number };
+    if (!userId || dailyLimit == null || dailyLimit < 0) {
       res.status(400).json({ code: 400, message: "参数不完整" });
       return;
     }
     const quota = await prisma.drAiQuota.upsert({
-      where: { userId_model: { userId, model: model.trim() } },
-      create: { userId, model: model.trim(), dailyLimit },
+      where: { userId },
+      create: { userId, dailyLimit },
       update: { dailyLimit },
     });
     res.json({ code: 200, message: "已保存", data: quota });

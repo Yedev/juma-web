@@ -7,13 +7,9 @@ import TaskManagement from "./pages/TaskManagement";
 import ConfigManagement from "./pages/ConfigManagement";
 import ApiPlayground from "./pages/ApiPlayground";
 import DrSpaceManagement from "./pages/DrSpaceManagement";
-import DrChannelManagement from "./pages/DrChannelManagement";
-import DrArticleManagement from "./pages/DrArticleManagement";
+import DrSpaceDetail from "./pages/DrSpaceDetail";
 import DrUserManagement from "./pages/DrUserManagement";
-import DrCollectionManagement from "./pages/DrCollectionManagement";
-import DrDailyPicksManagement from "./pages/DrDailyPicksManagement";
-import DrAiConfig from "./pages/DrAiConfig";
-import DrAiQuotaManagement from "./pages/DrAiQuotaManagement";
+import DrAiConfigTabs from "./pages/DrAiConfigTabs";
 import ImageHosting from "./pages/ImageHosting";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -76,13 +72,9 @@ function App() {
             <Route path="config" element={<ConfigManagement />} />
             <Route path="api-playground" element={<ApiPlayground />} />
             <Route path="dr/spaces" element={<DrSpaceManagement />} />
-            <Route path="dr/channels" element={<DrChannelManagement />} />
-            <Route path="dr/collections" element={<DrCollectionManagement />} />
-            <Route path="dr/articles" element={<DrArticleManagement />} />
+            <Route path="dr/spaces/:spaceId" element={<DrSpaceDetail />} />
             <Route path="dr/users" element={<DrUserManagement />} />
-            <Route path="dr/daily-picks" element={<DrDailyPicksManagement />} />
-            <Route path="dr/ai-config" element={<DrAiConfig />} />
-            <Route path="dr/ai-quotas" element={<DrAiQuotaManagement />} />
+            <Route path="dr/ai-config" element={<DrAiConfigTabs />} />
             <Route path="media" element={<ImageHosting />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

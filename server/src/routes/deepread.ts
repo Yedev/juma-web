@@ -86,6 +86,15 @@ router.post("/login", async (req: DrAuthRequest, res: Response): Promise<void> =
       user = await prisma.drUser.create({
         data: { phone, nickname: `用户${phone.slice(-4)}` },
       });
+
+      // 为新用户插入默认 AI 配额
+      const defaultCfg = await prisma.appConfig.findUnique({ where: { configKey: "dr_ai_default_daily_limit" } });
+      const defaultLimit = defaultCfg ? Number(defaultCfg.configValue) : 10;
+      if (defaultLimit >= 0) {
+        await prisma.drAiQuota.create({
+          data: { userId: user.id, dailyLimit: defaultLimit },
+        });
+      }
     }
 
     const token = signDrToken({ userId: user.id, phone: user.phone });
@@ -806,8 +815,8 @@ router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response
 
 // 获取思维格栅数据
 async function fetchLatticeData(spaceId: string) {
-  const lattice = await prisma.drDailyPickLattice.findUnique({ where: { spaceId } });
-  if (!lattice || !lattice.enabled) return null;
+  const lattice = await prisma.drDailyPickLattice.findFirst({ where: { spaceId, enabled: true } });
+  if (!lattice) return null;
 
   const collection = await prisma.drSpaceCollection.findUnique({ where: { collectionId: lattice.collectionId } });
   if (!collection) return null;
@@ -843,16 +852,6 @@ async function fetchLatticeData(spaceId: string) {
         };
       }),
   };
-}
-
-// 简单字符串哈希函数
-function hashString(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash) + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
 }
 
 // ── 阅读统计 ───────────────────────────────────────────────────
@@ -1173,12 +1172,12 @@ router.get("/daily-article", async (req: DrAuthRequest, res: Response): Promise<
     // 取第一个空间获取每日精选
     const spaceId = memberships[0].spaceId;
 
-    const pickArticles = await prisma.drDailyPickArticle.findMany({
+    // 获取当前启用的唯一精选（新模式：一个顶一个）
+    const selectedPick = await prisma.drDailyPickArticle.findFirst({
       where: { spaceId, enabled: true },
-      orderBy: { sortOrder: "asc" },
     });
 
-    if (pickArticles.length === 0) {
+    if (!selectedPick) {
       res.json({
         code: 200,
         message: "success",
@@ -1186,15 +1185,6 @@ router.get("/daily-article", async (req: DrAuthRequest, res: Response): Promise<
       });
       return;
     }
-
-    // 计算当日索引
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dayIndex = Math.floor(today.getTime() / 86400000);
-    const spaceHash = hashString(spaceId);
-    const selectedIndex = (dayIndex + spaceHash) % pickArticles.length;
-
-    const selectedPick = pickArticles[selectedIndex];
     const article = await prisma.drArticle.findUnique({
       where: { articleId: selectedPick.articleId },
     });
@@ -1606,44 +1596,39 @@ router.post("/ai/chat", async (req: DrAuthRequest, res: Response): Promise<void>
     const today = getTodayDateString();
     const userId = req.drUserId!;
     const modelKey = provider_model.trim();
+    const costPerUse = aiModel.costPerUse;
 
-    // 确定 dailyLimit：个人配额 > 模型默认 > 无限制
-    const quota = await prisma.drAiQuota.findUnique({
-      where: { userId_model: { userId, model: modelKey } },
+    // 确定 dailyLimit：个人配额 > 全局默认（兜底 10）
+    const quota = await prisma.drAiQuota.findUnique({ where: { userId } });
+    let dailyLimit: number;
+    if (quota) {
+      dailyLimit = quota.dailyLimit;
+    } else {
+      const defaultCfg = await prisma.appConfig.findUnique({ where: { configKey: "dr_ai_default_daily_limit" } });
+      dailyLimit = defaultCfg ? Number(defaultCfg.configValue) : 10;
+      if (isNaN(dailyLimit) || dailyLimit < 0) dailyLimit = 10;
+    }
+
+    // 原子检查+递增消耗值
+    await prisma.drAiUsage.upsert({
+      where: { userId_date: { userId, date: today } },
+      create: { userId, date: today, consumed: 0 },
+      update: {},
     });
-    const dailyLimit = quota?.dailyLimit ?? aiModel.defaultDailyLimit ?? null;
-
-    // 有配额限制时，原子检查+递增
-    if (dailyLimit !== null) {
-      await prisma.drAiUsage.upsert({
-        where: { userId_model_date: { userId, model: modelKey, date: today } },
-        create: { userId, model: modelKey, date: today, count: 0 },
-        update: {},
-      });
-      const result = await prisma.$executeRawUnsafe(
-        `UPDATE dr_ai_usages SET count = count + 1, updated_at = datetime('now')
-         WHERE user_id = ? AND model = ? AND date = ? AND count < ?`,
-        userId, modelKey, today, dailyLimit,
-      );
-      if (result === 0) {
-        res.status(429).json({ code: 429, message: "今日 AI 使用次数已达上限" });
-        return;
-      }
+    const result = await prisma.$executeRawUnsafe(
+      `UPDATE dr_ai_usages SET consumed = consumed + ?, updated_at = datetime('now')
+       WHERE user_id = ? AND date = ? AND consumed + ? <= ?`,
+      costPerUse, userId, today, costPerUse, dailyLimit,
+    );
+    if (result === 0) {
+      res.status(429).json({ code: 429, message: "今日 AI 使用额度已达上限" });
+      return;
     }
 
     // 透传调用
     const client = new OpenAI({ baseURL: provider.baseUrl, apiKey: provider.apiKey });
     const completion = await client.chat.completions.create({ model: modelName, messages });
     const reply = completion.choices[0]?.message?.content ?? "";
-
-    // 无配额限制时也记录用量
-    if (dailyLimit === null) {
-      await prisma.drAiUsage.upsert({
-        where: { userId_model_date: { userId, model: modelKey, date: today } },
-        create: { userId, model: modelKey, date: today, count: 1 },
-        update: { count: { increment: 1 } },
-      });
-    }
 
     res.json({ code: 200, message: "success", data: { reply } });
   } catch (error) {

@@ -28,7 +28,13 @@
       "Bash(ls /mnt/)",
       "Bash(ls /cygdrive/)",
       "Bash(powershell.exe -Command \"Copy-Item ''patch_tmp.patch'' -Destination \\([Environment]::GetFolderPath\\(''Desktop''\\) + ''\\\\changes-2026-04-08.patch''\\)\")",
-      "Bash(rm patch_tmp.patch)"
+      "Bash(rm patch_tmp.patch)",
+      "Bash(findstr /i node)",
+      "Bash(ls server/prisma/seed* server/src/*seed*)",
+      "Bash(npx eslint:*)",
+      "Bash(ls -la *.log *.out logs/)",
+      "Bash(ADMIN_TOKEN=\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEsInVzZXJuYW1lIjoianVtYSIsImlhdCI6MTc3NTcyODk4NiwiZXhwIjoxNzc1ODE1Mzg2fQ.z5fx3qD9rWf1peleCXkOHOT-mH4SrW_d-8rZd5d6ouQ\")",
+      "Bash(echo \"---\" echo $USERPROFILE echo $HOME)"
     ]
   }
 }

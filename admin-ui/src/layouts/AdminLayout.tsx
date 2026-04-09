@@ -5,11 +5,7 @@ import {
   ApiOutlined,
   LogoutOutlined,
   AppstoreOutlined,
-  BranchesOutlined,
-  ReadOutlined,
   TeamOutlined,
-  FolderOutlined,
-  StarOutlined,
   PictureOutlined,
   RobotOutlined,
 } from "@ant-design/icons";
@@ -24,13 +20,8 @@ const menuItems: MenuItem[] = [
   { key: "/api-playground", icon: <ApiOutlined />, label: "API接口说明" },
   { type: "divider", label: "DeepRead" },
   { key: "/dr/spaces", icon: <AppstoreOutlined />, label: "空间管理" },
-  { key: "/dr/channels", icon: <BranchesOutlined />, label: "频道管理" },
-  { key: "/dr/collections", icon: <FolderOutlined />, label: "集合管理" },
-  { key: "/dr/articles", icon: <ReadOutlined />, label: "文章管理" },
-  { key: "/dr/daily-picks", icon: <StarOutlined />, label: "每日精选" },
   { key: "/dr/users", icon: <TeamOutlined />, label: "用户管理" },
   { key: "/dr/ai-config", icon: <RobotOutlined />, label: "AI 配置" },
-  { key: "/dr/ai-quotas", icon: <RobotOutlined />, label: "AI 配额" },
 ];
 
 const pageTitle: Record<string, string> = {
@@ -39,13 +30,8 @@ const pageTitle: Record<string, string> = {
   "/media": "图床",
   "/api-playground": "API接口说明",
   "/dr/spaces": "空间管理",
-  "/dr/channels": "频道管理",
-  "/dr/collections": "集合管理",
-  "/dr/articles": "文章管理",
-  "/dr/daily-picks": "每日精选",
   "/dr/users": "用户管理",
   "/dr/ai-config": "AI 配置",
-  "/dr/ai-quotas": "AI 配额管理",
 };
 
 export default function AdminLayout() {
@@ -61,7 +47,7 @@ export default function AdminLayout() {
     navigate("/login");
   };
 
-  const currentTitle = pageTitle[location.pathname] || "JUMA";
+  const currentTitle = pageTitle[location.pathname] || (location.pathname.startsWith("/dr/spaces/") ? "空间详情" : "JUMA");
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "#f5f5f5" }}>
@@ -113,7 +99,7 @@ export default function AdminLayout() {
               );
             }
             const navItem = item as { key: string; icon: React.ReactNode; label: string };
-            const isActive = location.pathname === navItem.key;
+            const isActive = location.pathname === navItem.key || (navItem.key === "/dr/spaces" && location.pathname.startsWith("/dr/spaces/"));
             const isHovered = hoveredKey === navItem.key;
             return (
               <div

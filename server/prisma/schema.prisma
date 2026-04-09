@@ -280,7 +280,7 @@ model DrAiModel {
   providerId        Int          @map("provider_id")
   model             String
   enabled           Boolean      @default(true)
-  defaultDailyLimit Int?         @map("default_daily_limit")
+  costPerUse        Int          @default(1) @map("cost_per_use")
   createdAt         DateTime     @default(now()) @map("created_at")
   updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at")
   provider          DrAiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
@@ -291,26 +291,23 @@ model DrAiModel {
 
 model DrAiQuota {
   id         Int      @id @default(autoincrement())
-  userId     Int      @map("user_id")
-  model      String
+  userId     Int      @unique @map("user_id")
   dailyLimit Int      @map("daily_limit")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
 
-  @@unique([userId, model])
   @@map("dr_ai_quotas")
 }
 
 model DrAiUsage {
   id        Int      @id @default(autoincrement())
   userId    Int      @map("user_id")
-  model     String
   date      String
-  count     Int      @default(0)
+  consumed  Int      @default(0)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
-  @@unique([userId, model, date])
+  @@unique([userId, date])
   @@map("dr_ai_usages")
 }
 
@@ -319,7 +316,7 @@ model DrAiUsage {
 model DrDailyPickLattice {
   id             Int      @id @default(autoincrement())
   latticeId      String   @unique @map("lattice_id")
-  spaceId        String   @unique @map("space_id")
+  spaceId        String   @map("space_id")
   collectionId   String   @map("collection_id")
   recommendation String   @default("")
   enabled        Boolean  @default(true)
@@ -340,7 +337,6 @@ model DrDailyPickArticle {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
-  @@unique([spaceId, articleId])
   @@map("dr_daily_pick_articles")
 }
 

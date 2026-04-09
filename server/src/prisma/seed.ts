@@ -18,6 +18,8 @@ const defaultConfigs: { key: string; value: object }[] = [
   },
 ];
 
+const DR_AI_DEFAULT_DAILY_LIMIT = 10;
+
 const sampleTasks: { name: string; params: object; status: string; statusInfo: object }[] = [
   {
     name: "数据导出任务",
@@ -96,6 +98,17 @@ async function main() {
     } else {
       console.log(`Seed: config '${cfg.key}' already exists, skipping`);
     }
+  }
+
+  // AI default daily limit
+  const aiLimitExists = await prisma.appConfig.findUnique({ where: { configKey: "dr_ai_default_daily_limit" } });
+  if (!aiLimitExists) {
+    await prisma.appConfig.create({
+      data: { configKey: "dr_ai_default_daily_limit", configValue: String(DR_AI_DEFAULT_DAILY_LIMIT) },
+    });
+    console.log(`Seed: created config 'dr_ai_default_daily_limit' = ${DR_AI_DEFAULT_DAILY_LIMIT}`);
+  } else {
+    console.log("Seed: config 'dr_ai_default_daily_limit' already exists, skipping");
   }
 
   const taskCount = await prisma.task.count();

@@ -8,7 +8,7 @@ interface AiModel {
   providerId: number;
   model: string;
   enabled: boolean;
-  defaultDailyLimit: number | null;
+  costPerUse: number;
 }
 
 interface AiProvider {
@@ -109,8 +109,8 @@ export default function DrAiConfig() {
     setEditingModel(model ?? null);
     modelForm.setFieldsValue(
       model
-        ? { model: model.model, enabled: model.enabled, defaultDailyLimit: model.defaultDailyLimit }
-        : { model: "", enabled: true, defaultDailyLimit: null }
+        ? { model: model.model, enabled: model.enabled, costPerUse: model.costPerUse }
+        : { model: "", enabled: true, costPerUse: 1 }
     );
     setModelModalOpen(true);
   };
@@ -203,10 +203,10 @@ export default function DrAiConfig() {
       render: (v: boolean) => <Tag color={v ? "green" : "default"}>{v ? "启用" : "禁用"}</Tag>,
     },
     {
-      title: "默认每日限额",
-      dataIndex: "defaultDailyLimit",
-      key: "defaultDailyLimit",
-      render: (v: number | null) => (v == null ? <Tag>不限制</Tag> : <Tag color="blue">{v} 次/天</Tag>),
+      title: "消耗值",
+      dataIndex: "costPerUse",
+      key: "costPerUse",
+      render: (v: number) => <Tag color="purple">{v}</Tag>,
     },
     {
       title: "操作",
@@ -240,7 +240,7 @@ export default function DrAiConfig() {
         loading={loading}
         size="small"
         pagination={false}
-        rowClassName={(record) => record.id === selectedProvider?.id ? "ant-table-row-selected" : ""}
+        rowClassName={(record) => record.id === selectedProvider?.id ? "provider-row-selected" : ""}
         onRow={(record) => ({ onClick: () => setSelectedProvider(record), style: { cursor: "pointer" } })}
         style={{ marginBottom: 32 }}
       />
@@ -312,8 +312,8 @@ export default function DrAiConfig() {
           <Form.Item name="model" label="模型名称" rules={[{ required: true, message: "必填" }]}>
             <Input placeholder="如：gpt-4o、claude-3-5-sonnet、doubao-pro-32k" disabled={!!editingModel} />
           </Form.Item>
-          <Form.Item name="defaultDailyLimit" label="默认每日限额（留空表示不限制）">
-            <InputNumber min={0} style={{ width: "100%" }} placeholder="留空 = 不限制" />
+          <Form.Item name="costPerUse" label="消耗值（每次调用消耗的额度）" rules={[{ required: true, message: "必填" }]}>
+            <InputNumber min={1} style={{ width: "100%" }} placeholder="默认 1" />
           </Form.Item>
           <Form.Item name="enabled" label="状态" valuePropName="checked">
             <Switch checkedChildren="启用" unCheckedChildren="禁用" />

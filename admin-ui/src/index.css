@@ -77,6 +77,23 @@ body {
   color: #333 !important;
 }
 
+.ant-table-tbody > tr.provider-row-selected > td {
+  background: transparent !important;
+}
+
+.ant-table-tbody > tr.provider-row-selected > td:first-child {
+  border-left: 2px dashed #999 !important;
+}
+
+.ant-table-tbody > tr.provider-row-selected > td:last-child {
+  border-right: 2px dashed #999 !important;
+}
+
+.ant-table-tbody > tr.provider-row-selected > td {
+  border-top: 2px dashed #999 !important;
+  border-bottom: 2px dashed #999 !important;
+}
+
 .ant-btn-default {
   border-color: #e0e0e0 !important;
   color: #555 !important;
