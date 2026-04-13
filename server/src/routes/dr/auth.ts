@@ -65,29 +65,4 @@ router.post("/login", async (req: DrAuthRequest, res: Response): Promise<void> =
   }
 });
 
-// 2.3 Join space by invite code
-router.post("/space/join", async (req: DrAuthRequest, res: Response): Promise<void> => {
-  try {
-    const { invite_code } = req.body as { invite_code?: string };
-    if (!invite_code) {
-      res.status(400).json({ code: 400, message: "邀请码不能为空" });
-      return;
-    }
-
-    const result = await authService.joinSpace(req.drUserId!, invite_code);
-    if ("error" in result) {
-      res.status(result.status).json({ code: result.status, message: result.error });
-      return;
-    }
-
-    res.json({
-      code: 200,
-      message: result.alreadyMember ? "您已是该空间成员" : "加入成功",
-      data: result.data,
-    });
-  } catch (error) {
-    handleError(res, "Join space error", error);
-  }
-});
-
 export default router;
