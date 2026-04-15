@@ -1128,6 +1128,37 @@ router.get("/dr/users/:userId", async (req: AuthRequest, res: Response): Promise
   }
 });
 
+// ── User Sync Backup ──
+
+router.get("/dr/users/:userId/sync-backup", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = parseInt(req.params.userId as string);
+    if (isNaN(userId)) {
+      res.status(400).json({ code: 400, message: "无效的用户ID" });
+      return;
+    }
+
+    const backup = await prisma.drSyncBackup.findUnique({ where: { userId } });
+    if (!backup) {
+      res.json({ code: 200, message: "success", data: null });
+      return;
+    }
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        data: backup.data,
+        createdAt: backup.createdAt,
+        updatedAt: backup.updatedAt,
+      },
+    });
+  } catch (error) {
+    console.error("Admin get user sync backup error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
 // ── Space Homepage Modules ──────────────────────────────────
 
 const VALID_LAYOUT_TYPES = ["large_horizontal", "small_horizontal", "large_vertical", "small_vertical", "plain_text"] as const;

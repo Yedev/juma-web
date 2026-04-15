@@ -363,6 +363,18 @@ model DrEditorHighlight {
   @@map("dr_editor_highlights")
 }
 
+// ── 数据同步 ────────────────────────────────────────────────
+
+model DrSyncBackup {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique @map("user_id")
+  data      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("dr_sync_backups")
+}
+
 // ── 阅读统计 ────────────────────────────────────────────────
 
 model DrReadingStats {

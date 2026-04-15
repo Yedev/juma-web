@@ -7,7 +7,6 @@ import articleRoutes from "./dr/articles";
 import highlightRoutes from "./dr/highlights";
 import collectionRoutes from "./dr/collections";
 import homepageRoutes from "./dr/homepage";
-import statsRoutes from "./dr/stats";
 import syncRoutes from "./dr/sync";
 import aiRoutes from "./dr/ai";
 import * as authService from "../services/deepread/drAuthService";
@@ -53,7 +52,6 @@ router.use(articleRoutes);
 router.use(highlightRoutes);
 router.use(collectionRoutes);
 router.use(homepageRoutes);
-router.use(statsRoutes);
 router.use(syncRoutes);
 router.use(aiRoutes);
 

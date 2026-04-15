@@ -5,61 +5,29 @@ import * as syncService from "../../services/deepread/drSyncService";
 
 const router = Router();
 
-// POST /sync - 批量同步
-router.post("/sync", async (req: DrAuthRequest, res: Response): Promise<void> => {
+// POST /sync/export — 返回用户备份字符串
+router.post("/sync/export", async (req: DrAuthRequest, res: Response): Promise<void> => {
   try {
-    const { last_sync_at, payload } = req.body as {
-      client_sync_id?: string;
-      last_sync_at?: string;
-      payload?: {
-        highlights?: unknown[];
-        bookmarks?: unknown[];
-        read_progress?: unknown[];
-        reading_stats?: unknown[];
-      };
-    };
-
-    const { results, serverChanges } = await syncService.processSync(
-      req.drUserId!,
-      last_sync_at,
-      payload as Parameters<typeof syncService.processSync>[2],
-    );
-
-    res.json({
-      code: 200,
-      message: "同步成功",
-      data: {
-        server_sync_id: `sync-${Date.now()}`,
-        synced_at: new Date().toISOString(),
-        results,
-        server_changes: serverChanges,
-      },
-    });
+    const data = await syncService.exportData(req.drUserId!);
+    res.json({ code: 200, message: "success", data });
   } catch (error) {
-    handleError(res, "Sync error", error);
+    handleError(res, "Export data error", error);
   }
 });
 
-// GET /sync/changes - 增量获取
-router.get("/sync/changes", async (req: DrAuthRequest, res: Response): Promise<void> => {
+// POST /sync/import — 接收并存储用户备份字符串
+router.post("/sync/import", async (req: DrAuthRequest, res: Response): Promise<void> => {
   try {
-    const lastSyncAt = req.query.last_sync_at as string;
-    const entityTypes = (req.query.entity_types as string)?.split(",") || ["highlights", "bookmarks", "read_progress"];
-
-    if (!lastSyncAt) {
-      res.status(400).json({ code: 400, message: "last_sync_at 不能为空" });
+    const { data } = req.body as { data?: string };
+    if (data === undefined || data === null) {
+      res.status(400).json({ code: 400, message: "data 不能为空" });
       return;
     }
 
-    const changes = await syncService.getChanges(req.drUserId!, lastSyncAt, entityTypes);
-
-    res.json({
-      code: 200,
-      message: "success",
-      data: { synced_at: new Date().toISOString(), changes },
-    });
+    await syncService.importData(req.drUserId!, data);
+    res.json({ code: 200, message: "导入成功" });
   } catch (error) {
-    handleError(res, "Get sync changes error", error);
+    handleError(res, "Import data error", error);
   }
 });
 
