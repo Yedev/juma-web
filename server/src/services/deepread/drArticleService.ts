@@ -132,40 +132,6 @@ export async function setReadProgress(userId: number, articleId: string, progres
   });
 }
 
-export async function getBookmarksList(userId: number, page: number, pageSize: number) {
-  const [bookmarks, total] = await Promise.all([
-    prisma.drBookmark.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-    prisma.drBookmark.count({ where: { userId } }),
-  ]);
-
-  const articleIds = bookmarks.map((b) => b.articleId);
-  const articles =
-    articleIds.length > 0
-      ? await prisma.drArticle.findMany({
-          where: { articleId: { in: articleIds } },
-          select: { articleId: true, title: true, summary: true, coverUrl: true, author: true },
-        })
-      : [];
-  const articleMap = new Map(articles.map((a) => [a.articleId, a]));
-
-  return {
-    list: bookmarks
-      .filter((b) => articleMap.has(b.articleId))
-      .map((b) => {
-        const article = articleMap.get(b.articleId)!;
-        return { ...article, bookmarkedAt: b.createdAt };
-      }),
-    total,
-    page,
-    pageSize,
-  };
-}
-
 // Shared helper: enrich articles with bookmark/read status
 export async function enrichWithUserState(
   userId: number,

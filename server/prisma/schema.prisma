@@ -25,6 +25,28 @@ model AppConfig {
   @@map("app_configs")
 }
 
+model AnalyticsEvent {
+  id         Int      @id @default(autoincrement())
+  eventId    String   @unique @map("event_id")
+  userId     Int?     @map("user_id")
+  eventName  String   @map("event_name")
+  eventTime  DateTime @map("event_time")
+  platform   String   @default("")
+  page       String   @default("")
+  sessionId  String   @default("") @map("session_id")
+  deviceId   String   @default("") @map("device_id")
+  properties String   @default("{}")
+  rawPayload String   @default("{}") @map("raw_payload")
+  ip         String   @default("")
+  userAgent  String   @default("") @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([eventName])
+  @@index([userId])
+  @@index([eventTime])
+  @@map("analytics_events")
+}
+
 model Task {
   id         Int      @id @default(autoincrement())
   taskId     String   @unique @map("task_id")

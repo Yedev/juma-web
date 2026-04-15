@@ -5,12 +5,12 @@ import Login from "./pages/Login";
 import AdminLayout from "./layouts/AdminLayout";
 import TaskManagement from "./pages/TaskManagement";
 import ConfigManagement from "./pages/ConfigManagement";
-import ApiPlayground from "./pages/ApiPlayground";
 import DrSpaceManagement from "./pages/DrSpaceManagement";
 import DrSpaceDetail from "./pages/DrSpaceDetail";
 import DrUserManagement from "./pages/DrUserManagement";
 import DrAiConfigTabs from "./pages/DrAiConfigTabs";
 import ImageHosting from "./pages/ImageHosting";
+import AnalyticsEventManagement from "./pages/AnalyticsEventManagement";
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem("juma_token");
@@ -70,11 +70,11 @@ function App() {
             <Route index element={<Navigate to="/tasks" replace />} />
             <Route path="tasks" element={<TaskManagement />} />
             <Route path="config" element={<ConfigManagement />} />
-            <Route path="api-playground" element={<ApiPlayground />} />
             <Route path="dr/spaces" element={<DrSpaceManagement />} />
             <Route path="dr/spaces/:spaceId" element={<DrSpaceDetail />} />
             <Route path="dr/users" element={<DrUserManagement />} />
             <Route path="dr/ai-config" element={<DrAiConfigTabs />} />
+            <Route path="analytics/events" element={<AnalyticsEventManagement />} />
             <Route path="media" element={<ImageHosting />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

@@ -431,15 +431,30 @@ INSERT INTO dr_space_members (space_id, user_id, role) VALUES ('S1000001', 1, 'm
 
 ### TC-AI-001: AI 对话
 
-**接口**: `POST /ai/chat`
+**接口**: `POST /api/v1/dr/ai/chat`
 
 | 测试场景 | 请求体 | 预期状态 | 验证点 |
 |----------|--------|----------|--------|
-| 正常对话 | `{"article_id": "A1000001", "message": "总结文章"}` | 200 | 返回 `reply` |
-| 缺少article_id | `{"message": "test"}` | 400 | 参数错误 |
-| 缺少message | `{"article_id": "A1000001"}` | 400 | 参数错误 |
-| 文章不存在 | `{"article_id": "INVALID", "message": "test"}` | 404 | 文章不存在 |
-| 未配置API Key | 服务端未配置 | 500 | `{"message": "AI 服务未配置"}` |
+| 正常对话 | `{"provider_model":"openai-gpt-4o","messages":[{"role":"user","content":"总结文章"}]}` | 200 | 返回 `data.reply` |
+| 缺少provider_model | `{"messages":[{"role":"user","content":"test"}]}` | 400 | 参数错误 |
+| 缺少messages | `{"provider_model":"openai-gpt-4o"}` | 400 | 参数错误 |
+| provider_model 格式错误 | `{"provider_model":"invalid","messages":[{"role":"user","content":"test"}]}` | 400 | 返回格式错误提示 |
+| Provider 未启用 | Provider 被禁用 | 503 | 返回 Provider 不可用 |
+| 模型未启用 | 模型被禁用 | 503 | 返回模型不可用 |
+| 超出额度 | 用户当日消耗超限 | 429 | 返回额度上限提示 |
+
+### TC-AI-002: AI 流式对话
+
+**接口**: `POST /api/v1/dr/ai/chat/stream`
+
+| 测试场景 | 请求体 | 预期状态 | 验证点 |
+|----------|--------|----------|--------|
+| 正常流式对话 | `{"provider_model":"openai-gpt-4o","messages":[{"role":"user","content":"逐步解释重点"}]}` | 200 | `Content-Type` 为 `text/event-stream`，先收到 `stream-start`，持续收到 `delta`，最后收到 `done` |
+| 缺少provider_model | `{"messages":[{"role":"user","content":"test"}]}` | 400 | 流开始前返回 JSON 错误 |
+| 缺少messages | `{"provider_model":"openai-gpt-4o"}` | 400 | 流开始前返回 JSON 错误 |
+| Provider 未启用 | Provider 被禁用 | 503 | 流开始前返回 JSON 错误 |
+| 超出额度 | 用户当日消耗超限 | 429 | 流开始前返回 JSON 错误 |
+| 客户端主动断开 | 请求进行中关闭连接 | 200 | 服务端停止继续推流，不再输出后续 `delta` |
 
 ---
 
@@ -515,7 +530,8 @@ INSERT INTO dr_space_members (space_id, user_id, role) VALUES ('S1000001', 1, 'm
 | GET /articles | < 200ms | 100条数据 |
 | GET /spaces/:id/homepage | < 300ms | 10个模块 |
 | POST /sync | < 500ms | 100个同步项 |
-| POST /ai/chat | < 5s | 取决于AI服务 |
+| POST /api/v1/dr/ai/chat | < 5s | 取决于AI服务 |
+| POST /api/v1/dr/ai/chat/stream | 首包 < 2s | 取决于AI服务与网络 |
 
 ### 15.2 并发测试
 
@@ -536,6 +552,8 @@ INSERT INTO dr_space_members (space_id, user_id, role) VALUES ('S1000001', 1, 'm
 - [ ] 收藏/取消收藏文章
 - [ ] 批量同步接口
 - [ ] 阅读统计上报
+- [ ] AI 非流式对话
+- [ ] AI 流式对话
 
 ### 16.2 回归测试（每次发布）
 

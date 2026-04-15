@@ -727,3 +727,61 @@ curl -X POST "http://localhost:3001/api/admin/dr/articles/A1000001/editor-highli
   ]
 }
 ```
+
+---
+
+## 分析埋点管理
+
+#### GET /api/admin/analytics/events
+
+分页查看客户端上报的分析埋点事件，支持按事件名、DeepRead 用户、页面、会话和时间范围筛选。
+
+**查询参数：**
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `page` | number | 页码，默认 `1` |
+| `pageSize` | number | 每页数量，默认 `20`，最大 `100` |
+| `eventName` | string | 按事件名模糊筛选 |
+| `userId` | number | 按 DeepRead 用户 ID 精确筛选 |
+| `eventPage` | string | 按页面/路由模糊筛选 |
+| `sessionId` | string | 按会话 ID 模糊筛选 |
+| `deviceId` | string | 按设备 ID 模糊筛选 |
+| `startAt` | string | 起始时间（ISO 时间字符串） |
+| `endAt` | string | 结束时间（ISO 时间字符串） |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "list": [
+      {
+        "id": 1,
+        "eventId": "AE1776227000000123",
+        "userId": 1,
+        "eventName": "article_open",
+        "eventTime": "2026-04-15T12:30:00.000Z",
+        "platform": "flutter",
+        "page": "article_detail",
+        "sessionId": "session-001",
+        "deviceId": "device-abc",
+        "properties": "{\"article_id\":\"A1000001\"}",
+        "rawPayload": "{\"event_name\":\"article_open\"}",
+        "ip": "::1",
+        "userAgent": "Mozilla/5.0 ...",
+        "createdAt": "2026-04-15T12:30:01.000Z",
+        "user": {
+          "id": 1,
+          "phone": "13800138000",
+          "nickname": "测试用户"
+        }
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "pageSize": 20
+  }
+}
+```

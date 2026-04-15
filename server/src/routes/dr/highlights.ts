@@ -48,51 +48,7 @@ router.post("/highlights", async (req: DrAuthRequest, res: Response): Promise<vo
   }
 });
 
-// 4.2 Update highlight
-router.put("/highlights/:highlightId", async (req: DrAuthRequest, res: Response): Promise<void> => {
-  try {
-    const highlightId = req.params.highlightId as string;
-    const { color, note } = req.body as { color?: string; note?: string };
-
-    const result = await highlightService.updateHighlight(req.drUserId!, highlightId, { color, note });
-    if ("error" in result) {
-      res.status(result.status).json({ code: result.status, message: result.error });
-      return;
-    }
-
-    res.json({
-      code: 200,
-      message: "批注已更新",
-      data: {
-        highlightId: result.data.highlightId,
-        color: result.data.color,
-        note: result.data.note,
-        updatedAt: result.data.updatedAt,
-      },
-    });
-  } catch (error) {
-    handleError(res, "Update highlight error", error);
-  }
-});
-
-// 4.3 Delete highlight
-router.delete("/highlights/:highlightId", async (req: DrAuthRequest, res: Response): Promise<void> => {
-  try {
-    const highlightId = req.params.highlightId as string;
-
-    const result = await highlightService.deleteHighlight(req.drUserId!, highlightId);
-    if ("error" in result) {
-      res.status(result.status).json({ code: result.status, message: result.error });
-      return;
-    }
-
-    res.json({ code: 200, message: "批注已删除" });
-  } catch (error) {
-    handleError(res, "Delete highlight error", error);
-  }
-});
-
-// 4.4 Get highlights for article
+// 4.2 Get highlights for article
 router.get("/highlights", async (req: DrAuthRequest, res: Response): Promise<void> => {
   try {
     const articleId = req.query.article_id as string;

@@ -5,3 +5,7 @@ export function generateId(prefix: string): string {
 export function generateStatsId(): string {
   return generateId("RS");
 }
+
+export function generateAnalyticsEventId(): string {
+  return generateId("AE");
+}

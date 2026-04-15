@@ -236,3 +236,86 @@ curl -G "http://localhost:3001/api/v1/app/task/status" \
   }
 }
 ```
+
+---
+
+## 分析事件 API（/api/v1/analytics）
+
+### POST /api/v1/analytics/events
+
+上报分析埋点事件。所有请求都需要 `x-timestamp` 和 `x-sign`，可选携带 `Authorization: Bearer <dr_token>` 以自动关联 DeepRead 用户。
+
+支持两种请求体格式：
+- 单条事件对象
+- `{ "events": [...] }` 批量上报，单次最多 100 条
+
+**单条请求示例：**
+```json
+{
+  "event_name": "article_open",
+  "event_time": "2026-04-15T12:30:00.000Z",
+  "platform": "flutter",
+  "page": "article_detail",
+  "session_id": "session-001",
+  "device_id": "device-abc",
+  "properties": {
+    "article_id": "A1000001",
+    "source": "homepage"
+  }
+}
+```
+
+**批量请求示例：**
+```json
+{
+  "events": [
+    {
+      "event_name": "article_open",
+      "event_time": "2026-04-15T12:30:00.000Z",
+      "properties": { "article_id": "A1000001" }
+    },
+    {
+      "event_name": "article_share",
+      "event_time": "2026-04-15T12:31:00.000Z",
+      "properties": { "article_id": "A1000001", "channel": "wechat" }
+    }
+  ]
+}
+```
+
+**字段说明：**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `event_name` | string | 是 | 事件名；兼容别名 `event`、`name` |
+| `event_time` | string/date | 否 | 事件发生时间；兼容 `timestamp`、`time`、`occurred_at`，未传时取服务端当前时间 |
+| `platform` | string | 否 | 平台标识，如 `flutter`、`ios`、`android` |
+| `page` | string | 否 | 页面或路由名；兼容 `screen`、`route` |
+| `session_id` | string | 否 | 会话 ID；兼容 `sessionId` |
+| `device_id` | string | 否 | 设备 ID；兼容 `deviceId`、`anonymous_id`、`anonymousId` |
+| `properties` | object | 否 | 业务属性对象；兼容 `params`、`data`、`payload` |
+
+服务端会额外记录：
+- 原始请求事件内容（raw payload）
+- 请求 IP
+- User-Agent
+- 若携带有效 `dr_token`，自动关联 `userId`
+
+**成功响应：**
+```json
+{
+  "code": 200,
+  "message": "事件已接收",
+  "data": {
+    "count": 2
+  }
+}
+```
+
+**错误情况：**
+```json
+{ "code": 400, "message": "events 不能为空" }
+{ "code": 400, "message": "第 1 条事件缺少 event_name" }
+{ "code": 400, "message": "单次最多上报 100 条事件" }
+{ "code": 401, "message": "Token已过期或无效" }
+```

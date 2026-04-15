@@ -88,6 +88,8 @@
 | 合集创建 | 完成 | 用户私有 |
 | 合集文章管理（添加/移除） | 完成 | 仅合集所有者可操作 |
 | 合集列表（含文章数） | 完成 | groupBy 批量统计 |
+| AI 对话（非流式） | 完成 | `POST /api/v1/dr/ai/chat` |
+| AI 对话（SSE 流式） | 完成 | `POST /api/v1/dr/ai/chat/stream` |
 
 ### 移动 App API（/api/v1/app）
 
@@ -169,19 +171,15 @@
    - 在客户端维护对话历史
    - 服务端接受 `history` 数组参数
 
-6. **AI 流式响应（SSE）**
-   - 改为 Server-Sent Events 或 HTTP 流式响应
-   - 减少用户等待感知时间
-
-7. **全文搜索**
+6. **全文搜索**
    - 对文章标题和内容建立搜索索引
    - 可使用 SQLite FTS5 虚拟表实现
 
-8. **任务优先级**
+7. **任务优先级**
    - 在 Task 表增加 `priority` 字段（整数）
    - 调度时按 `priority DESC, createdAt ASC` 排序
 
-9. **数据库迁移规范化**
+8. **数据库迁移规范化**
    - 从 `db push` 切换到 `migrate dev` 管理 schema 变更
    - 建立迁移版本历史
 

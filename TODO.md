@@ -8,7 +8,7 @@
 
 - [x] `POST /api/v1/dr/sync/export` — 导出用户数据 ✓
 - [x] `POST /api/v1/dr/sync/import` — 导入用户数据 ✓
-- [ ] `POST /api/v1/analytics/events` — 上报分析事件
+- [x] `POST /api/v1/analytics/events` — 上报分析事件 ✓
 
 ## 3. ~~服务端需要清除的接口~~ 已完成 ✓
 

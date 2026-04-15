@@ -2,12 +2,12 @@ import { useState } from "react";
 import {
   UnorderedListOutlined,
   SettingOutlined,
-  ApiOutlined,
   LogoutOutlined,
   AppstoreOutlined,
   TeamOutlined,
   PictureOutlined,
   RobotOutlined,
+  LineChartOutlined,
 } from "@ant-design/icons";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 
@@ -17,7 +17,7 @@ const menuItems: MenuItem[] = [
   { key: "/tasks", icon: <UnorderedListOutlined />, label: "任务管理" },
   { key: "/config", icon: <SettingOutlined />, label: "配置管理" },
   { key: "/media", icon: <PictureOutlined />, label: "图床" },
-  { key: "/api-playground", icon: <ApiOutlined />, label: "API接口说明" },
+  { key: "/analytics/events", icon: <LineChartOutlined />, label: "埋点事件" },
   { type: "divider", label: "DeepRead" },
   { key: "/dr/spaces", icon: <AppstoreOutlined />, label: "空间管理" },
   { key: "/dr/users", icon: <TeamOutlined />, label: "用户管理" },
@@ -28,7 +28,7 @@ const pageTitle: Record<string, string> = {
   "/tasks": "任务管理",
   "/config": "配置管理",
   "/media": "图床",
-  "/api-playground": "API接口说明",
+  "/analytics/events": "埋点事件",
   "/dr/spaces": "空间管理",
   "/dr/users": "用户管理",
   "/dr/ai-config": "AI 配置",

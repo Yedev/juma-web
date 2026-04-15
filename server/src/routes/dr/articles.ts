@@ -93,17 +93,4 @@ router.put("/articles/:articleId/read", async (req: DrAuthRequest, res: Response
   }
 });
 
-// Bookmarks list
-router.get("/bookmarks", async (req: DrAuthRequest, res: Response): Promise<void> => {
-  try {
-    const page = parseInt(req.query.page as string) || 1;
-    const pageSize = parseInt(req.query.page_size as string) || 20;
-
-    const data = await articleService.getBookmarksList(req.drUserId!, page, pageSize);
-    res.json({ code: 200, message: "success", data });
-  } catch (error) {
-    handleError(res, "Get bookmarks error", error);
-  }
-});
-
 export default router;

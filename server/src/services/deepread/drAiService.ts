@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { Stream } from "openai/streaming";
 import prisma from "../../lib/prisma";
 
 function getTodayDateString(): string {
@@ -7,12 +8,15 @@ function getTodayDateString(): string {
 }
 
 type ServiceError = { error: string; status: number };
+type ChatContext = {
+  modelName: string;
+  client: OpenAI;
+};
 
-export async function chat(
+async function prepareChatContext(
   userId: number,
   providerModel: string,
-  messages: OpenAI.Chat.ChatCompletionMessageParam[],
-): Promise<ServiceError | { data: { reply: string } }> {
+): Promise<ServiceError | ChatContext> {
   const idx = providerModel.indexOf("-");
   if (idx === -1) return { error: "provider_model 格式错误，应为 providerName-modelName", status: 400 };
 
@@ -57,9 +61,45 @@ export async function chat(
     data: { consumed: { increment: costPerUse } },
   });
 
-  const client = new OpenAI({ baseURL: provider.baseUrl, apiKey: provider.apiKey });
+  return {
+    modelName,
+    client: new OpenAI({ baseURL: provider.baseUrl, apiKey: provider.apiKey }),
+  };
+}
+
+export async function chat(
+  userId: number,
+  providerModel: string,
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+): Promise<ServiceError | { data: { reply: string } }> {
+  const context = await prepareChatContext(userId, providerModel);
+  if ("error" in context) {
+    return context;
+  }
+
+  const { client, modelName } = context;
   const completion = await client.chat.completions.create({ model: modelName, messages });
   const reply = completion.choices[0]?.message?.content ?? "";
 
   return { data: { reply } };
+}
+
+export async function chatStream(
+  userId: number,
+  providerModel: string,
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+): Promise<ServiceError | { stream: Stream<OpenAI.Chat.Completions.ChatCompletionChunk> }> {
+  const context = await prepareChatContext(userId, providerModel);
+  if ("error" in context) {
+    return context;
+  }
+
+  const { client, modelName } = context;
+  const stream = await client.chat.completions.create({
+    model: modelName,
+    messages,
+    stream: true,
+  });
+
+  return { stream };
 }

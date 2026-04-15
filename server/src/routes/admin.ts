@@ -510,6 +510,94 @@ router.delete("/config/:key", async (req: AuthRequest, res: Response): Promise<v
   }
 });
 
+// ── Analytics ────────────────────────────────────────────
+
+router.get("/analytics/events", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const page = Math.max(parseInt(req.query.page as string) || 1, 1);
+    const pageSize = Math.min(Math.max(parseInt(req.query.pageSize as string) || 20, 1), 100);
+    const skip = (page - 1) * pageSize;
+
+    const eventName = (req.query.eventName as string | undefined)?.trim();
+    const eventPage = (req.query.eventPage as string | undefined)?.trim();
+    const sessionId = (req.query.sessionId as string | undefined)?.trim();
+    const deviceId = (req.query.deviceId as string | undefined)?.trim();
+    const startAtRaw = (req.query.startAt as string | undefined)?.trim();
+    const endAtRaw = (req.query.endAt as string | undefined)?.trim();
+    const userIdRaw = (req.query.userId as string | undefined)?.trim();
+
+    const where: Record<string, unknown> = {};
+    if (eventName) where.eventName = { contains: eventName };
+    if (eventPage) where.page = { contains: eventPage };
+    if (sessionId) where.sessionId = { contains: sessionId };
+    if (deviceId) where.deviceId = { contains: deviceId };
+    if (userIdRaw) {
+      const userId = Number(userIdRaw);
+      if (Number.isNaN(userId)) {
+        res.status(400).json({ code: 400, message: "userId 必须是数字" });
+        return;
+      }
+      where.userId = userId;
+    }
+    if (startAtRaw || endAtRaw) {
+      const eventTime: Record<string, Date> = {};
+      if (startAtRaw) {
+        const startAt = new Date(startAtRaw);
+        if (Number.isNaN(startAt.getTime())) {
+          res.status(400).json({ code: 400, message: "startAt 不是合法时间" });
+          return;
+        }
+        eventTime.gte = startAt;
+      }
+      if (endAtRaw) {
+        const endAt = new Date(endAtRaw);
+        if (Number.isNaN(endAt.getTime())) {
+          res.status(400).json({ code: 400, message: "endAt 不是合法时间" });
+          return;
+        }
+        eventTime.lte = endAt;
+      }
+      where.eventTime = eventTime;
+    }
+
+    const [events, total] = await Promise.all([
+      prisma.analyticsEvent.findMany({
+        where,
+        orderBy: [{ eventTime: "desc" }, { id: "desc" }],
+        skip,
+        take: pageSize,
+      }),
+      prisma.analyticsEvent.count({ where }),
+    ]);
+
+    const userIds = [...new Set(events.map((event) => event.userId).filter((value): value is number => value != null))];
+    const users = userIds.length > 0
+      ? await prisma.drUser.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, phone: true, nickname: true },
+        })
+      : [];
+    const userMap = new Map(users.map((user) => [user.id, user]));
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: {
+        list: events.map((event) => ({
+          ...event,
+          user: event.userId ? (userMap.get(event.userId) ?? null) : null,
+        })),
+        total,
+        page,
+        pageSize,
+      },
+    });
+  } catch (error) {
+    console.error("Admin list analytics events error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
 // ── DeepRead Admin ──────────────────────────────────────
 
 function generateDrId(prefix: string): string {

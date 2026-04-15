@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import authRoutes from "./routes/auth";
 import adminRoutes from "./routes/admin";
 import appRoutes from "./routes/app";
+import analyticsRoutes from "./routes/analytics";
 import deepreadRoutes from "./routes/deepread";
 import { createServer } from "http";
 import { startExecutionEngine } from "./services/executionEngine";
@@ -25,6 +26,7 @@ app.get("/api/health", (_req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/v1/app", appRoutes);
+app.use("/api/v1/analytics", analyticsRoutes);
 app.use("/api/v1/dr", deepreadRoutes);
 const uploadsDir = path.resolve(__dirname, "../uploads");
 app.use("/uploads", express.static(uploadsDir));

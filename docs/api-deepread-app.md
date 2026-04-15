@@ -534,147 +534,12 @@
 
 ## 阅读统计
 
-### POST /api/v1/dr/reading-stats
-
-上报单条阅读统计数据。需要用户 JWT。
-
-**查询参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `include_today_summary` | string | 否 | 设为 `true` 时响应中附带当日阅读汇总 |
-
-**请求体：**
-```json
-{
-  "article_id": "A1000001",
-  "reading_time_seconds": 180,
-  "scroll_depth": 85,
-  "session_start": "2026-03-25T10:00:00.000Z",
-  "session_end": "2026-03-25T10:03:00.000Z"
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `article_id` | string | 是 | 文章 ID |
-| `reading_time_seconds` | int | 否 | 有效阅读时长（秒），默认 0 |
-| `scroll_depth` | int | 否 | 滚动深度 (0-100)，默认 0 |
-| `session_start` | string | 否 | 阅读开始时间，默认当前时间 |
-| `session_end` | string | 否 | 阅读结束时间，默认当前时间 |
-
-**响应示例（不含汇总）：**
-```json
-{
-  "code": 200,
-  "message": "统计已上报",
-  "data": {
-    "statsId": "RS17429088000001234",
-    "articleId": "A1000001",
-    "readingTimeSeconds": 180,
-    "scrollDepth": 85,
-    "createdAt": "2026-03-25T10:03:00.000Z"
-  }
-}
-```
-
-**响应示例（`?include_today_summary=true`）：**
-```json
-{
-  "code": 200,
-  "message": "统计已记录",
-  "data": {
-    "statsId": "RS17429088000001234",
-    "articleId": "A1000001",
-    "readingTimeSeconds": 180,
-    "scrollDepth": 85,
-    "createdAt": "2026-03-25T10:03:00.000Z",
-    "total_reading_time_today": 3600,
-    "articles_read_today": 5
-  }
-}
-```
-
----
-
-### POST /api/v1/dr/reading-stats/batch
-
-批量上报阅读统计数据（最多 100 条）。需要用户 JWT。
-
-**请求体：**
-```json
-{
-  "stats": [
-    {
-      "article_id": "A1000001",
-      "reading_time_seconds": 180,
-      "scroll_depth": 85,
-      "session_start": "2026-03-25T10:00:00.000Z",
-      "session_end": "2026-03-25T10:03:00.000Z"
-    },
-    {
-      "article_id": "A1000002",
-      "reading_time_seconds": 60,
-      "scroll_depth": 50,
-      "session_start": "2026-03-25T10:05:00.000Z",
-      "session_end": "2026-03-25T10:06:00.000Z"
-    }
-  ]
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `stats` | array | 是 | 阅读统计数组，最多 100 条 |
-| `stats[].article_id` | string | 是 | 文章 ID |
-| `stats[].reading_time_seconds` | int | 否 | 有效阅读时长（秒），默认 0 |
-| `stats[].scroll_depth` | int | 否 | 滚动深度 (0-100)，默认 0 |
-| `stats[].session_start` | string | 否 | 阅读开始时间 |
-| `stats[].session_end` | string | 否 | 阅读结束时间 |
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "统计已批量上报",
-  "data": {
-    "count": 2
-  }
-}
-```
-
-**错误情况：**
-```json
-{ "code": 400, "message": "stats 不能为空" }
-{ "code": 400, "message": "单次最多上报 100 条统计" }
-```
-
----
-
-### GET /api/v1/dr/stats/summary
-
-获取用户阅读统计汇总。需要用户 JWT。
-
-**查询参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `period` | string | 否 | 统计周期: `today`/`week`/`month`/`all`，默认 `all` |
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "total_reading_time_seconds": 86400,
-    "total_articles_read": 45,
-    "total_highlights": 128,
-    "total_notes": 32,
-    "reading_streak_days": 12
-  }
-}
-```
+> 当前版本的 `DeepRead` 主路由未挂载 `statsRoutes`，因此以下历史接口目前**不对外提供**：
+> - `POST /api/v1/dr/reading-stats`
+> - `POST /api/v1/dr/reading-stats/batch`
+> - `GET /api/v1/dr/stats/summary`
+>
+> 如需恢复对外文档，请先在服务端重新挂载对应路由后再补充接口细节。
 
 ---
 
@@ -812,141 +677,67 @@
 
 ---
 
-## 批量同步
+## 数据备份同步
 
-### POST /api/v1/dr/sync
+当前版本的同步能力已调整为“整包导入/导出”模式，不再提供旧版的增量同步接口 `POST /sync` 和 `GET /sync/changes`。
 
-批量同步客户端数据到服务器。需要用户 JWT。
+### POST /api/v1/dr/sync/export
 
-**请求体：**
-```json
-{
-  "client_sync_id": "uuid-xxx",
-  "last_sync_at": "2026-03-25T09:00:00.000Z",
-  "payload": {
-    "highlights": [
-      {
-        "local_id": "uuid-1",
-        "action": "create",
-        "data": {
-          "article_id": "A1000001",
-          "text": "高亮文字",
-          "color": "#FFEB3B",
-          "position_data": { "paragraph": 1, "offset": 10 },
-          "note": "批注内容"
-        }
-      },
-      {
-        "local_id": "uuid-2",
-        "action": "delete",
-        "remote_id": "H1000001"
-      }
-    ],
-    "bookmarks": [
-      {
-        "local_id": "uuid-3",
-        "action": "create",
-        "data": { "article_id": "A1000001", "bookmarked": true }
-      }
-    ],
-    "read_progress": [
-      {
-        "local_id": "uuid-4",
-        "action": "update",
-        "data": { "article_id": "A1000001", "progress": 75 }
-      }
-    ],
-    "reading_stats": [
-      {
-        "local_id": "uuid-5",
-        "action": "create",
-        "data": {
-          "article_id": "A1000001",
-          "reading_time_seconds": 180,
-          "scroll_depth": 85,
-          "session_start": "2026-03-25T10:00:00.000Z",
-          "session_end": "2026-03-25T10:03:00.000Z"
-        }
-      }
-    ]
-  }
-}
-```
+导出当前用户保存的备份字符串。需要用户 JWT。
 
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "同步成功",
-  "data": {
-    "server_sync_id": "sync-1742908800000",
-    "synced_at": "2026-03-25T10:30:00.000Z",
-    "results": {
-      "highlights": [
-        { "local_id": "uuid-1", "remote_id": "H1000002", "status": "success" }
-      ],
-      "bookmarks": [
-        { "local_id": "uuid-3", "status": "success" }
-      ],
-      "read_progress": [
-        { "local_id": "uuid-4", "status": "success" }
-      ],
-      "reading_stats": [
-        { "local_id": "uuid-5", "status": "success" }
-      ]
-    },
-    "server_changes": {
-      "highlights": [],
-      "bookmarks": [],
-      "articles": []
-    }
-  }
-}
-```
+**请求体：** 无
 
----
-
-### GET /api/v1/dr/sync/changes
-
-获取自上次同步以来的服务端数据变化。需要用户 JWT。
-
-**查询参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `last_sync_at` | string | 是 | 上次同步时间 |
-| `entity_types` | string | 否 | 实体类型，逗号分隔，默认全部 |
-
-**响应示例：**
+**成功响应：**
 ```json
 {
   "code": 200,
   "message": "success",
-  "data": {
-    "synced_at": "2026-03-25T10:30:00.000Z",
-    "changes": {
-      "highlights": {
-        "created": [],
-        "updated": [
-          {
-            "highlightId": "H1000001",
-            "articleId": "A1000001",
-            "text": "更新后的文字",
-            "color": "#FF5722",
-            "note": "更新后的笔记",
-            "updatedAt": "2026-03-25T10:00:00.000Z"
-          }
-        ],
-        "deleted": []
-      },
-      "bookmarks": {
-        "created": [],
-        "updated": [],
-        "deleted": []
-      }
-    }
-  }
+  "data": "{\"version\":1,\"highlights\":[],\"bookmarks\":[]}"
 }
+```
+
+如果用户还没有备份数据，`data` 返回 `null`：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": null
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `data` | string \| null | 服务端存储的原始备份字符串；服务端不解析其内部结构 |
+
+---
+
+### POST /api/v1/dr/sync/import
+
+上传并保存当前用户的备份字符串。需要用户 JWT。
+
+**请求体：**
+```json
+{
+  "data": "{\"version\":1,\"highlights\":[],\"bookmarks\":[]}"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `data` | string | 是 | 客户端生成的完整备份字符串，服务端按 opaque blob 原样保存 |
+
+**成功响应：**
+```json
+{
+  "code": 200,
+  "message": "导入成功"
+}
+```
+
+**错误情况：**
+```json
+{ "code": 400, "message": "data 不能为空" }
 ```
 
 ---
@@ -1002,3 +793,135 @@
 - 无个人配额的用户不限制调用次数（调用量仍会被记录）
 - 每次调用的消耗点数由所选模型的 `costPerUse` 决定（在后台模型配置中设置）
 - 配额按自然日（东八区）重置
+
+---
+
+### POST /api/v1/dr/ai/chat/stream
+
+与 `/api/v1/dr/ai/chat` 相同，但服务端会以流式方式返回 AI 生成内容，适合逐字显示回答内容。
+
+**请求头：** 需要 `x-timestamp` + `x-sign` 签名，以及 `Authorization: Bearer <token>`。
+
+**请求体：**
+```json
+{
+  "provider_model": "openai-gpt-4o",
+  "messages": [
+    { "role": "system", "content": "你是一个阅读助手，帮助用户理解文章内容。" },
+    { "role": "user", "content": "请逐步解释这篇文章的重点。" }
+  ]
+}
+```
+
+**响应头：**
+
+```http
+Content-Type: text/event-stream; charset=utf-8
+Cache-Control: no-cache, no-transform
+Connection: keep-alive
+```
+
+**SSE 数据格式：**
+
+```text
+data: {"code":200,"message":"stream-start"}
+
+data: {"type":"delta","content":"这"}
+
+data: {"type":"delta","content":"篇文章"}
+
+data: {"type":"done"}
+```
+
+说明：
+- `stream-start`：流建立成功
+- `delta`：增量文本片段，客户端按顺序拼接
+- `done`：流结束
+- `error`：流中途异常中断
+
+**错误响应：**
+
+在流开始前的校验失败仍返回普通 JSON：
+
+```json
+{ "code": 400, "message": "messages 不能为空" }
+```
+
+配额、模型启用状态等规则与 `/api/v1/dr/ai/chat` 保持一致。
+
+---
+
+## 分析埋点
+
+> 该接口供 DeepRead 客户端上报行为事件使用，但接口路径不在 `/api/v1/dr` 下，而是独立挂载在 `/api/v1/analytics`。
+
+### POST /api/v1/analytics/events
+
+上报分析埋点事件。需要 `x-timestamp` 和 `x-sign`；可选携带 `Authorization: Bearer <token>`，服务端会在 token 有效时自动关联当前 DeepRead 用户。
+
+支持两种请求体：
+- 单条事件对象
+- `{ "events": [...] }` 批量上报，单次最多 100 条
+
+**单条请求示例：**
+```json
+{
+  "event_name": "article_open",
+  "event_time": "2026-04-15T12:30:00.000Z",
+  "platform": "flutter",
+  "page": "article_detail",
+  "session_id": "session-001",
+  "device_id": "device-abc",
+  "properties": {
+    "article_id": "A1000001",
+    "source": "homepage"
+  }
+}
+```
+
+**批量请求示例：**
+```json
+{
+  "events": [
+    {
+      "event_name": "article_open",
+      "event_time": "2026-04-15T12:30:00.000Z",
+      "properties": { "article_id": "A1000001" }
+    },
+    {
+      "event_name": "article_share",
+      "event_time": "2026-04-15T12:31:00.000Z",
+      "properties": { "article_id": "A1000001", "channel": "wechat" }
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `event_name` | string | 是 | 事件名；兼容别名 `event`、`name` |
+| `event_time` | string/date | 否 | 事件时间；兼容 `timestamp`、`time`、`occurred_at`，未传时取服务端当前时间 |
+| `platform` | string | 否 | 平台标识，如 `flutter`、`ios`、`android` |
+| `page` | string | 否 | 页面或路由名；兼容 `screen`、`route` |
+| `session_id` | string | 否 | 会话 ID；兼容 `sessionId` |
+| `device_id` | string | 否 | 设备 ID；兼容 `deviceId`、`anonymous_id`、`anonymousId` |
+| `properties` | object | 否 | 业务扩展字段；兼容 `params`、`data`、`payload` |
+
+**成功响应：**
+```json
+{
+  "code": 200,
+  "message": "事件已接收",
+  "data": {
+    "count": 2
+  }
+}
+```
+
+**错误情况：**
+```json
+{ "code": 400, "message": "events 不能为空" }
+{ "code": 400, "message": "第 1 条事件缺少 event_name" }
+{ "code": 400, "message": "单次最多上报 100 条事件" }
+{ "code": 401, "message": "Token已过期或无效" }
+```

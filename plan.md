@@ -295,16 +295,23 @@ GET /api/v1/dr/collections
 
 #### 6.1 AI 对话
 ```
-POST /api/v1/dr/ai/chat   [需要 drAuth]
-Body: { article_id: "xxx", message: "这篇文章的核心观点是什么？" }
+POST /api/v1/dr/ai/chat          [需要 drAuth]
+POST /api/v1/dr/ai/chat/stream   [需要 drAuth]
+Body: {
+  provider_model: "openai-gpt-4o",
+  messages: [
+    { role: "system", content: "你是 DeepRead 阅读助手" },
+    { role: "user", content: "这篇文章的核心观点是什么？" }
+  ]
+}
 ```
-- 从数据库取出文章 `content`，剥离 HTML 标签提取纯文本
-- 构造 system prompt：你是 DeepRead 阅读助手，基于以下文章内容回答用户问题
-- 调用 Volcengine Doubao API
-- 流式返回 → 本期先做非流式，返回完整回复
+- 由客户端自行传入完整 `messages` 上下文
+- 服务端根据 `provider_model` 选择已启用的 Provider 和 Model
+- 支持普通 JSON 回复和 SSE 流式回复两种模式
+- 按模型 `costPerUse` 计入用户当日 AI 配额
 
 **依赖**：
-- 环境变量：`ARK_API_KEY`
+- 后台配置 AI Provider / AI Model / AI Quota
 
 ---
 

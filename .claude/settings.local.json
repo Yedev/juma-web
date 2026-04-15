@@ -40,7 +40,14 @@
       "Bash(git push:*)",
       "Bash(git pull:*)",
       "Bash(git stash:*)",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(find:*)",
+      "Bash(./node_modules/.bin/tsc:*)",
+      "Bash(node_modules/.bin/tsc:*)",
+      "Bash(DATABASE_URL=\"file:./dev.db\" npx prisma db push)",
+      "Bash(DATABASE_URL=\"file:./dev.db\" npx prisma generate)",
+      "Bash(ls /data/data/com.termux/files/home/juma-web/server/src/routes/admin*.ts /data/data/com.termux/files/home/juma-web/server/src/routes/dr/admin*.ts)",
+      "Bash(git commit:*)"
     ]
   }
 }
