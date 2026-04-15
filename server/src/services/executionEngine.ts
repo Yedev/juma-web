@@ -174,34 +174,23 @@ async function claimNextLocalTask(prisma: PrismaClient): Promise<Task | null> {
 }
 
 async function failLegacyQueuedTasks(prisma: PrismaClient): Promise<void> {
-  const legacy = await prisma.task.findMany({
+  const now = new Date();
+  await prisma.task.updateMany({
     where: {
       status: "queued",
-      taskType: {
-        in: ["server_script", "remote_mac"],
-      },
+      taskType: { in: ["server_script", "remote_mac"] },
     },
-    orderBy: { createdAt: "asc" },
-    take: 100,
+    data: {
+      status: "error",
+      resultCode: -1,
+      finishedAt: now,
+      statusInfo: JSON.stringify({
+        executor: "task_runtime",
+        error: "脚本/服务模式已下线，仅支持 task_name + task_payload",
+        finished_at: now.toISOString(),
+      }),
+    },
   });
-  if (legacy.length === 0) return;
-
-  const now = new Date();
-  for (const item of legacy) {
-    await prisma.task.update({
-      where: { id: item.id },
-      data: {
-        status: "error",
-        resultCode: -1,
-        finishedAt: now,
-        statusInfo: JSON.stringify({
-          executor: "task_runtime",
-          error: "脚本/服务模式已下线，仅支持 task_name + task_payload",
-          finished_at: now.toISOString(),
-        }),
-      },
-    });
-  }
 }
 
 async function scheduleLocalTasks(prisma: PrismaClient): Promise<void> {

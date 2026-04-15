@@ -67,6 +67,7 @@ model Task {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
 
+  @@index([status, taskType])
   @@map("tasks")
 }
 
@@ -109,6 +110,7 @@ model DrSmsCode {
   expiresAt DateTime @map("expires_at")
   used      Boolean  @default(false)
   createdAt DateTime @default(now()) @map("created_at")
+  @@index([phone, used, expiresAt])
   @@map("dr_sms_codes")
 }
 
@@ -158,6 +160,7 @@ model DrChannel {
   coverUrl  String   @default("") @map("cover_url")
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
+  @@index([spaceId])
   @@map("dr_channels")
 }
 
@@ -196,6 +199,7 @@ model DrSpaceHomepageModule {
   sortOrder    Int      @default(0) @map("sort_order")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  @@index([spaceId])
   @@map("dr_space_homepage_modules")
 }
 
@@ -285,6 +289,7 @@ model DrSpaceCollectionArticle {
   sortOrder    Int      @default(0) @map("sort_order")
   addedAt      DateTime @default(now()) @map("added_at")
   @@unique([collectionId, articleId])
+  @@index([collectionId])
   @@map("dr_space_collection_articles")
 }
 
@@ -351,6 +356,7 @@ model DrDailyPickLattice {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @default(now()) @updatedAt @map("updated_at")
 
+  @@index([spaceId, enabled])
   @@map("dr_daily_pick_lattices")
 }
 
@@ -365,6 +371,7 @@ model DrDailyPickArticle {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
+  @@index([spaceId, enabled])
   @@map("dr_daily_pick_articles")
 }
 

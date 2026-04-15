@@ -45,21 +45,26 @@ async function prepareChatContext(
     if (isNaN(dailyLimit) || dailyLimit < 0) dailyLimit = 10;
   }
 
-  // 原子检查+递增消耗值
-  const usage = await prisma.drAiUsage.upsert({
+  // 确保当日用量记录存在
+  await prisma.drAiUsage.upsert({
     where: { userId_date: { userId, date: today } },
     create: { userId, date: today, consumed: 0 },
     update: {},
   });
 
-  if (usage.consumed + costPerUse > dailyLimit) {
+  // 原子扣减：只在剩余额度充足时才更新，用受影响行数判断是否成功
+  const updated = await prisma.$executeRaw`
+    UPDATE dr_ai_usages
+    SET consumed = consumed + ${costPerUse},
+        updated_at = CURRENT_TIMESTAMP
+    WHERE user_id = ${userId}
+      AND date = ${today}
+      AND consumed + ${costPerUse} <= ${dailyLimit}
+  `;
+
+  if (updated === 0) {
     return { error: "今日 AI 使用额度已达上限", status: 429 };
   }
-
-  await prisma.drAiUsage.update({
-    where: { userId_date: { userId, date: today } },
-    data: { consumed: { increment: costPerUse } },
-  });
 
   return {
     modelName,
