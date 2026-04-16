@@ -1,13 +1,33 @@
 import prisma from "../../lib/prisma";
+import getRedis from "../../lib/redis";
 import { enrichWithUserState } from "./drArticleService";
 
-export async function getHomepageModules(userId: number, spaceId: string) {
+interface CachedModuleData {
+  orderedModules: Array<{
+    moduleId: string;
+    moduleType: string;
+    title: string;
+    subtitle: string;
+    description: string;
+    layoutType: string;
+    sourceType: string;
+    sourceId: string;
+  }>;
+  resourcesByModule: Record<string, Array<{
+    resourceType: string;
+    resourceId: string;
+    sortOrder: number;
+    detail: unknown;
+  }>>;
+}
+
+async function buildModuleData(spaceId: string): Promise<CachedModuleData | null> {
   const modules = await prisma.drSpaceHomepageModule.findMany({
     where: { spaceId },
     orderBy: { sortOrder: "asc" },
   });
 
-  if (modules.length === 0) return [];
+  if (modules.length === 0) return null;
 
   // load_list modules always appear last
   const nonLoadListModules = modules.filter((m) => m.moduleType !== "load_list");
@@ -53,15 +73,13 @@ export async function getHomepageModules(userId: number, spaceId: string) {
       : [],
   ]);
 
-  const enrichedArticles = await enrichWithUserState(userId, articles);
-
   const channelMap = new Map(channels.map((c) => [c.channelId, c]));
-  const articleMap = new Map(enrichedArticles.map((a) => [a.articleId, a]));
+  const articleMap = new Map(articles.map((a) => [a.articleId, a]));
   const collectionMap = new Map(collectionsData.map((c) => [c.collectionId, c]));
 
-  const resourcesByModule = new Map<string, unknown[]>();
+  const resourcesByModule: Record<string, Array<{ resourceType: string; resourceId: string; sortOrder: number; detail: unknown }>> = {};
   for (const r of resources) {
-    if (!resourcesByModule.has(r.moduleId)) resourcesByModule.set(r.moduleId, []);
+    if (!resourcesByModule[r.moduleId]) resourcesByModule[r.moduleId] = [];
     let detail: unknown = null;
     if (r.resourceType === "channel") {
       detail = channelMap.get(r.resourceId) ?? null;
@@ -70,7 +88,7 @@ export async function getHomepageModules(userId: number, spaceId: string) {
     } else if (r.resourceType === "collection") {
       detail = collectionMap.get(r.resourceId) ?? null;
     }
-    resourcesByModule.get(r.moduleId)!.push({
+    resourcesByModule[r.moduleId].push({
       resourceType: r.resourceType,
       resourceId: r.resourceId,
       sortOrder: r.sortOrder,
@@ -78,15 +96,76 @@ export async function getHomepageModules(userId: number, spaceId: string) {
     });
   }
 
+  const serializedModules = orderedModules.map((m) => ({
+    moduleId: m.moduleId,
+    moduleType: m.moduleType || "standard",
+    title: m.title,
+    subtitle: m.subtitle,
+    description: m.description,
+    layoutType: m.layoutType,
+    sourceType: m.sourceType,
+    sourceId: m.sourceId,
+  }));
+
+  return { orderedModules: serializedModules, resourcesByModule };
+}
+
+export async function getHomepageModules(userId: number, spaceId: string) {
+  const redis = getRedis();
+  let moduleData: CachedModuleData | null = null;
+
+  if (redis) {
+    const cached = await redis.get(`homepage:modules:${spaceId}`);
+    if (cached) {
+      try {
+        moduleData = JSON.parse(cached);
+      } catch { /* fall through */ }
+    }
+  }
+
+  if (!moduleData) {
+    moduleData = await buildModuleData(spaceId);
+    if (!moduleData) return [];
+
+    if (redis) {
+      await redis.set(`homepage:modules:${spaceId}`, JSON.stringify(moduleData), "EX", 300).catch(() => {});
+    }
+  }
+
+  const { orderedModules, resourcesByModule } = moduleData;
+
+  // Enrich articles with user state (not cached — personalized)
+  const allResources = Object.values(resourcesByModule).flat();
+  const articleIds = allResources
+    .filter((r) => r.resourceType === "article" && r.detail)
+    .map((r) => (r.detail as { articleId: string }).articleId);
+
+  let enrichedMap = new Map<string, unknown>();
+  if (articleIds.length > 0) {
+    const rawArticles = allResources
+      .filter((r) => r.resourceType === "article" && r.detail)
+      .map((r) => r.detail as { articleId: string; [key: string]: unknown });
+    const enriched = await enrichWithUserState(userId, rawArticles);
+    for (const a of enriched) {
+      enrichedMap.set((a as { articleId: string }).articleId, a);
+    }
+  }
+
   return orderedModules.map((m) => {
-    const base = { moduleId: m.moduleId, moduleType: m.moduleType || "standard", title: m.title };
+    const base = { moduleId: m.moduleId, moduleType: m.moduleType, title: m.title };
     if (m.moduleType === "title_desc") {
       return { ...base, description: m.description };
     }
     if (m.moduleType === "load_list") {
       return { ...base, subtitle: m.subtitle, sourceType: m.sourceType, sourceId: m.sourceId };
     }
-    return { ...base, subtitle: m.subtitle, layoutType: m.layoutType, resources: resourcesByModule.get(m.moduleId) ?? [] };
+    const moduleResources = (resourcesByModule[m.moduleId] ?? []).map((r) => {
+      if (r.resourceType === "article" && enrichedMap.has(r.resourceId)) {
+        return { ...r, detail: enrichedMap.get(r.resourceId) };
+      }
+      return r;
+    });
+    return { ...base, subtitle: m.subtitle, layoutType: m.layoutType, resources: moduleResources };
   });
 }
 

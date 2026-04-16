@@ -1,27 +1,41 @@
 import prisma from "../../lib/prisma";
+import getRedis from "../../lib/redis";
 import { signDrToken } from "../../middleware/drAuth";
 
 export async function sendSmsCode(phone: string) {
   // Dev mode: fixed code 888888
   const code = "888888";
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-  await prisma.drSmsCode.create({ data: { phone, code, expiresAt } });
+  const redis = getRedis();
+  if (redis) {
+    await redis.set(`sms:code:${phone}`, code, "EX", 300);
+  } else {
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    await prisma.drSmsCode.create({ data: { phone, code, expiresAt } });
+  }
   return code;
 }
 
 export async function loginWithSms(phone: string, code: string) {
-  const smsRecord = await prisma.drSmsCode.findFirst({
-    where: { phone, code, used: false, expiresAt: { gte: new Date() } },
-    orderBy: { createdAt: "desc" },
-  });
+  const redis = getRedis();
 
-  if (!smsRecord) return null;
-
-  await prisma.drSmsCode.update({
-    where: { id: smsRecord.id },
-    data: { used: true },
-  });
+  if (redis) {
+    // Redis path
+    const stored = await redis.get(`sms:code:${phone}`);
+    if (!stored || stored !== code) return null;
+    await redis.del(`sms:code:${phone}`);
+  } else {
+    // DB fallback
+    const smsRecord = await prisma.drSmsCode.findFirst({
+      where: { phone, code, used: false, expiresAt: { gte: new Date() } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!smsRecord) return null;
+    await prisma.drSmsCode.update({
+      where: { id: smsRecord.id },
+      data: { used: true },
+    });
+  }
 
   let user = await prisma.drUser.findUnique({ where: { phone } });
   if (!user) {
@@ -30,8 +44,8 @@ export async function loginWithSms(phone: string, code: string) {
     });
 
     // 为新用户插入默认 AI 配额
-    const defaultCfg = await prisma.appConfig.findUnique({ where: { configKey: "dr_ai_default_daily_limit" } });
-    const defaultLimit = defaultCfg ? Number(defaultCfg.configValue) : 10;
+    const { getConfig } = await import("../../lib/configCache");
+    const defaultLimit = Number(await getConfig("dr_ai_default_daily_limit")) || 10;
     if (defaultLimit >= 0) {
       await prisma.drAiQuota.create({
         data: { userId: user.id, dailyLimit: defaultLimit },

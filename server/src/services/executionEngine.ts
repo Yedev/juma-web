@@ -1,5 +1,6 @@
 import { PrismaClient, Task } from "@prisma/client";
 import { executeServerTaskByName, hasServerTask } from "./serverTaskRuntime";
+import getRedis from "../lib/redis";
 
 const LOCAL_EXECUTOR_ID = "server-local";
 const LOCAL_POLL_INTERVAL_MS = parseInt(process.env.LOCAL_EXECUTOR_POLL_MS || "2000", 10);
@@ -217,21 +218,56 @@ async function scheduleLocalTasks(prisma: PrismaClient): Promise<void> {
 }
 
 async function refreshExecutorStatus(prisma: PrismaClient): Promise<void> {
-  const cutoff = new Date(Date.now() - OFFLINE_TIMEOUT_MS);
-  await prisma.executorClient.updateMany({
-    where: {
-      lastHeartbeat: { lt: cutoff },
-      status: { not: "offline" },
-    },
-    data: { status: "offline" },
-  });
-  await prisma.executorClient.updateMany({
-    where: {
-      lastHeartbeat: { gte: cutoff },
-      status: "offline",
-    },
-    data: { status: "online" },
-  });
+  const redis = getRedis();
+
+  if (redis) {
+    // Redis path: check heartbeat keys instead of DB timestamp scan
+    const clients = await prisma.executorClient.findMany({
+      select: { clientId: true, status: true },
+    });
+
+    const toOnline: string[] = [];
+    const toOffline: string[] = [];
+
+    for (const client of clients) {
+      const alive = await redis.exists(`executor:heartbeat:${client.clientId}`);
+      if (alive && client.status === "offline") {
+        toOnline.push(client.clientId);
+      } else if (!alive && client.status !== "offline") {
+        toOffline.push(client.clientId);
+      }
+    }
+
+    if (toOnline.length > 0) {
+      await prisma.executorClient.updateMany({
+        where: { clientId: { in: toOnline } },
+        data: { status: "online" },
+      });
+    }
+    if (toOffline.length > 0) {
+      await prisma.executorClient.updateMany({
+        where: { clientId: { in: toOffline } },
+        data: { status: "offline" },
+      });
+    }
+  } else {
+    // DB fallback
+    const cutoff = new Date(Date.now() - OFFLINE_TIMEOUT_MS);
+    await prisma.executorClient.updateMany({
+      where: {
+        lastHeartbeat: { lt: cutoff },
+        status: { not: "offline" },
+      },
+      data: { status: "offline" },
+    });
+    await prisma.executorClient.updateMany({
+      where: {
+        lastHeartbeat: { gte: cutoff },
+        status: "offline",
+      },
+      data: { status: "online" },
+    });
+  }
 }
 
 async function recoverStaleRemoteTasks(prisma: PrismaClient): Promise<void> {

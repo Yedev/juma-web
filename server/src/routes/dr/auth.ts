@@ -1,12 +1,13 @@
 import { Router, Response } from "express";
 import { DrAuthRequest } from "../../middleware/drAuth";
 import { handleError } from "../../lib/errors";
+import { smsRateLimit } from "../../middleware/rateLimit";
 import * as authService from "../../services/deepread/drAuthService";
 
 const router = Router();
 
 // 2.1 Send SMS code
-router.post("/sms/send", async (req: DrAuthRequest, res: Response): Promise<void> => {
+router.post("/sms/send", smsRateLimit, async (req: DrAuthRequest, res: Response): Promise<void> => {
   try {
     const { phone } = req.body as { phone?: string };
 

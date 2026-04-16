@@ -373,3 +373,20 @@ LIMIT: 1 次/分钟，5 次/天
 ---
 
 *文档生成于 2026-04-15*
+
+---
+
+## 实施状态
+
+截至 2026-04-16，以下场景已实施：
+
+| # | 场景 | 状态 | 备注 |
+|---|------|------|------|
+| 1 | SMS 验证码 | ✅ 已完成 | `drAuthService.ts`，Redis 不可用时回退 DB |
+| 2 | AI 使用额度 | ✅ 已完成 | `drAiService.ts`，INCRBY + midnight TTL |
+| 3 | AppConfig 缓存 | ✅ 已完成 | `lib/configCache.ts`，管理端更新自动失效 |
+| 4 | 首页模块缓存 | ✅ 已完成 | `drHomepageService.ts`，模块结构 300s 缓存 |
+| 6 | Executor 心跳 | ✅ 已完成 | `executorWsGateway.ts`，key+TTL 替代全表扫描 |
+| 8 | 接口限流 | ✅ 已完成 | `middleware/rateLimit.ts`，AI 10/min，SMS 1/min |
+| 5 | 任务队列 | ⏳ 待实施 | BullMQ 方案 |
+| 7 | JWT Token 吊销 | ⏳ 待实施 | 低优先级 |

@@ -3,6 +3,7 @@ import { IncomingMessage, Server as HttpServer } from "http";
 import { Duplex } from "stream";
 import { Prisma, PrismaClient, Task } from "@prisma/client";
 import { inferTaskTypeFromName } from "../services/taskNaming";
+import getRedis from "../lib/redis";
 
 const EXECUTOR_SHARED_KEY = process.env.EXECUTOR_SHARED_KEY || "juma_executor_2026";
 const MAX_LOG_BYTES = parseInt(process.env.TASK_LOG_MAX_BYTES || "65536", 10);
@@ -624,6 +625,8 @@ export function createExecutorWsGateway(server: HttpServer, prisma: PrismaClient
               where: { clientId: conn.clientId },
               data: { status: "online", lastHeartbeat: new Date() },
             });
+            const redis = getRedis();
+            if (redis) void redis.set(`executor:heartbeat:${conn.clientId}`, "1", "EX", 70).catch(() => {});
           }
           conn.sendJson("server.heartbeat.ack", { ok: true });
           return;
@@ -647,6 +650,8 @@ export function createExecutorWsGateway(server: HttpServer, prisma: PrismaClient
       if (!conn.clientId) return;
       const active = sessions.get(conn.clientId);
       if (active && active.conn === conn) sessions.delete(conn.clientId);
+      const redis = getRedis();
+      if (redis) void redis.del(`executor:heartbeat:${conn.clientId}`).catch(() => {});
       void prisma.executorClient
         .update({ where: { clientId: conn.clientId }, data: { status: "offline" } })
         .catch((error: unknown) => {

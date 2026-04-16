@@ -10,6 +10,9 @@ import { listRegisteredTasks } from "../services/taskRegistry";
 import { enqueueTaskByRegisteredName } from "../services/taskEnqueue";
 import { inferTaskTypeFromName, taskNameRuleText } from "../services/taskNaming";
 import { hasServerTask } from "../services/serverTaskRuntime";
+import { invalidateConfig } from "../lib/configCache";
+import { invalidateHomepageCache } from "../lib/homepageCache";
+import getRedis from "../lib/redis";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -473,6 +476,8 @@ router.put("/config/:key", async (req: AuthRequest, res: Response): Promise<void
       create: { configKey: key, configValue },
     });
 
+    void invalidateConfig(key);
+
     res.json({
       code: 200,
       message: "配置已保存并发布",
@@ -502,6 +507,8 @@ router.delete("/config/:key", async (req: AuthRequest, res: Response): Promise<v
     }
 
     await prisma.appConfig.delete({ where: { configKey: key } });
+
+    void invalidateConfig(key);
 
     res.json({ code: 200, message: "配置已删除" });
   } catch (error) {
@@ -1393,6 +1400,7 @@ router.post("/dr/spaces/:spaceId/homepage-modules", async (req: AuthRequest, res
       },
     });
 
+    void invalidateHomepageCache(spaceId);
     res.json({ code: 200, message: "模块已创建", data: module });
   } catch (error) {
     console.error("Admin create homepage module error:", error);
@@ -1437,6 +1445,7 @@ router.put("/dr/homepage-modules/:moduleId", async (req: AuthRequest, res: Respo
     if (sourceId !== undefined) updateData.sourceId = sourceId;
 
     const updated = await prisma.drSpaceHomepageModule.update({ where: { moduleId }, data: updateData });
+    void invalidateHomepageCache(existing.spaceId);
     res.json({ code: 200, message: "模块已更新", data: updated });
   } catch (error) {
     console.error("Admin update homepage module error:", error);
@@ -1455,6 +1464,7 @@ router.delete("/dr/homepage-modules/:moduleId", async (req: AuthRequest, res: Re
 
     await prisma.drSpaceHomepageModuleResource.deleteMany({ where: { moduleId } });
     await prisma.drSpaceHomepageModule.delete({ where: { moduleId } });
+    void invalidateHomepageCache(existing.spaceId);
     res.json({ code: 200, message: "模块已删除" });
   } catch (error) {
     console.error("Admin delete homepage module error:", error);
@@ -1497,6 +1507,7 @@ router.put("/dr/spaces/:spaceId/homepage-modules/reorder", async (req: AuthReque
       )
     );
 
+    void invalidateHomepageCache(spaceId);
     res.json({ code: 200, message: "排序已更新" });
   } catch (error) {
     console.error("Admin reorder homepage modules error:", error);
@@ -1563,6 +1574,7 @@ router.post("/dr/homepage-modules/:moduleId/resources", async (req: AuthRequest,
     });
 
     res.json({ code: 200, message: "资源已添加", data: resource });
+    void invalidateHomepageCache(module.spaceId);
   } catch (error) {
     console.error("Admin add module resource error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
@@ -1584,6 +1596,8 @@ router.delete("/dr/homepage-modules/:moduleId/resources/:resourceId", async (req
     await prisma.drSpaceHomepageModuleResource.delete({
       where: { moduleId_resourceId: { moduleId, resourceId } },
     });
+    const mod = await prisma.drSpaceHomepageModule.findUnique({ where: { moduleId }, select: { spaceId: true } });
+    if (mod) void invalidateHomepageCache(mod.spaceId);
     res.json({ code: 200, message: "资源已移除" });
   } catch (error) {
     console.error("Admin remove module resource error:", error);
@@ -2332,6 +2346,8 @@ router.put("/dr/ai-providers/:id", async (req: AuthRequest, res: Response): Prom
     if (apiKey !== undefined) data.apiKey = apiKey.trim();
     if (enabled !== undefined) data.enabled = enabled;
     const provider = await prisma.drAiProvider.update({ where: { id }, data });
+    const r = getRedis();
+    if (r) void r.del(`ai:provider:${provider.name}`).catch(() => {});
     res.json({ code: 200, message: "已更新", data: provider });
   } catch (error) {
     console.error("Update AI provider error:", error);
@@ -2381,6 +2397,8 @@ router.put("/dr/ai-models/:id", async (req: AuthRequest, res: Response): Promise
     if (enabled !== undefined) data.enabled = enabled;
     if (costPerUse !== undefined) data.costPerUse = costPerUse;
     const aiModel = await prisma.drAiModel.update({ where: { id }, data });
+    const r = getRedis();
+    if (r) void r.del(`ai:model:${aiModel.providerId}:${aiModel.model}`).catch(() => {});
     res.json({ code: 200, message: "已更新", data: aiModel });
   } catch (error) {
     console.error("Update AI model error:", error);
@@ -2392,7 +2410,9 @@ router.delete("/dr/ai-models/:id", async (req: AuthRequest, res: Response): Prom
   try {
     const id = Number(req.params.id);
     if (isNaN(id)) { res.status(400).json({ code: 400, message: "无效 ID" }); return; }
-    await prisma.drAiModel.delete({ where: { id } });
+    const deleted = await prisma.drAiModel.delete({ where: { id } });
+    const r2 = getRedis();
+    if (r2) void r2.del(`ai:model:${deleted.providerId}:${deleted.model}`).catch(() => {});
     res.json({ code: 200, message: "已删除" });
   } catch (error) {
     console.error("Delete AI model error:", error);

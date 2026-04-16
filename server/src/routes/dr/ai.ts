@@ -2,6 +2,7 @@ import { Router, Response } from "express";
 import OpenAI from "openai";
 import { DrAuthRequest } from "../../middleware/drAuth";
 import { handleError } from "../../lib/errors";
+import { aiRateLimit } from "../../middleware/rateLimit";
 import * as aiService from "../../services/deepread/drAiService";
 
 const router = Router();
@@ -27,7 +28,7 @@ function validateChatRequest(body: unknown):
   };
 }
 
-router.post("/ai/chat", async (req: DrAuthRequest, res: Response): Promise<void> => {
+router.post("/ai/chat", aiRateLimit, async (req: DrAuthRequest, res: Response): Promise<void> => {
   try {
     const payload = validateChatRequest(req.body);
     if ("error" in payload) {
@@ -47,7 +48,7 @@ router.post("/ai/chat", async (req: DrAuthRequest, res: Response): Promise<void>
   }
 });
 
-router.post("/ai/chat/stream", async (req: DrAuthRequest, res: Response): Promise<void> => {
+router.post("/ai/chat/stream", aiRateLimit, async (req: DrAuthRequest, res: Response): Promise<void> => {
   try {
     const payload = validateChatRequest(req.body);
     if ("error" in payload) {

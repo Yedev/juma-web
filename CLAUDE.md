@@ -8,7 +8,7 @@ juma-web is a full-stack TypeScript application with two core modules:
 1. **Admin Management System** - Task scheduling, remote executor dispatch, app configuration for mobile apps
 2. **DeepRead Platform** - Content reading platform with spaces, channels, articles, collections, and AI integration
 
-Tech stack: Express + TypeScript + Prisma + SQLite (backend), Vite + React 19 + TypeScript + Ant Design 6 (frontend).
+Tech stack: Express + TypeScript + Prisma + SQLite + Redis (backend), Vite + React 19 + TypeScript + Ant Design 6 (frontend).
 
 ## Development Commands
 
@@ -39,6 +39,8 @@ Tech stack: Express + TypeScript + Prisma + SQLite (backend), Vite + React 19 + 
 cd server && npm install && npx prisma generate && npx prisma db push && npm run db:seed
 cd ../admin-ui && npm install
 ```
+
+Redis is optional but recommended. Start locally with `docker run -d -p 6379:6379 redis:alpine` or set `REDIS_URL`. The server gracefully falls back to DB-only mode when Redis is unavailable.
 
 No test framework is configured. There are no automated tests.
 
@@ -82,6 +84,23 @@ Key model groups:
 - Admin: `AdminUser`, `AppConfig`, `Task`, `ExecutorClient`
 - DeepRead: `DrUser`, `DrSpace`, `DrSpaceMember`, `DrChannel`, `DrArticle`, `DrCollection`, `DrBookmark`, `DrReadStatus`, `DrHighlight`, `DrSpaceHomepageModule`
 
+### Redis Cache Layer
+
+Redis client at `server/src/lib/redis.ts` (ioredis singleton, graceful fallback). SQLite remains source of truth; Redis is read-acceleration only.
+
+| Scenario | Key Pattern | TTL | Module |
+|----------|-------------|-----|--------|
+| SMS verification code | `sms:code:{phone}` | 300s | `drAuthService.ts` |
+| AppConfig cache | `config:{key}` | 60s | `lib/configCache.ts` |
+| AI daily usage | `ai:usage:{userId}:{date}` | until midnight CST | `drAiService.ts` |
+| AI provider config | `ai:provider:{name}` | 300s | `drAiService.ts` |
+| AI model config | `ai:model:{providerId}:{model}` | 300s | `drAiService.ts` |
+| Homepage modules | `homepage:modules:{spaceId}` | 300s | `drHomepageService.ts` |
+| Rate limiting | `ratelimit:{prefix}:{key}` | 60s | `middleware/rateLimit.ts` |
+| Executor heartbeat | `executor:heartbeat:{clientId}` | 70s | `ws/executorWsGateway.ts` |
+
+Cache invalidation: admin routes delete relevant keys on write. All keys auto-expire via TTL.
+
 ### Frontend Structure
 
 - Entry: `admin-ui/src/App.tsx` (React Router v7 routes)
@@ -95,3 +114,4 @@ Key model groups:
 - Default admin credentials: `juma` / `juma2026`. DeepRead test user: `13800138000` / `888888`.
 - All `/api/v1/*` endpoints require `x-timestamp` and `x-sign` headers. The Admin UI's API Playground page auto-generates these.
 - `APP_SECRET` for signing: `juma2026_secret`.
+- `REDIS_URL` defaults to `redis://localhost:6379`. Server works without Redis (falls back to DB).
