@@ -5,6 +5,41 @@
 
 ---
 
+## 应用配置
+
+### GET /api/v1/app/config
+
+获取应用配置项。仅需签名，不需要用户 JWT。
+
+**查询参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `key` | string | 否 | 配置键名，默认为 `global_json` |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "appVersion": "1.0.0",
+    "featureFlags": {
+      "aiChat": true
+    }
+  }
+}
+```
+
+> `data` 为对应配置键存储的 JSON 对象，结构由后台写入时决定。
+
+**错误情况：**
+```json
+{ "code": 404, "message": "配置 'xxx' 不存在" }
+```
+
+---
+
 ### POST /api/v1/dr/sms/send
 
 发送短信验证码。

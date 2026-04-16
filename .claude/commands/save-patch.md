@@ -11,7 +11,8 @@ from datetime import datetime
 
 repo_dir = os.getcwd()
 timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-patch_file = f"D:/Users/W9095286/Downloads/deepread-{timestamp}.patch"
+project_name = os.path.basename(repo_dir)
+patch_file = f"D:/Users/W9095286/Downloads/{project_name}-{timestamp}.patch"
 
 # Step 1: git add .
 subprocess.run(["git", "add", "."], cwd=repo_dir, check=True)

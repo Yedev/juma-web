@@ -221,36 +221,42 @@ async function refreshExecutorStatus(prisma: PrismaClient): Promise<void> {
   const redis = getRedis();
 
   if (redis) {
-    // Redis path: check heartbeat keys instead of DB timestamp scan
-    const clients = await prisma.executorClient.findMany({
-      select: { clientId: true, status: true },
-    });
+    try {
+      // Redis path: check heartbeat keys instead of DB timestamp scan
+      const clients = await prisma.executorClient.findMany({
+        select: { clientId: true, status: true },
+      });
 
-    const toOnline: string[] = [];
-    const toOffline: string[] = [];
+      const toOnline: string[] = [];
+      const toOffline: string[] = [];
 
-    for (const client of clients) {
-      const alive = await redis.exists(`executor:heartbeat:${client.clientId}`);
-      if (alive && client.status === "offline") {
-        toOnline.push(client.clientId);
-      } else if (!alive && client.status !== "offline") {
-        toOffline.push(client.clientId);
+      for (const client of clients) {
+        const alive = await redis.exists(`executor:heartbeat:${client.clientId}`);
+        if (alive && client.status === "offline") {
+          toOnline.push(client.clientId);
+        } else if (!alive && client.status !== "offline") {
+          toOffline.push(client.clientId);
+        }
       }
-    }
 
-    if (toOnline.length > 0) {
-      await prisma.executorClient.updateMany({
-        where: { clientId: { in: toOnline } },
-        data: { status: "online" },
-      });
+      if (toOnline.length > 0) {
+        await prisma.executorClient.updateMany({
+          where: { clientId: { in: toOnline } },
+          data: { status: "online" },
+        });
+      }
+      if (toOffline.length > 0) {
+        await prisma.executorClient.updateMany({
+          where: { clientId: { in: toOffline } },
+          data: { status: "offline" },
+        });
+      }
+      return;
+    } catch {
+      // Redis unavailable — fall through to DB path
     }
-    if (toOffline.length > 0) {
-      await prisma.executorClient.updateMany({
-        where: { clientId: { in: toOffline } },
-        data: { status: "offline" },
-      });
-    }
-  } else {
+  }
+  {
     // DB fallback
     const cutoff = new Date(Date.now() - OFFLINE_TIMEOUT_MS);
     await prisma.executorClient.updateMany({

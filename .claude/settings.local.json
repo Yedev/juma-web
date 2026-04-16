@@ -41,7 +41,17 @@
       "Bash(git checkout:*)",
       "Bash(npm test:*)",
       "Bash(DATABASE_URL=\"file:./prisma/test.db\" npx prisma db push --skip-generate)",
-      "Bash(npx jest:*)"
+      "Bash(npx jest:*)",
+      "Bash(cmd /c \"taskkill /F /IM node.exe\")",
+      "Bash(cmd /c \"tasklist | findstr node\")",
+      "Bash(powershell -Command \"Get-Process node -ErrorAction SilentlyContinue | Stop-Process -Force; Write-Host 'killed'\")",
+      "Bash(cmd /c \"taskkill /PID 33624 /F\")",
+      "Bash(cmd /c \"taskkill /PID 33624 /F 2>&1\")",
+      "Bash(powershell -Command \"Stop-Process -Id 33624 -Force\" 2>&1)",
+      "Bash(cmd /c \"taskkill /PID 22244 /F\")",
+      "Bash(cmd /c \"taskkill /PID 22244 /F && echo KILLED\")",
+      "Bash(powershell -Command \"Stop-Process -Id 22244 -Force; Write-Host 'killed'\")",
+      "Bash(powershell -Command \"Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force\")"
     ]
   }
 }
