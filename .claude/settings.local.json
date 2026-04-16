@@ -36,7 +36,12 @@
       "Read(//tmp/**)",
       "Read(//c/Users//**)",
       "Read(//mnt/c/**)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "Bash(python:*)",
+      "Bash(git checkout:*)",
+      "Bash(npm test:*)",
+      "Bash(DATABASE_URL=\"file:./prisma/test.db\" npx prisma db push --skip-generate)",
+      "Bash(npx jest:*)"
     ]
   }
 }
