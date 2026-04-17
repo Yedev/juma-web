@@ -16,7 +16,7 @@ router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response
       return;
     }
 
-    const data = await homepageService.getHomepageModules(req.drUserId!, spaceId);
+    const data = await homepageService.getHomepageModules(spaceId);
     res.json({ code: 200, message: "success", data });
   } catch (error) {
     handleError(res, "Get homepage error", error);

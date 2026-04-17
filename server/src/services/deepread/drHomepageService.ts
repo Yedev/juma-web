@@ -1,6 +1,5 @@
 import prisma from "../../lib/prisma";
 import getRedis from "../../lib/redis";
-import { enrichWithUserState } from "./drArticleService";
 
 interface CachedModuleData {
   orderedModules: Array<{
@@ -110,7 +109,7 @@ async function buildModuleData(spaceId: string): Promise<CachedModuleData | null
   return { orderedModules: serializedModules, resourcesByModule };
 }
 
-export async function getHomepageModules(userId: number, spaceId: string) {
+export async function getHomepageModules(spaceId: string) {
   const redis = getRedis();
   let moduleData: CachedModuleData | null = null;
 
@@ -134,23 +133,6 @@ export async function getHomepageModules(userId: number, spaceId: string) {
 
   const { orderedModules, resourcesByModule } = moduleData;
 
-  // Enrich articles with user state (not cached — personalized)
-  const allResources = Object.values(resourcesByModule).flat();
-  const articleIds = allResources
-    .filter((r) => r.resourceType === "article" && r.detail)
-    .map((r) => (r.detail as { articleId: string }).articleId);
-
-  let enrichedMap = new Map<string, unknown>();
-  if (articleIds.length > 0) {
-    const rawArticles = allResources
-      .filter((r) => r.resourceType === "article" && r.detail)
-      .map((r) => r.detail as { articleId: string; [key: string]: unknown });
-    const enriched = await enrichWithUserState(userId, rawArticles);
-    for (const a of enriched) {
-      enrichedMap.set((a as { articleId: string }).articleId, a);
-    }
-  }
-
   return orderedModules.map((m) => {
     const base = { moduleId: m.moduleId, moduleType: m.moduleType, title: m.title };
     if (m.moduleType === "title_desc") {
@@ -159,12 +141,7 @@ export async function getHomepageModules(userId: number, spaceId: string) {
     if (m.moduleType === "load_list") {
       return { ...base, subtitle: m.subtitle, sourceType: m.sourceType, sourceId: m.sourceId };
     }
-    const moduleResources = (resourcesByModule[m.moduleId] ?? []).map((r) => {
-      if (r.resourceType === "article" && enrichedMap.has(r.resourceId)) {
-        return { ...r, detail: enrichedMap.get(r.resourceId) };
-      }
-      return r;
-    });
+    const moduleResources = resourcesByModule[m.moduleId] ?? [];
     return { ...base, subtitle: m.subtitle, layoutType: m.layoutType, resources: moduleResources };
   });
 }

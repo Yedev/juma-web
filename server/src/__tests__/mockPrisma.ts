@@ -30,8 +30,6 @@ export const prismaMock = {
   drInviteCode: createModelMock(),
   drChannel: createModelMock(),
   drArticle: createModelMock(),
-  drBookmark: createModelMock(),
-  drReadStatus: createModelMock(),
   drHighlight: createModelMock(),
   drCollection: createModelMock(),
   drCollectionArticle: createModelMock(),

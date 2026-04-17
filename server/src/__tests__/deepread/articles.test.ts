@@ -32,8 +32,6 @@ describe("DeepRead Articles", () => {
       ];
       prismaMock.drArticle.findMany.mockResolvedValue(articles);
       prismaMock.drArticle.count.mockResolvedValue(2);
-      prismaMock.drBookmark.findMany.mockResolvedValue([]);
-      prismaMock.drReadStatus.findMany.mockResolvedValue([]);
 
       const res = await request(app)
         .get("/api/v1/dr/articles")
@@ -70,8 +68,6 @@ describe("DeepRead Articles", () => {
       prismaMock.drSpaceMember.findUnique.mockResolvedValue({ id: 1 });
       prismaMock.drArticle.findMany.mockResolvedValue([]);
       prismaMock.drArticle.count.mockResolvedValue(0);
-      prismaMock.drBookmark.findMany.mockResolvedValue([]);
-      prismaMock.drReadStatus.findMany.mockResolvedValue([]);
 
       await request(app)
         .get("/api/v1/dr/articles")
@@ -104,8 +100,6 @@ describe("DeepRead Articles", () => {
     it("应返回文章详情并增加阅读计数", async () => {
       prismaMock.drArticle.findUnique.mockResolvedValue(TEST_ARTICLE);
       prismaMock.drArticle.update.mockResolvedValue({ ...TEST_ARTICLE, readCount: 6 });
-      prismaMock.drBookmark.findUnique.mockResolvedValue(null);
-      prismaMock.drReadStatus.findUnique.mockResolvedValue(null);
       prismaMock.drSpaceMember.findUnique.mockResolvedValue({ id: 1 });
 
       const res = await request(app)
@@ -115,8 +109,6 @@ describe("DeepRead Articles", () => {
       expect(res.status).toBe(200);
       expect(res.body.data.articleId).toBe("art_001");
       expect(res.body.data.readCount).toBe(6);
-      expect(res.body.data.bookmarked).toBe(false);
-      expect(res.body.data.readProgress).toBe(0);
       expect(prismaMock.drArticle.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { articleId: "art_001" },
@@ -145,72 +137,6 @@ describe("DeepRead Articles", () => {
         .set(authHeaders(token));
 
       expect(res.status).toBe(403);
-    });
-  });
-
-  // ── PUT /articles/:articleId/bookmark ──────────────────
-
-  describe("PUT /api/v1/dr/articles/:articleId/bookmark", () => {
-    it("应成功收藏文章", async () => {
-      prismaMock.drBookmark.upsert.mockResolvedValue({});
-
-      const res = await request(app)
-        .put("/api/v1/dr/articles/art_001/bookmark")
-        .set(authHeaders(token))
-        .send({ bookmarked: true });
-
-      expect(res.status).toBe(200);
-      expect(res.body.message).toMatch("已收藏");
-      expect(prismaMock.drBookmark.upsert).toHaveBeenCalled();
-    });
-
-    it("应成功取消收藏", async () => {
-      prismaMock.drBookmark.deleteMany.mockResolvedValue({ count: 1 });
-
-      const res = await request(app)
-        .put("/api/v1/dr/articles/art_001/bookmark")
-        .set(authHeaders(token))
-        .send({ bookmarked: false });
-
-      expect(res.status).toBe(200);
-      expect(res.body.message).toMatch("已取消收藏");
-      expect(prismaMock.drBookmark.deleteMany).toHaveBeenCalled();
-    });
-  });
-
-  // ── PUT /articles/:articleId/read ──────────────────────
-
-  describe("PUT /api/v1/dr/articles/:articleId/read", () => {
-    it("默认应标记 progress=100", async () => {
-      prismaMock.drReadStatus.upsert.mockResolvedValue({});
-
-      const res = await request(app)
-        .put("/api/v1/dr/articles/art_001/read")
-        .set(authHeaders(token))
-        .send({});
-
-      expect(res.status).toBe(200);
-      expect(prismaMock.drReadStatus.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          update: expect.objectContaining({ progress: 100 }),
-        }),
-      );
-    });
-
-    it("应支持自定义 progress", async () => {
-      prismaMock.drReadStatus.upsert.mockResolvedValue({});
-
-      const res = await request(app)
-        .put("/api/v1/dr/articles/art_001/read")
-        .set(authHeaders(token))
-        .send({ progress: 50 });
-
-      expect(res.status).toBe(200);
-      expect(prismaMock.drReadStatus.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          update: expect.objectContaining({ progress: 50 }),
-        }),
-      );
     });
   });
 });

@@ -25,7 +25,7 @@ router.get("/articles", async (req: DrAuthRequest, res: Response): Promise<void>
       return;
     }
 
-    const result = await articleService.getArticlesList(req.drUserId!, spaceId, {
+    const result = await articleService.getArticlesList(spaceId, {
       channelId,
       collectionId,
       page,
@@ -48,7 +48,7 @@ router.get("/articles/:articleId", async (req: DrAuthRequest, res: Response): Pr
   try {
     const articleId = req.params.articleId as string;
 
-    const data = await articleService.getArticleDetail(req.drUserId!, articleId);
+    const data = await articleService.getArticleDetail(articleId);
     if (!data) {
       res.status(404).json({ code: 404, message: "文章不存在" });
       return;
@@ -65,32 +65,5 @@ router.get("/articles/:articleId", async (req: DrAuthRequest, res: Response): Pr
   }
 });
 
-// 3.3 Bookmark / unbookmark
-router.put("/articles/:articleId/bookmark", async (req: DrAuthRequest, res: Response): Promise<void> => {
-  try {
-    const articleId = req.params.articleId as string;
-    const { bookmarked } = req.body as { bookmarked?: boolean };
-
-    await articleService.setBookmark(req.drUserId!, articleId, !!bookmarked);
-
-    res.json({ code: 200, message: bookmarked ? "已收藏" : "已取消收藏" });
-  } catch (error) {
-    handleError(res, "Bookmark error", error);
-  }
-});
-
-// 3.4 Mark as read
-router.put("/articles/:articleId/read", async (req: DrAuthRequest, res: Response): Promise<void> => {
-  try {
-    const articleId = req.params.articleId as string;
-    const { progress } = req.body as { progress?: number };
-
-    await articleService.setReadProgress(req.drUserId!, articleId, progress ?? 100);
-
-    res.json({ code: 200, message: "已标记" });
-  } catch (error) {
-    handleError(res, "Mark read error", error);
-  }
-});
 
 export default router;

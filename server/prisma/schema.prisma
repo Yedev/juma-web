@@ -214,25 +214,6 @@ model DrSpaceHomepageModuleResource {
   @@map("dr_space_homepage_module_resources")
 }
 
-model DrBookmark {
-  id        Int      @id @default(autoincrement())
-  userId    Int      @map("user_id")
-  articleId String   @map("article_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  @@unique([userId, articleId])
-  @@index([userId])
-  @@map("dr_bookmarks")
-}
-
-model DrReadStatus {
-  id        Int      @id @default(autoincrement())
-  userId    Int      @map("user_id")
-  articleId String   @map("article_id")
-  progress  Int      @default(0)
-  readAt    DateTime @default(now()) @map("read_at")
-  @@unique([userId, articleId])
-  @@map("dr_read_status")
-}
 
 model DrHighlight {
   id           Int      @id @default(autoincrement())

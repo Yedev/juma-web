@@ -1001,23 +1001,11 @@ router.get("/dr/articles", async (req: AuthRequest, res: Response): Promise<void
       prisma.drArticle.count({ where }),
     ]);
 
-    // Get bookmark counts
-    const articleIds = articles.map((a) => a.articleId);
-    const bookmarkCounts = await prisma.drBookmark.groupBy({
-      by: ["articleId"],
-      where: { articleId: { in: articleIds } },
-      _count: { userId: true },
-    });
-    const bmMap = new Map(bookmarkCounts.map((b) => [b.articleId, b._count.userId]));
-
     res.json({
       code: 200,
       message: "success",
       data: {
-        list: articles.map((a) => ({
-          ...a,
-          bookmarkCount: bmMap.get(a.articleId) ?? 0,
-        })),
+        list: articles,
         total,
         page,
         pageSize,
@@ -1125,9 +1113,7 @@ router.delete("/dr/articles/:articleId", async (req: AuthRequest, res: Response)
       return;
     }
 
-    // Cascade delete bookmarks, read status, highlights
-    await prisma.drBookmark.deleteMany({ where: { articleId } });
-    await prisma.drReadStatus.deleteMany({ where: { articleId } });
+    // Cascade delete highlights
     await prisma.drHighlight.deleteMany({ where: { articleId } });
     await prisma.drCollectionArticle.deleteMany({ where: { articleId } });
     await prisma.drSpaceHomepageModuleResource.deleteMany({ where: { resourceId: articleId, resourceType: "article" } });

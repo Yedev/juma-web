@@ -49,8 +49,6 @@ describe("DeepRead Homepage", () => {
         },
       ]);
       prismaMock.drArticle.findMany.mockResolvedValue([TEST_ARTICLE]);
-      prismaMock.drBookmark.findMany.mockResolvedValue([]);
-      prismaMock.drReadStatus.findMany.mockResolvedValue([]);
 
       const res = await request(app)
         .get("/api/v1/dr/spaces/sp_001/homepage")

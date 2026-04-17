@@ -27,7 +27,6 @@ type ArticleListItem = {
 };
 
 export async function getArticlesList(
-  userId: number,
   spaceId: string,
   options: { channelId?: string; collectionId?: string; page: number; pageSize: number },
 ) {
@@ -76,11 +75,10 @@ export async function getArticlesList(
     ]);
   }
 
-  const enriched = await enrichWithUserState(userId, articles);
-  return { list: enriched, total, page, pageSize };
+  return { list: articles, total, page, pageSize };
 }
 
-export async function getArticleDetail(userId: number, articleId: string) {
+export async function getArticleDetail(articleId: string) {
   const article = await prisma.drArticle.findUnique({ where: { articleId } });
   if (!article) return null;
 
@@ -88,11 +86,6 @@ export async function getArticleDetail(userId: number, articleId: string) {
     where: { articleId },
     data: { readCount: { increment: 1 } },
   });
-
-  const [bookmark, readStatus] = await Promise.all([
-    prisma.drBookmark.findUnique({ where: { userId_articleId: { userId, articleId } } }),
-    prisma.drReadStatus.findUnique({ where: { userId_articleId: { userId, articleId } } }),
-  ]);
 
   return {
     articleId: article.articleId,
@@ -107,48 +100,6 @@ export async function getArticleDetail(userId: number, articleId: string) {
     author: article.author,
     readCount: article.readCount + 1,
     publishedAt: article.publishedAt,
-    bookmarked: !!bookmark,
-    readProgress: readStatus?.progress ?? 0,
   };
 }
 
-export async function setBookmark(userId: number, articleId: string, bookmarked: boolean) {
-  if (bookmarked) {
-    await prisma.drBookmark.upsert({
-      where: { userId_articleId: { userId, articleId } },
-      update: {},
-      create: { userId, articleId },
-    });
-  } else {
-    await prisma.drBookmark.deleteMany({ where: { userId, articleId } });
-  }
-}
-
-export async function setReadProgress(userId: number, articleId: string, progress: number) {
-  await prisma.drReadStatus.upsert({
-    where: { userId_articleId: { userId, articleId } },
-    update: { progress, readAt: new Date() },
-    create: { userId, articleId, progress },
-  });
-}
-
-// Shared helper: enrich articles with bookmark/read status
-export async function enrichWithUserState(
-  userId: number,
-  articles: Array<{ articleId: string; [key: string]: unknown }>,
-) {
-  if (articles.length === 0) return [];
-  const articleIds = articles.map((a) => a.articleId);
-  const [bookmarks, readStatuses] = await Promise.all([
-    prisma.drBookmark.findMany({ where: { userId, articleId: { in: articleIds } } }),
-    prisma.drReadStatus.findMany({ where: { userId, articleId: { in: articleIds } } }),
-  ]);
-  const bookmarkSet = new Set(bookmarks.map((b) => b.articleId));
-  const readMap = new Map(readStatuses.map((r) => [r.articleId, r.progress]));
-
-  return articles.map((a) => ({
-    ...a,
-    bookmarked: bookmarkSet.has(a.articleId),
-    readProgress: readMap.get(a.articleId) ?? 0,
-  }));
-}
