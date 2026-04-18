@@ -1,0 +1,52 @@
+name: 运行测试
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: 安装依赖
+        run: cd server && npm ci
+
+      - name: 生成 Prisma Client
+        run: cd server && npx prisma generate
+
+      - name: 初始化测试数据库
+        run: cd server && DATABASE_URL=file:./test.db npx prisma db push --skip-generate
+
+      - name: 运行测试
+        run: cd server && DATABASE_URL=file:./test.db npm test -- --ci --reporters=default --reporters=jest-junit
+        env:
+          JEST_JUNIT_OUTPUT_DIR: server/test-results
+          JEST_JUNIT_OUTPUT_NAME: junit.xml
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: server/test-results/junit.xml
+          retention-days: 30
+
+      - name: 测试报告摘要
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Jest 测试报告
+          path: server/test-results/junit.xml
+          reporter: jest-junit
