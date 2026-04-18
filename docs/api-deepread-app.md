@@ -203,9 +203,79 @@
 
 | 类型 | `detail` 字段 |
 |------|------|
-| `article` | articleId, channelId, title, summary, coverUrl, layoutType, author, readCount, publishedAt, bookmarked, readProgress |
+| `article` | articleId, channelId, title, summary, coverUrl, layoutType, author, readCount, publishedAt |
 | `channel` | channelId, spaceId, name, coverUrl, sortOrder |
 | `collection` | collectionId, spaceId, name, description, coverUrl, sortOrder |
+
+---
+
+### GET /api/v1/dr/me
+
+获取当前登录用户的个人信息及已加入的空间列表。需要用户 JWT。
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "data": {
+    "id": 1,
+    "phone": "13800138000",
+    "nickname": "用户8000",
+    "avatar": "",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "spaces": [
+      {
+        "spaceId": "S1000001",
+        "name": "DeepRead 精选",
+        "description": "DeepRead 官方精选阅读空间",
+        "role": "member",
+        "joinedAt": "2026-01-02T00:00:00.000Z"
+      }
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `spaces` | array | 用户已加入的空间列表，按加入时间升序 |
+| `spaces[].role` | string | 用户在该空间的角色，`member` 或 `admin` |
+| `spaces[].joinedAt` | string | 加入时间（ISO 8601） |
+
+---
+
+### PUT /api/v1/dr/me/nickname
+
+修改当前用户的昵称。需要用户 JWT。
+
+**请求体：**
+```json
+{ "nickname": "新昵称" }
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `nickname` | string | 是 | 新昵称，不能为空，不超过 20 个字符 |
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "修改成功",
+  "data": {
+    "id": 1,
+    "phone": "13800138000",
+    "nickname": "新昵称",
+    "avatar": ""
+  }
+}
+```
+
+**错误情况：**
+```json
+{ "code": 400, "message": "昵称不能为空" }
+{ "code": 400, "message": "昵称不能超过20个字符" }
+```
 
 ---
 
@@ -273,9 +343,7 @@
         "layoutType": "default",
         "author": "李四",
         "readCount": 128,
-        "publishedAt": "2026-03-01T08:00:00.000Z",
-        "bookmarked": true,
-        "readProgress": 75
+        "publishedAt": "2026-03-01T08:00:00.000Z"
       }
     ],
     "total": 24,
@@ -308,48 +376,9 @@
     "contentType": "html",
     "author": "李四",
     "readCount": 129,
-    "publishedAt": "2026-03-01T08:00:00.000Z",
-    "bookmarked": true,
-    "readProgress": 75
+    "publishedAt": "2026-03-01T08:00:00.000Z"
   }
 }
-```
-
----
-
-### PUT /api/v1/dr/articles/:articleId/bookmark
-
-收藏/取消收藏文章。需要用户 JWT。
-
-**请求体：**
-```json
-{ "bookmarked": true }
-```
-
-**响应示例：**
-```json
-{ "code": 200, "message": "已收藏" }
-// 取消收藏时 message 为 "已取消收藏"
-```
-
----
-
-### PUT /api/v1/dr/articles/:articleId/read
-
-标记文章已读/更新阅读进度。需要用户 JWT。
-
-**请求体：**
-```json
-{ "progress": 80 }
-```
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `progress` | number | 阅读进度百分比（0-100），不传则默认 100（标记已读） |
-
-**响应示例：**
-```json
-{ "code": 200, "message": "已标记" }
 ```
 
 ---
@@ -575,44 +604,6 @@
 > - `GET /api/v1/dr/stats/summary`
 >
 > 如需恢复对外文档，请先在服务端重新挂载对应路由后再补充接口细节。
-
----
-
-## 收藏列表
-
-### GET /api/v1/dr/bookmarks
-
-获取用户收藏的文章列表。需要用户 JWT。
-
-**查询参数：**
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `page` | int | 否 | 页码，默认 1 |
-| `page_size` | int | 否 | 每页数量，默认 20 |
-
-**响应示例：**
-```json
-{
-  "code": 200,
-  "message": "success",
-  "data": {
-    "list": [
-      {
-        "articleId": "A1000001",
-        "title": "AI 时代的教育变革",
-        "summary": "探讨人工智能对教育的深远影响...",
-        "coverUrl": "https://example.com/cover.jpg",
-        "author": "李四",
-        "bookmarkedAt": "2026-03-25T10:00:00.000Z"
-      }
-    ],
-    "total": 24,
-    "page": 1,
-    "pageSize": 20
-  }
-}
-```
 
 ---
 
