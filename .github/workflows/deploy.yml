@@ -2,8 +2,8 @@ name: 构建并部署到阿里云
 
 on:
   push:
-    branches:
-      - release
+    tags:
+      - 'v*'
 
 env:
   REGISTRY: crpi-pcnycfgdwvbfz2xa.cn-chengdu.personal.cr.aliyuncs.com
@@ -33,7 +33,7 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE }}:latest
-            ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.NAMESPACE }}/${{ env.IMAGE }}:${{ github.ref_name }}
 
       - name: 部署到服务器
         uses: appleboy/ssh-action@v1
