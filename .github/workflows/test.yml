@@ -8,6 +8,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
 
     steps:
       - name: 检出代码
@@ -21,18 +24,18 @@ jobs:
           cache-dependency-path: server/package-lock.json
 
       - name: 安装依赖
-        run: cd server && npm ci
+        run: npm ci
 
       - name: 生成 Prisma Client
-        run: cd server && npx prisma generate
+        run: npx prisma generate
 
       - name: 初始化测试数据库
-        run: cd server && DATABASE_URL=file:./test.db npx prisma db push --skip-generate
+        run: DATABASE_URL=file:./test.db npx prisma db push --skip-generate
 
       - name: 运行测试
-        run: cd server && DATABASE_URL=file:./test.db npm test -- --ci --reporters=default --reporters=jest-junit
+        run: DATABASE_URL=file:./test.db npm test -- --ci --reporters=default --reporters=jest-junit
         env:
-          JEST_JUNIT_OUTPUT_DIR: server/test-results
+          JEST_JUNIT_OUTPUT_DIR: test-results
           JEST_JUNIT_OUTPUT_NAME: junit.xml
 
       - name: 上传测试报告
