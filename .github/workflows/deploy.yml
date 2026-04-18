@@ -104,6 +104,10 @@ jobs:
               --name juma-web \
               --restart always \
               --network $NETWORK \
+              -e OSS_ACCESS_KEY_ID=${{ secrets.OSS_ACCESS_KEY_ID }} \
+              -e OSS_ACCESS_KEY_SECRET=${{ secrets.OSS_ACCESS_KEY_SECRET }} \
+              -e OSS_BUCKET=${{ secrets.OSS_BUCKET }} \
+              -e OSS_REGION=${{ secrets.OSS_REGION }} \
               -v /opt/juma-web/data:/app/data \
               $REGISTRY/$NAMESPACE/$IMAGE:latest
 
