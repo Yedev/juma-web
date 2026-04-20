@@ -13,6 +13,7 @@ import { hasServerTask } from "../services/serverTaskRuntime";
 import { invalidateConfig } from "../lib/configCache";
 import { invalidateHomepageCache } from "../lib/homepageCache";
 import getRedis from "../lib/redis";
+import { isOssAvailable, uploadToOss, listOssObjects, deleteFromOss, IMG_BUCKET } from "../lib/oss";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -2236,22 +2237,12 @@ router.delete("/dr/editor-highlights/:highlightId", async (req: AuthRequest, res
   }
 });
 
-// ── Image Hosting ─────────────────────────────────────────
+// ── Image Hosting (OSS) ──────────────────────────────────────
 
-const UPLOADS_DIR = path.resolve(__dirname, "../../uploads/images");
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const hash = crypto.randomBytes(8).toString("hex");
-    cb(null, `${Date.now()}_${hash}${ext}`);
-  },
-});
+const OSS_IMAGE_PREFIX = "images/";
 
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
   fileFilter: (_req, file, cb) => {
     const allowed = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"];
@@ -2261,26 +2252,42 @@ const upload = multer({
   },
 });
 
-router.post("/upload/image", upload.single("file"), (req: AuthRequest, res: Response): void => {
-  if (!req.file) {
-    res.status(400).json({ code: 400, message: "未收到文件" });
-    return;
+const MIME_MAP: Record<string, string> = {
+  ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+  ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+};
+
+router.post("/upload/image", upload.single("file"), async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!req.file) { res.status(400).json({ code: 400, message: "未收到文件" }); return; }
+  if (!isOssAvailable(IMG_BUCKET)) { res.status(500).json({ code: 500, message: "OSS 未配置" }); return; }
+
+  const ext = path.extname(req.file.originalname).toLowerCase();
+  const hash = crypto.randomBytes(8).toString("hex");
+  const filename = `${Date.now()}_${hash}${ext}`;
+  const key = `${OSS_IMAGE_PREFIX}${filename}`;
+  try {
+    const url = await uploadToOss(key, req.file.buffer, { contentType: MIME_MAP[ext], bucket: IMG_BUCKET! });
+    res.json({ code: 200, message: "上传成功", data: { url, filename, size: req.file.size } });
+  } catch (err) {
+    console.error("OSS upload error:", err);
+    res.status(500).json({ code: 500, message: "上传失败" });
   }
-  const url = `/uploads/images/${req.file.filename}`;
-  res.json({ code: 200, message: "上传成功", data: { url, filename: req.file.filename, size: req.file.size } });
 });
 
-router.get("/upload/images", (_req: AuthRequest, res: Response): void => {
+router.get("/upload/images", async (_req: AuthRequest, res: Response): Promise<void> => {
+  if (!isOssAvailable(IMG_BUCKET)) { res.json({ code: 200, message: "success", data: [] }); return; }
   try {
-    const files = fs.readdirSync(UPLOADS_DIR)
-      .filter((f) => /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(f))
-      .map((filename) => {
-        const stat = fs.statSync(path.join(UPLOADS_DIR, filename));
-        return { filename, url: `/uploads/images/${filename}`, size: stat.size, createdAt: stat.birthtimeMs };
+    const objects = await listOssObjects(OSS_IMAGE_PREFIX, IMG_BUCKET);
+    const files = objects
+      .filter((o) => /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(o.key))
+      .map((o) => {
+        const filename = o.key.replace(OSS_IMAGE_PREFIX, "");
+        return { filename, url: o.url, size: o.size, createdAt: o.lastModified.getTime() };
       })
       .sort((a, b) => b.createdAt - a.createdAt);
     res.json({ code: 200, message: "success", data: files });
-  } catch {
+  } catch (err) {
+    console.error("OSS list error:", err);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
@@ -2406,19 +2413,25 @@ router.delete("/dr/ai-models/:id", async (req: AuthRequest, res: Response): Prom
   }
 });
 
-router.delete("/upload/images/:filename", (req: AuthRequest, res: Response): void => {
+router.delete("/upload/images/:filename", async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!isOssAvailable(IMG_BUCKET)) { res.status(500).json({ code: 500, message: "OSS 未配置" }); return; }
   const filename = req.params.filename as string;
   if (filename.includes("/") || filename.includes("..")) {
     res.status(400).json({ code: 400, message: "非法文件名" });
     return;
   }
-  const filepath = path.join(UPLOADS_DIR, filename);
-  if (!fs.existsSync(filepath)) {
-    res.status(404).json({ code: 404, message: "文件不存在" });
-    return;
+  try {
+    await deleteFromOss(`${OSS_IMAGE_PREFIX}${filename}`, IMG_BUCKET);
+    res.json({ code: 200, message: "已删除" });
+  } catch (err: unknown) {
+    const msg = (err as Error).message || "";
+    if (msg.includes("NoSuchKey")) {
+      res.status(404).json({ code: 404, message: "文件不存在" });
+      return;
+    }
+    console.error("OSS delete error:", err);
+    res.status(500).json({ code: 500, message: "删除失败" });
   }
-  fs.unlinkSync(filepath);
-  res.json({ code: 200, message: "已删除" });
 });
 
 // ── AI 配额管理 ──────────────────────────────────────────────

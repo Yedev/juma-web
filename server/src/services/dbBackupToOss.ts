@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import cron from "node-cron";
 import { PrismaClient } from "@prisma/client";
-import { getOssClient } from "../lib/oss";
+import { isOssAvailable, uploadToOss } from "../lib/oss";
 
 const prisma = new PrismaClient();
 const OSS_BACKUP_PREFIX = "db-backups/";
@@ -15,8 +15,7 @@ function resolveDbPath(): string | null {
 }
 
 async function runBackup() {
-  const oss = getOssClient();
-  if (!oss) {
+  if (!isOssAvailable()) {
     console.log("[DBBackup] OSS 不可用，跳过数据库备份。");
     return;
   }
@@ -37,7 +36,7 @@ async function runBackup() {
     await prisma.$queryRaw`PRAGMA wal_checkpoint(TRUNCATE)`;
 
     const buffer = fs.readFileSync(dbPath);
-    await oss.put(ossKey, buffer);
+    await uploadToOss(ossKey, buffer, { contentType: "application/octet-stream" });
 
     const sizeMB = (buffer.length / 1024 / 1024).toFixed(2);
     console.log(`[DBBackup] 备份完成: ${ossKey} (${sizeMB} MB)`);
@@ -47,8 +46,7 @@ async function runBackup() {
 }
 
 export function startDbBackupTask() {
-  const oss = getOssClient();
-  if (!oss) {
+  if (!isOssAvailable()) {
     console.log("[DBBackup] OSS 未配置，数据库备份任务未启动。");
     return;
   }

@@ -41,7 +41,7 @@ export default function ImageHosting() {
   };
 
   const copyUrl = (url: string) => {
-    const full = `${window.location.origin}${url}`;
+    const full = url.startsWith("http") ? url : `${window.location.origin}${url}`;
     navigator.clipboard.writeText(full).then(() => message.success("已复制"));
   };
 
@@ -85,7 +85,7 @@ export default function ImageHosting() {
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16 }}>
           {images.map((img) => {
-            const fullUrl = `${window.location.origin}${img.url}`;
+            const fullUrl = img.url.startsWith("http") ? img.url : `${window.location.origin}${img.url}`;
             return (
               <div
                 key={img.filename}
