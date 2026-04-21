@@ -1,6 +1,6 @@
+import { randomUUID } from "crypto";
 import { Prisma } from "@prisma/client";
 import prisma from "../../lib/prisma";
-import { generateAnalyticsEventId } from "../../lib/generateId";
 
 const MAX_BATCH_SIZE = 100;
 
@@ -76,7 +76,7 @@ function normalizeEvent(
   );
 
   return {
-    eventId: generateAnalyticsEventId(),
+    eventId: `AE_${randomUUID()}`,
     userId: context.userId ?? null,
     eventName,
     eventTime: parseEventTime(event.event_time ?? event.timestamp ?? event.time ?? event.occurred_at),
@@ -118,6 +118,6 @@ export async function createEvents(
     rows.push(normalized);
   }
 
-  const result = await prisma.analyticsEvent.createMany({ data: rows });
+  const result = await prisma.analyticsEvent.createMany({ data: rows, skipDuplicates: true });
   return { count: result.count };
 }

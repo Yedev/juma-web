@@ -121,6 +121,7 @@ export default function DrArticleManagement() {
   const [formLayoutType, setFormLayoutType] = useState("default");
   const [formContent, setFormContent] = useState("");
   const [formContentType, setFormContentType] = useState("html");
+  const [formHighlights, setFormHighlights] = useState("");
   const [formChannels, setFormChannels] = useState<ChannelOption[]>([]);
 
   // Preview
@@ -211,6 +212,7 @@ export default function DrArticleManagement() {
     setFormLayoutType("default");
     setFormContent("");
     setFormContentType("html");
+    setFormHighlights("");
     if (filterSpaceId) {
       fetchChannelsForSpace(filterSpaceId).then(setFormChannels);
     } else {
@@ -239,15 +241,19 @@ export default function DrArticleManagement() {
         const detail = res.data.data;
         setFormContent(detail.content || "");
         setFormContentType(detail.contentType || "html");
+        const hl = typeof detail.highlights === "string" ? JSON.parse(detail.highlights || "[]") : detail.highlights || [];
+        setFormHighlights(Array.isArray(hl) && hl.length > 0 ? hl.join("\n") : "");
         setEditing(detail);
       } else {
         setFormContent("");
         setFormContentType("html");
+        setFormHighlights("");
         setEditing({ ...record, content: "", contentType: "html" });
       }
     } catch {
       setFormContent("");
       setFormContentType("html");
+      setFormHighlights("");
       setEditing({ ...record, content: "", contentType: "html" });
     }
   };
@@ -273,6 +279,7 @@ export default function DrArticleManagement() {
         layoutType: formLayoutType,
         content: formContent,
         contentType: formContentType,
+        highlights: formHighlights.trim() ? formHighlights.trim().split("\n").filter(Boolean) : [],
       };
 
       if (editing) {
@@ -577,6 +584,10 @@ export default function DrArticleManagement() {
           <div>
             <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>摘要</div>
             <Input.TextArea value={formSummary} onChange={(e) => setFormSummary(e.target.value)} placeholder="文章摘要" rows={2} />
+          </div>
+          <div>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>精彩摘录（每行一条）</div>
+            <Input.TextArea value={formHighlights} onChange={(e) => setFormHighlights(e.target.value)} placeholder="每行输入一条精彩摘录，如：&#10;人生如逆旅，我亦是行人&#10;不畏浮云遮望眼" rows={3} />
           </div>
           <div>
             <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>封面 URL</div>

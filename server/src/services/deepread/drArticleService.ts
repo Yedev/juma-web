@@ -9,6 +9,7 @@ const ARTICLE_LIST_SELECT = {
   coverUrl: true,
   layoutType: true,
   author: true,
+  highlights: true,
   readCount: true,
   publishedAt: true,
 } as const;
@@ -22,6 +23,7 @@ type ArticleListItem = {
   coverUrl: string;
   layoutType: string;
   author: string;
+  highlights: string;
   readCount: number;
   publishedAt: Date;
 };
@@ -75,7 +77,8 @@ export async function getArticlesList(
     ]);
   }
 
-  return { list: articles, total, page, pageSize };
+  const list = articles.map((a) => ({ ...a, highlights: JSON.parse(a.highlights || "[]") }));
+  return { list, total, page, pageSize };
 }
 
 export async function getArticleDetail(articleId: string) {
@@ -98,6 +101,7 @@ export async function getArticleDetail(articleId: string) {
     content: article.content,
     contentType: article.contentType,
     author: article.author,
+    highlights: JSON.parse(article.highlights || "[]"),
     readCount: article.readCount + 1,
     publishedAt: article.publishedAt,
   };

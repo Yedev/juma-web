@@ -91,6 +91,7 @@ describe("DeepRead Homepage", () => {
 
     it("无精选文章时应返回提示", async () => {
       prismaMock.drSpaceMember.findMany.mockResolvedValue([{ spaceId: "sp_001" }]);
+      prismaMock.appConfig.findUnique.mockResolvedValue(null);
       prismaMock.drDailyPickArticle.findFirst.mockResolvedValue(null);
 
       const res = await request(app)
@@ -104,6 +105,7 @@ describe("DeepRead Homepage", () => {
 
     it("应返回每日精选文章", async () => {
       prismaMock.drSpaceMember.findMany.mockResolvedValue([{ spaceId: "sp_001" }]);
+      prismaMock.appConfig.findUnique.mockResolvedValue(null);
       prismaMock.drDailyPickArticle.findFirst.mockResolvedValue({
         articleId: "art_001",
         spaceId: "sp_001",
@@ -113,7 +115,6 @@ describe("DeepRead Homepage", () => {
       prismaMock.drArticle.findUnique.mockResolvedValue(TEST_ARTICLE);
       prismaMock.drChannel.findUnique.mockResolvedValue({ channelId: "ch_001", name: "测试频道" });
       prismaMock.drEditorHighlight.findMany.mockResolvedValue([]);
-      prismaMock.drDailyPickLattice.findFirst.mockResolvedValue(null);
 
       const res = await request(app)
         .get("/api/v1/dr/daily-article")
@@ -124,6 +125,68 @@ describe("DeepRead Homepage", () => {
       expect(res.body.data.article.title).toBe("测试文章");
       expect(res.body.data.article.channelName).toBe("测试频道");
       expect(res.body.data.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(res.body.data.lattice).toBeUndefined();
+    });
+  });
+
+  describe("GET /api/v1/dr/thinking-lattice", () => {
+    it("无可用格栅时应返回 null", async () => {
+      prismaMock.drSpaceMember.findMany.mockResolvedValue([{ spaceId: "sp_001" }]);
+      prismaMock.appConfig.findUnique.mockResolvedValue(null);
+      prismaMock.drDailyPickLattice.findFirst.mockResolvedValue(null);
+
+      const res = await request(app)
+        .get("/api/v1/dr/thinking-lattice")
+        .set(authHeaders(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toBeNull();
+    });
+
+    it("应按合集顺序返回带 nodeName 的思维格栅", async () => {
+      prismaMock.drSpaceMember.findMany.mockResolvedValue([{ spaceId: "sp_001" }]);
+      prismaMock.appConfig.findUnique.mockResolvedValue(null);
+      prismaMock.drDailyPickLattice.findFirst.mockResolvedValue({
+        latticeId: "lt_001",
+        spaceId: "sp_001",
+        collectionId: "col_001",
+        recommendation: "本周推荐",
+        nodeNames: JSON.stringify(["节点一", "节点二"]),
+        enabled: true,
+      });
+      prismaMock.drSpaceCollection.findUnique.mockResolvedValue({
+        collectionId: "col_001",
+        spaceId: "sp_001",
+        name: "测试合集",
+        description: "合集描述",
+        coverUrl: "",
+      });
+      prismaMock.drSpaceCollectionArticle.findMany.mockResolvedValue([
+        { collectionId: "col_001", articleId: "art_001", sortOrder: 0, addedAt: new Date() },
+        { collectionId: "col_001", articleId: "art_002", sortOrder: 1, addedAt: new Date() },
+      ]);
+      prismaMock.drArticle.findMany.mockResolvedValue([
+        TEST_ARTICLE,
+        {
+          ...TEST_ARTICLE,
+          articleId: "art_002",
+          title: "测试文章二",
+          summary: "第二篇摘要",
+          author: "作者二",
+        },
+      ]);
+
+      const res = await request(app)
+        .get("/api/v1/dr/thinking-lattice")
+        .set(authHeaders(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.lattice.collectionId).toBe("col_001");
+      expect(res.body.data.lattice.articles).toHaveLength(2);
+      expect(res.body.data.lattice.articles[0].nodeName).toBe("节点一");
+      expect(res.body.data.lattice.articles[1].nodeName).toBe("节点二");
+      expect(res.body.data.lattice.articles[0].sortOrder).toBe(0);
+      expect(res.body.data.weekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     });
   });
 });

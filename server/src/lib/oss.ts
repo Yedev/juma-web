@@ -10,29 +10,28 @@ const clientMap = new Map<string, OSS>();
 let initFailed = false;
 
 function createClient(bucket: string): OSS {
-  const c = new OSS({
+  return new OSS({
     region: REGION!,
     accessKeyId: ACCESS_KEY_ID!,
     accessKeySecret: ACCESS_KEY_SECRET!,
     bucket,
   });
-  return c;
 }
 
 /** Get OSS client for a specific bucket (defaults to env OSS_BUCKET) */
 export function getOssClient(bucket?: string): OSS | null {
   if (!ACCESS_KEY_ID || !ACCESS_KEY_SECRET || !REGION) return null;
   if (initFailed) return null;
-  const b = bucket || BUCKET;
-  if (!b) return null;
+  const bucketName = bucket || BUCKET;
+  if (!bucketName) return null;
   try {
-    let c = clientMap.get(b);
-    if (!c) {
-      c = createClient(b);
-      clientMap.set(b, c);
-      console.log(`[oss] client initialized, bucket=${b}, region=${REGION}`);
+    let client = clientMap.get(bucketName);
+    if (!client) {
+      client = createClient(bucketName);
+      clientMap.set(bucketName, client);
+      console.log(`[oss] client initialized, bucket=${bucketName}, region=${REGION}`);
     }
-    return c;
+    return client;
   } catch (err) {
     console.error("[oss] client initialization failed:", (err as Error).message);
     initFailed = true;
@@ -47,25 +46,25 @@ export function isOssAvailable(bucket?: string): boolean {
 
 /** Build the public URL base for a bucket */
 export function getOssBaseUrl(bucket?: string): string {
-  const b = bucket || BUCKET;
-  return `https://${b}.${REGION}.aliyuncs.com`;
+  const bucketName = bucket || BUCKET;
+  return `https://${bucketName}.${REGION}.aliyuncs.com`;
 }
 
 /** Upload a buffer to OSS, return the public URL */
 export async function uploadToOss(key: string, data: Buffer, options?: { contentType?: string; bucket?: string }): Promise<string> {
-  const b = options?.bucket;
-  const c = getOssClient(b);
-  if (!c) throw new Error("OSS not configured");
+  const bucketName = options?.bucket;
+  const client = getOssClient(bucketName);
+  if (!client) throw new Error("OSS not configured");
   const opts = options?.contentType ? { headers: { "Content-Type": options.contentType } } : undefined;
-  await c.put(key, data, opts);
-  return `${getOssBaseUrl(b)}/${key}`;
+  await client.put(key, data, opts);
+  return `${getOssBaseUrl(bucketName)}/${key}`;
 }
 
 /** List objects under a prefix */
 export async function listOssObjects(prefix: string, bucket?: string): Promise<Array<{ key: string; url: string; size: number; lastModified: Date }>> {
-  const c = getOssClient(bucket);
-  if (!c) throw new Error("OSS not configured");
-  const result = await c.list({ prefix, "max-keys": 1000 });
+  const client = getOssClient(bucket);
+  if (!client) throw new Error("OSS not configured");
+  const result = await client.list({ prefix, "max-keys": 1000 });
   return (result.objects || []).map((obj) => ({
     key: obj.name,
     url: `${getOssBaseUrl(bucket)}/${obj.name}`,
@@ -76,9 +75,9 @@ export async function listOssObjects(prefix: string, bucket?: string): Promise<A
 
 /** Delete an object by key */
 export async function deleteFromOss(key: string, bucket?: string): Promise<void> {
-  const c = getOssClient(bucket);
-  if (!c) throw new Error("OSS not configured");
-  await c.delete(key);
+  const client = getOssClient(bucket);
+  if (!client) throw new Error("OSS not configured");
+  await client.delete(key);
 }
 
 /** The bucket used for image hosting (OSS_BUCKET_IMG or fallback to OSS_BUCKET) */

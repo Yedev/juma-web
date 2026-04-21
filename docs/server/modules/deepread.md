@@ -336,5 +336,6 @@ GET /api/v1/dr/collections
 | GET | `/api/v1/dr/stats/summary` | sign + drAuth | 获取阅读统计汇总 |
 | GET | `/api/v1/dr/bookmarks` | sign + drAuth | 获取收藏列表 |
 | GET | `/api/v1/dr/daily-article` | sign + drAuth | 获取每日推荐文章 |
+| GET | `/api/v1/dr/thinking-lattice` | sign + drAuth | 获取当前思维格栅 |
 | POST | `/api/v1/dr/sync` | sign + drAuth | 批量同步 |
 | GET | `/api/v1/dr/sync/changes` | sign + drAuth | 增量获取同步变化 |

@@ -62,6 +62,30 @@ function parseArrayField(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function normalizeNodeNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function buildDefaultNodeName(title: string): string {
+  const source = title.split(/[：:|｜\-]/)[0]?.trim() || title.trim();
+  const compact = source.replace(/[，。！？；、,.!?;()\[\]（）【】"'"]/g, "").replace(/\s+/g, "");
+  return compact.slice(0, 6) || title.trim().slice(0, 6);
+}
+
+function buildDefaultNodeNames(titles: string[]): string[] {
+  const used = new Map<string, number>();
+  return titles.map((title) => {
+    const base = buildDefaultNodeName(title) || "节点";
+    const count = used.get(base) ?? 0;
+    used.set(base, count + 1);
+    return count === 0 ? base : `${base}${count + 1}`;
+  });
+}
+
 function normalizeTaskList(value: unknown): Array<{ name: string; version?: string; description?: string }> {
   if (!Array.isArray(value)) return [];
   const dedupe = new Map<string, { name: string; version?: string; description?: string }>();
@@ -1035,7 +1059,7 @@ router.get("/dr/articles/:articleId", async (req: AuthRequest, res: Response): P
 
 router.post("/dr/articles", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { title, summary, coverUrl, content, contentType, spaceId, channelId, author, layoutType } =
+    const { title, summary, coverUrl, content, contentType, spaceId, channelId, author, layoutType, highlights } =
       req.body as {
         title?: string;
         summary?: string;
@@ -1046,6 +1070,7 @@ router.post("/dr/articles", async (req: AuthRequest, res: Response): Promise<voi
         channelId?: string;
         author?: string;
         layoutType?: string;
+        highlights?: string[];
       };
 
     if (!title?.trim() || !spaceId || !channelId) {
@@ -1065,6 +1090,7 @@ router.post("/dr/articles", async (req: AuthRequest, res: Response): Promise<voi
         content: content || "",
         contentType: contentType || "html",
         author: author?.trim() || "",
+        highlights: JSON.stringify(highlights || []),
       },
     });
 
@@ -1078,8 +1104,8 @@ router.post("/dr/articles", async (req: AuthRequest, res: Response): Promise<voi
 router.put("/dr/articles/:articleId", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const articleId = req.params.articleId as string;
-    const { title, summary, coverUrl, content, contentType, channelId, author, layoutType } =
-      req.body as Record<string, string | undefined>;
+    const { title, summary, coverUrl, content, contentType, channelId, author, layoutType, highlights } =
+      req.body as Record<string, unknown>;
 
     const existing = await prisma.drArticle.findUnique({ where: { articleId } });
     if (!existing) {
@@ -1088,14 +1114,15 @@ router.put("/dr/articles/:articleId", async (req: AuthRequest, res: Response): P
     }
 
     const updateData: Record<string, unknown> = {};
-    if (title !== undefined) updateData.title = title.trim();
-    if (summary !== undefined) updateData.summary = summary.trim();
-    if (coverUrl !== undefined) updateData.coverUrl = coverUrl.trim();
+    if (title !== undefined) updateData.title = (title as string).trim();
+    if (summary !== undefined) updateData.summary = (summary as string).trim();
+    if (coverUrl !== undefined) updateData.coverUrl = (coverUrl as string).trim();
     if (content !== undefined) updateData.content = content;
     if (contentType !== undefined) updateData.contentType = contentType;
     if (channelId !== undefined) updateData.channelId = channelId;
-    if (author !== undefined) updateData.author = author.trim();
+    if (author !== undefined) updateData.author = (author as string).trim();
     if (layoutType !== undefined) updateData.layoutType = layoutType;
+    if (highlights !== undefined) updateData.highlights = JSON.stringify(highlights);
 
     const updated = await prisma.drArticle.update({ where: { articleId }, data: updateData });
     res.json({ code: 200, message: "文章已更新", data: updated });
@@ -2000,8 +2027,17 @@ router.get("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, re
 
     const data = lattices.map((l) => {
       const col = collectionMap.get(l.collectionId);
+      const nodeNames = (() => {
+        try {
+          const parsed = JSON.parse(l.nodeNames) as unknown;
+          return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+        } catch {
+          return [];
+        }
+      })();
       return {
         ...l,
+        nodeNames,
         collection: col ? { collectionId: col.collectionId, name: col.name, description: col.description, coverUrl: col.coverUrl } : null,
         articleCount: countMap.get(l.collectionId) ?? 0,
       };
@@ -2018,9 +2054,10 @@ router.get("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, re
 router.post("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const spaceId = req.params.spaceId as string;
-    const { collectionId, recommendation } = req.body as {
+    const { collectionId, recommendation, nodeNames } = req.body as {
       collectionId?: string;
       recommendation?: string;
+      nodeNames?: string[];
     };
 
     const space = await prisma.drSpace.findUnique({ where: { spaceId } });
@@ -2040,6 +2077,32 @@ router.post("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, r
       return;
     }
 
+    const collectionArticles = await prisma.drSpaceCollectionArticle.findMany({
+      where: { collectionId },
+      orderBy: { sortOrder: "asc" },
+      select: { articleId: true },
+    });
+    const articles = collectionArticles.length > 0
+      ? await prisma.drArticle.findMany({
+          where: { articleId: { in: collectionArticles.map((item) => item.articleId) } },
+          select: { articleId: true, title: true },
+        })
+      : [];
+    const articleMap = new Map(articles.map((item) => [item.articleId, item]));
+    const normalizedNodeNames = normalizeNodeNames(nodeNames);
+    const resolvedNodeNames =
+      normalizedNodeNames.length > 0
+        ? normalizedNodeNames
+        : buildDefaultNodeNames(collectionArticles.map((item) => articleMap.get(item.articleId)?.title || item.articleId));
+    if (collectionArticles.length > 0 && resolvedNodeNames.length !== collectionArticles.length) {
+      res.status(400).json({ code: 400, message: "节点名数量必须与合集文章数量一致" });
+      return;
+    }
+    if (resolvedNodeNames.length !== new Set(resolvedNodeNames).size) {
+      res.status(400).json({ code: 400, message: "同一个格栅中的节点名不能重复" });
+      return;
+    }
+
     // 禁用该空间所有现有格栅
     await prisma.drDailyPickLattice.updateMany({
       where: { spaceId, enabled: true },
@@ -2051,6 +2114,7 @@ router.post("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, r
         latticeId: generateDrId("LT"),
         spaceId,
         collectionId,
+        nodeNames: JSON.stringify(resolvedNodeNames),
         recommendation: recommendation?.trim() ?? "",
         enabled: true,
       },
@@ -2239,7 +2303,7 @@ router.delete("/dr/editor-highlights/:highlightId", async (req: AuthRequest, res
 
 // ── Image Hosting (OSS) ──────────────────────────────────────
 
-const OSS_IMAGE_PREFIX = "images/";
+const OSS_IMAGE_PREFIX = "imgs/";
 
 const upload = multer({
   storage: multer.memoryStorage(),

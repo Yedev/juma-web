@@ -26,10 +26,22 @@ router.get("/spaces/:spaceId/homepage", async (req: DrAuthRequest, res: Response
 // 每日一文
 router.get("/daily-article", async (req: DrAuthRequest, res: Response): Promise<void> => {
   try {
-    const data = await homepageService.getDailyArticle(req.drUserId!);
+    const spaceId = req.query.spaceId as string | undefined;
+    const data = await homepageService.getDailyArticle(req.drUserId!, spaceId);
     res.json({ code: 200, message: "success", data });
   } catch (error) {
     handleError(res, "Get daily article error", error);
+  }
+});
+
+// 思维格栅
+router.get("/thinking-lattice", async (req: DrAuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.query.spaceId as string | undefined;
+    const data = await homepageService.getThinkingLattice(req.drUserId!, spaceId);
+    res.json({ code: 200, message: "success", data });
+  } catch (error) {
+    handleError(res, "Get thinking lattice error", error);
   }
 });
 

@@ -1,5 +1,6 @@
 import prisma from "../../lib/prisma";
 import getRedis from "../../lib/redis";
+import { getConfig } from "../../lib/configCache";
 
 interface CachedModuleData {
   orderedModules: Array<{
@@ -146,29 +147,110 @@ export async function getHomepageModules(spaceId: string) {
   });
 }
 
-export async function getDailyArticle(userId: number) {
+function getTodayIsoDate(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+function parseNodeNames(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string").map((item) => item.trim());
+  } catch {
+    return [];
+  }
+}
+
+function buildDefaultNodeName(title: string): string {
+  const source = title.split(/[：:|｜\-]/)[0]?.trim() || title.trim();
+  const compact = source.replace(/[，。！？；、,.!?;()\[\]（）【】"'"]/g, "").replace(/\s+/g, "");
+  return compact.slice(0, 6) || title.trim().slice(0, 6);
+}
+
+function buildDefaultNodeNames(titles: string[]): string[] {
+  const used = new Map<string, number>();
+  return titles.map((title) => {
+    const base = buildDefaultNodeName(title) || "节点";
+    const count = used.get(base) ?? 0;
+    used.set(base, count + 1);
+    return count === 0 ? base : `${base}${count + 1}`;
+  });
+}
+
+function getCurrentWeekStart(): Date {
+  const now = new Date();
+  const currentDay = now.getDay();
+  const diff = currentDay === 0 ? -6 : 1 - currentDay;
+  const weekStart = new Date(now);
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() + diff);
+  return weekStart;
+}
+
+function formatWeekLabel(weekStart: Date): string {
+  const year = weekStart.getFullYear();
+  const month = weekStart.toLocaleString("en-US", { month: "long" }).toUpperCase();
+  const firstDayOfYear = new Date(year, 0, 1);
+  const dayOffset = (firstDayOfYear.getDay() + 6) % 7;
+  const firstWeekStart = new Date(firstDayOfYear);
+  firstWeekStart.setDate(firstDayOfYear.getDate() - dayOffset);
+  firstWeekStart.setHours(0, 0, 0, 0);
+  const diffDays = Math.floor((weekStart.getTime() - firstWeekStart.getTime()) / (24 * 60 * 60 * 1000));
+  const weekNumber = Math.floor(diffDays / 7) + 1;
+  return `${year} ${month} WEEK ${weekNumber}`;
+}
+
+async function resolvePreferredSpaceId(userId: number, requestedSpaceId?: string) {
   const memberships = await prisma.drSpaceMember.findMany({ where: { userId } });
 
   if (memberships.length === 0) {
-    return { date: new Date().toISOString().split("T")[0], article: null, reason: "您还没有加入任何空间" };
+    return { ok: false as const, reason: "您还没有加入任何空间" };
   }
 
-  const spaceId = memberships[0].spaceId;
+  if (requestedSpaceId) {
+    if (!memberships.some((m) => m.spaceId === requestedSpaceId)) {
+      return { ok: false as const, reason: "您不是该空间的成员" };
+    }
+    return { ok: true as const, spaceId: requestedSpaceId };
+  }
 
+  let spaceId = memberships[0].spaceId;
+  const rawDefaultSpaceId = await getConfig("dr_default_space_id");
+  if (rawDefaultSpaceId) {
+    try {
+      const defaultSpaceId = JSON.parse(rawDefaultSpaceId) as string;
+      if (memberships.some((m) => m.spaceId === defaultSpaceId)) {
+        spaceId = defaultSpaceId;
+      }
+    } catch {
+      // Ignore malformed config and fallback to the first joined space.
+    }
+  }
+
+  return { ok: true as const, spaceId };
+}
+
+export async function getDailyArticle(userId: number, requestedSpaceId?: string) {
+  const resolved = await resolvePreferredSpaceId(userId, requestedSpaceId);
+  if (!resolved.ok) {
+    return { date: getTodayIsoDate(), article: null, reason: resolved.reason };
+  }
+
+  const { spaceId } = resolved;
   const selectedPick = await prisma.drDailyPickArticle.findFirst({
     where: { spaceId, enabled: true },
   });
 
   if (!selectedPick) {
-    return { date: new Date().toISOString().split("T")[0], article: null, reason: "暂无精选文章" };
+    return { date: getTodayIsoDate(), article: null, reason: "暂无精选文章" };
   }
 
   const article = await prisma.drArticle.findUnique({ where: { articleId: selectedPick.articleId } });
   if (!article) {
-    return { date: new Date().toISOString().split("T")[0], article: null, reason: "文章不存在" };
+    return { date: getTodayIsoDate(), article: null, reason: "文章不存在" };
   }
 
-  const [channel, rawHighlights, lattice] = await Promise.all([
+  const [channel, rawHighlights] = await Promise.all([
     prisma.drChannel.findUnique({
       where: { channelId: article.channelId },
       select: { channelId: true, name: true },
@@ -178,11 +260,10 @@ export async function getDailyArticle(userId: number) {
       orderBy: { sortOrder: "asc" },
       select: { highlightId: true, text: true, color: true, note: true, sortOrder: true, contextBefore: true, contextAfter: true },
     }),
-    fetchLatticeData(spaceId),
   ]);
 
   return {
-    date: new Date().toISOString().split("T")[0],
+    date: getTodayIsoDate(),
     article: {
       articleId: article.articleId,
       title: article.title,
@@ -195,6 +276,24 @@ export async function getDailyArticle(userId: number) {
       highlights: rawHighlights,
     },
     reason: selectedPick.reason || "",
+  };
+}
+
+export async function getThinkingLattice(userId: number, requestedSpaceId?: string) {
+  const resolved = await resolvePreferredSpaceId(userId, requestedSpaceId);
+  if (!resolved.ok) {
+    return null;
+  }
+
+  const lattice = await fetchLatticeData(resolved.spaceId);
+  if (!lattice) {
+    return null;
+  }
+
+  const weekStart = getCurrentWeekStart();
+  return {
+    weekLabel: formatWeekLabel(weekStart),
+    weekStart: weekStart.toISOString().split("T")[0],
     lattice,
   };
 }
@@ -215,6 +314,12 @@ async function fetchLatticeData(spaceId: string) {
   const articles =
     articleIds.length > 0 ? await prisma.drArticle.findMany({ where: { articleId: { in: articleIds } } }) : [];
   const articleMap = new Map(articles.map((a) => [a.articleId, a]));
+  const nodeNames = parseNodeNames(lattice.nodeNames);
+  const fallbackNodeNames = buildDefaultNodeNames(
+    collectionArticles
+      .filter((ca) => articleMap.has(ca.articleId))
+      .map((ca) => articleMap.get(ca.articleId)?.title || ca.articleId)
+  );
 
   return {
     collectionId: collection.collectionId,
@@ -224,15 +329,16 @@ async function fetchLatticeData(spaceId: string) {
     recommendation: lattice.recommendation,
     articles: collectionArticles
       .filter((ca) => articleMap.has(ca.articleId))
-      .map((ca) => {
+      .map((ca, index) => {
         const a = articleMap.get(ca.articleId)!;
         return {
           articleId: a.articleId,
           title: a.title,
-          summary: a.summary,
+          nodeName: nodeNames[index] || fallbackNodeNames[index] || buildDefaultNodeName(a.title),
+          excerpt: a.summary,
           coverUrl: a.coverUrl,
           author: a.author,
-          publishedAt: a.publishedAt,
+          sortOrder: ca.sortOrder,
         };
       }),
   };

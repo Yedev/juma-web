@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { message, Table, Modal, Input, Spin, Button } from "antd";
-import { PlusOutlined, EditOutlined, DeleteOutlined, AppstoreOutlined } from "@ant-design/icons";
+import { message, Table, Modal, Input, Spin, Button, Tag } from "antd";
+import { PlusOutlined, EditOutlined, DeleteOutlined, AppstoreOutlined, StarOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { adminClient } from "../api/client";
 
@@ -25,6 +25,32 @@ export default function DrSpaceManagement() {
   const [formName, setFormName] = useState("");
   const [formDesc, setFormDesc] = useState("");
   const [saving, setSaving] = useState(false);
+  const [defaultSpaceId, setDefaultSpaceId] = useState<string | null>(null);
+
+  const fetchDefaultSpace = useCallback(async () => {
+    try {
+      const res = await adminClient.get("/api/admin/config/dr_default_space_id");
+      if (res.data.code === 200) {
+        setDefaultSpaceId(JSON.parse(res.data.data.configValue));
+      }
+    } catch {
+      // config may not exist yet
+    }
+  }, []);
+
+  const handleSetDefault = async (spaceId: string) => {
+    try {
+      const res = await adminClient.put("/api/admin/config/dr_default_space_id", {
+        configValue: JSON.stringify(spaceId),
+      });
+      if (res.data.code === 200) {
+        message.success("已设为默认空间");
+        setDefaultSpaceId(spaceId);
+      }
+    } catch {
+      message.error("设置失败");
+    }
+  };
 
   const fetchSpaces = useCallback(async () => {
     setLoading(true);
@@ -42,7 +68,8 @@ export default function DrSpaceManagement() {
 
   useEffect(() => {
     fetchSpaces();
-  }, [fetchSpaces]);
+    fetchDefaultSpace();
+  }, [fetchSpaces, fetchDefaultSpace]);
 
   const openCreate = () => {
     setEditing(null);
@@ -121,13 +148,16 @@ export default function DrSpaceManagement() {
       key: "name",
       width: 160,
       render: (name: string, record: SpaceRecord) => (
-        <span
-          onClick={() => navigate(`/dr/spaces/${record.spaceId}`)}
-          style={{ color: "#333", cursor: "pointer", fontWeight: 500 }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = "#1890ff")}
-          onMouseLeave={(e) => (e.currentTarget.style.color = "#333")}
-        >
-          {name}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span
+            onClick={() => navigate(`/dr/spaces/${record.spaceId}`)}
+            style={{ color: "#333", cursor: "pointer", fontWeight: 500 }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = "#1890ff")}
+            onMouseLeave={(e) => (e.currentTarget.style.color = "#333")}
+          >
+            {name}
+          </span>
+          {record.spaceId === defaultSpaceId && <Tag color="blue">默认</Tag>}
         </span>
       ),
     },
@@ -169,7 +199,7 @@ export default function DrSpaceManagement() {
     {
       title: "操作",
       key: "actions",
-      width: 160,
+      width: 220,
       render: (_: unknown, record: SpaceRecord) => (
         <div style={{ display: "flex", gap: 12 }}>
           <span onClick={() => navigate(`/dr/spaces/${record.spaceId}`)} style={{ color: "#666", cursor: "pointer", fontSize: 13 }}>
@@ -178,6 +208,11 @@ export default function DrSpaceManagement() {
           <span onClick={() => openEdit(record)} style={{ color: "#666", cursor: "pointer", fontSize: 13 }}>
             <EditOutlined /> 编辑
           </span>
+          {record.spaceId !== defaultSpaceId && (
+            <span onClick={() => handleSetDefault(record.spaceId)} style={{ color: "#1890ff", cursor: "pointer", fontSize: 13 }}>
+              <StarOutlined /> 默认
+            </span>
+          )}
           <span onClick={() => handleDelete(record)} style={{ color: "#ff4d4f", cursor: "pointer", fontSize: 13 }}>
             <DeleteOutlined />
           </span>

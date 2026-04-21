@@ -611,7 +611,13 @@
 
 ### GET /api/v1/dr/daily-article
 
-获取每日推荐文章（含编辑高亮及上下文）及思维格栅合集模块。需要用户 JWT。
+获取每日推荐文章（含编辑高亮及上下文）。需要用户 JWT。
+
+**Query 参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `spaceId` | string | 否 | 指定空间 ID。传入时返回该空间的精选文章（需为该空间成员）；不传时优先使用默认空间，无默认空间则取用户首个空间 |
 
 **响应示例：**
 ```json
@@ -641,24 +647,7 @@
         }
       ]
     },
-    "reason": "根据您的阅读偏好推荐",
-    "lattice": {
-      "collectionId": "SC1000001",
-      "collectionName": "思维方式精选",
-      "description": "帮你建立更清晰的思考框架",
-      "coverUrl": "https://example.com/collection-cover.jpg",
-      "recommendation": "这个合集会让你重新审视自己的思维方式",
-      "articles": [
-        {
-          "articleId": "A1000010",
-          "title": "第一性原理思考法",
-          "summary": "从基本假设出发，重构解决方案",
-          "coverUrl": "https://example.com/cover2.jpg",
-          "author": "王五",
-          "publishedAt": "2026-03-10T10:00:00.000Z"
-        }
-      ]
-    }
+    "reason": "根据您的阅读偏好推荐"
   }
 }
 ```
@@ -678,28 +667,89 @@
 | `highlights[].contextBefore` | string | 高亮文字前的原文片段，由管理员手动填写，未填时为空字符串 |
 | `highlights[].contextAfter` | string | 高亮文字后的原文片段，由管理员手动填写，未填时为空字符串 |
 | `reason` | string | 管理员填写的推荐语，未填写时为空字符串 |
-| `lattice` | object \| null | 思维格栅模块，未配置或已禁用时为 `null` |
-| `lattice.collectionId` | string | 合集 ID |
-| `lattice.collectionName` | string | 合集名称 |
-| `lattice.description` | string | 合集描述 |
-| `lattice.coverUrl` | string | 合集封面图 URL |
-| `lattice.recommendation` | string | 管理员填写的一句话推荐，未填时为空字符串 |
-| `lattice.articles` | array | 合集下的全部资源文章列表 |
 
 **`article` 为 `null` 时，`reason` 为固定说明：**
 
 | `reason` | 说明 |
 |----------|------|
 | `您还没有加入任何空间` | 用户未加入任何空间 |
+| `您不是该空间的成员` | 传入了 `spaceId` 但用户不是该空间成员 |
 | `暂无精选文章` | 空间精选池为空 |
 | `文章不存在` | 精选文章已被删除 |
 
 **选取规则：**
 - 管理员在后台设置当前精选文章，新增即替换旧的（旧的进入历史记录）
 - 每个空间同一时间只有一篇启用的精选文章
-- 取用户所在的第一个空间
+- 若客户端传了 `spaceId`，直接使用该空间（需校验成员关系）
+- 若未传 `spaceId`，优先使用系统配置的默认空间（`dr_default_space_id`），否则取用户首个空间
 
 > `contextBefore` 和 `contextAfter` 由管理员在后台手动填写，客户端可直接拼接展示「前文 + **高亮** + 后文」的效果。
+
+### GET /api/v1/dr/thinking-lattice
+
+获取当前用户所在空间的本周思维格栅。需要用户 JWT。
+
+**Query 参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `spaceId` | string | 否 | 指定空间 ID。传入时返回该空间的思维格栅（需为该空间成员）；不传时优先使用默认空间，无默认空间则取用户首个空间 |
+
+**成功响应：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "weekLabel": "2026 APRIL WEEK 17",
+    "weekStart": "2026-04-20",
+    "lattice": {
+      "collectionId": "SC1000001",
+      "collectionName": "思维方式精选",
+      "description": "帮你建立更清晰的思考框架",
+      "coverUrl": "https://example.com/collection-cover.jpg",
+      "recommendation": "这个合集会让你重新审视自己的思维方式",
+      "articles": [
+        {
+          "articleId": "A1000010",
+          "title": "第一性原理思考法",
+          "nodeName": "第一性",
+          "excerpt": "从基本假设出发，重构解决方案",
+          "coverUrl": "https://example.com/cover2.jpg",
+          "author": "王五",
+          "sortOrder": 0
+        }
+      ]
+    }
+  }
+}
+```
+
+当本周未配置思维格栅时，返回：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": null
+}
+```
+
+**字段说明：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `weekLabel` | string | 当前周展示文本 |
+| `weekStart` | string | 当前周周一日期（YYYY-MM-DD） |
+| `lattice.collectionId` | string | 合集 ID |
+| `lattice.collectionName` | string | 合集名称 |
+| `lattice.description` | string | 合集描述 |
+| `lattice.coverUrl` | string | 合集封面图 URL |
+| `lattice.recommendation` | string | 管理员填写的一句话推荐，未填时为空字符串 |
+| `lattice.articles` | array | 合集下的全部资源文章列表 |
+| `lattice.articles[].nodeName` | string | 节点短名，来源于思维格栅配置，不影响文章资源本身 |
+| `lattice.articles[].excerpt` | string | 文章摘要，未填时为空字符串 |
+| `lattice.articles[].sortOrder` | number | 节点排序值，按合集文章顺序返回 |
 
 ---
 

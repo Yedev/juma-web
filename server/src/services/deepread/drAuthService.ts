@@ -53,6 +53,22 @@ export async function loginWithSms(phone: string, code: string) {
         data: { userId: user.id, dailyLimit: defaultLimit },
       });
     }
+
+    // 自动加入默认空间
+    try {
+      const rawSpaceId = await getConfig("dr_default_space_id");
+      const defaultSpaceId = rawSpaceId ? JSON.parse(rawSpaceId) : null;
+      if (defaultSpaceId) {
+        const space = await prisma.drSpace.findUnique({ where: { spaceId: defaultSpaceId } });
+        if (space) {
+          await prisma.drSpaceMember.create({
+            data: { spaceId: defaultSpaceId, userId: user.id, role: "member" },
+          });
+        }
+      }
+    } catch {
+      // 静默失败，不影响注册流程
+    }
   }
 
   const token = signDrToken({ userId: user.id, phone: user.phone });

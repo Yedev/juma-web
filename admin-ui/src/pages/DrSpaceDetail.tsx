@@ -147,7 +147,7 @@ interface EditorHighlight {
 
 interface LatticeConfig {
   latticeId: string; spaceId: string; collectionId: string;
-  recommendation: string; enabled: boolean;
+  recommendation: string; enabled: boolean; nodeNames: string[];
   collection: { collectionId: string; name: string; description: string; coverUrl: string } | null;
   articleCount: number;
 }
@@ -177,6 +177,22 @@ const layoutColor = (type: string): string => {
   const map: Record<string, string> = { large_horizontal: "blue", small_horizontal: "cyan", large_vertical: "green", small_vertical: "lime", plain_text: "default" };
   return map[type] ?? "default";
 };
+
+function buildDefaultNodeName(title: string): string {
+  const source = title.split(/[：:|｜\-]/)[0]?.trim() || title.trim();
+  const compact = source.replace(/[，。！？；、,.!?;()\[\]（）【】"'"]/g, "").replace(/\s+/g, "");
+  return compact.slice(0, 6) || title.trim().slice(0, 6);
+}
+
+function buildDefaultNodeNames(titles: string[]): string[] {
+  const used = new Map<string, number>();
+  return titles.map((title) => {
+    const base = buildDefaultNodeName(title) || "节点";
+    const count = used.get(base) ?? 0;
+    used.set(base, count + 1);
+    return count === 0 ? base : `${base}${count + 1}`;
+  });
+}
 
 // ── Mobile preview ──
 function MobilePreviewModal({ open, onClose, title, content, contentType = "html" }: {
@@ -695,6 +711,9 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
   const [collectionOptions, setCollectionOptions] = useState<CollectionOption[]>([]);
   const [latticeCollectionId, setLatticeCollectionId] = useState<string>("");
   const [latticeRecommendation, setLatticeRecommendation] = useState("");
+  const [latticeNodeNames, setLatticeNodeNames] = useState("");
+  const [latticeCollectionArticles, setLatticeCollectionArticles] = useState<CollectionArticleItem[]>([]);
+  const [latticeArticlesLoading, setLatticeArticlesLoading] = useState(false);
   const [latticeSaving, setLatticeSaving] = useState(false);
 
   // ── 每日精选 API ──
@@ -798,17 +817,62 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
   };
 
   // ── 思维格栅 API ──
+  const loadLatticeCollectionArticles = async (collectionId: string) => {
+    setLatticeArticlesLoading(true);
+    try {
+      const res = await adminClient.get(`/api/admin/dr/collections/${collectionId}/articles`);
+      if (res.data.code === 200) {
+        const items = (res.data.data ?? []) as CollectionArticleItem[];
+        setLatticeCollectionArticles(items);
+        setLatticeNodeNames(
+          buildDefaultNodeNames(items.map((item) => item.article?.title || item.articleId)).join("\n")
+        );
+      }
+    } catch {
+      message.error("加载合集文章失败");
+    } finally {
+      setLatticeArticlesLoading(false);
+    }
+  };
+
   const openLatticeModal = async () => {
-    setLatticeCollectionId(""); setLatticeRecommendation(""); setLatticeModalOpen(true);
+    setLatticeCollectionId("");
+    setLatticeRecommendation("");
+    setLatticeNodeNames("");
+    setLatticeCollectionArticles([]);
+    setLatticeModalOpen(true);
     try { const res = await adminClient.get(`/api/admin/dr/spaces/${spaceId}/collections`); if (res.data.code === 200) setCollectionOptions(res.data.data ?? []); }
     catch { message.error("加载合集列表失败"); }
   };
 
+  const handleChangeLatticeCollection = async (collectionId: string) => {
+    setLatticeCollectionId(collectionId);
+    setLatticeNodeNames("");
+    setLatticeCollectionArticles([]);
+    await loadLatticeCollectionArticles(collectionId);
+  };
+
   const handleSaveLattice = async () => {
     if (!latticeCollectionId) { message.error("请选择合集"); return; }
+    const nodeNames = latticeNodeNames
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (latticeCollectionArticles.length > 0 && nodeNames.length !== latticeCollectionArticles.length) {
+      message.error(`节点名数量需与合集文章数一致（当前 ${latticeCollectionArticles.length} 篇）`);
+      return;
+    }
+    if (nodeNames.length !== new Set(nodeNames).size) {
+      message.error("同一个格栅中的节点名不能重复");
+      return;
+    }
     setLatticeSaving(true);
     try {
-      const res = await adminClient.post(`/api/admin/dr/spaces/${spaceId}/daily-pick-lattice`, { collectionId: latticeCollectionId, recommendation: latticeRecommendation.trim() });
+      const res = await adminClient.post(`/api/admin/dr/spaces/${spaceId}/daily-pick-lattice`, {
+        collectionId: latticeCollectionId,
+        recommendation: latticeRecommendation.trim(),
+        nodeNames,
+      });
       if (res.data.code === 200) { message.success("已设为当前思维格栅"); setLatticeModalOpen(false); fetchLattices(); } else message.error(res.data.message || "保存失败");
     } catch { message.error("保存失败"); }
     finally { setLatticeSaving(false); }
@@ -906,6 +970,11 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
           {c?.description && <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>{c.description}</div>}
           {currentLattice.recommendation && <div style={{ color: "#722ed1", fontSize: 13, marginTop: 4 }}>推荐语：{currentLattice.recommendation}</div>}
           <div style={{ color: "#999", fontSize: 12, marginTop: 4 }}>共 {currentLattice.articleCount} 篇资源</div>
+          {currentLattice.nodeNames.length > 0 && (
+            <div style={{ color: "#999", fontSize: 12, marginTop: 4 }}>
+              已配置 {currentLattice.nodeNames.length} 个节点名
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1012,7 +1081,23 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
       {/* 新增思维格栅 Modal */}
       <Modal title="新增思维格栅" open={latticeModalOpen} onCancel={() => setLatticeModalOpen(false)} onOk={handleSaveLattice} okText="确定" cancelText="取消" confirmLoading={latticeSaving}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "12px 0" }}>
-          <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>关联合集 *</div><Select value={latticeCollectionId || undefined} onChange={(v) => setLatticeCollectionId(v)} style={{ width: "100%" }} placeholder="请选择合集" showSearch optionFilterProp="label" options={collectionOptions.map((c) => ({ value: c.collectionId, label: c.name }))} /></div>
+          <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>关联合集 *</div><Select value={latticeCollectionId || undefined} onChange={handleChangeLatticeCollection} style={{ width: "100%" }} placeholder="请选择合集" showSearch optionFilterProp="label" options={collectionOptions.map((c) => ({ value: c.collectionId, label: c.name }))} /></div>
+          <div>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>节点名列表 *</div>
+            <Input.TextArea
+              value={latticeNodeNames}
+              onChange={(e) => setLatticeNodeNames(e.target.value)}
+              placeholder="选中合集后会按文章顺序自动生成默认节点名；每行一个"
+              rows={6}
+            />
+            <div style={{ marginTop: 6, fontSize: 12, color: "#999" }}>
+              {latticeArticlesLoading
+                ? "正在读取合集文章..."
+                : latticeCollectionArticles.length > 0
+                  ? `当前合集共 ${latticeCollectionArticles.length} 篇文章，节点名会按当前顺序依次绑定`
+                  : "请先选择合集"}
+            </div>
+          </div>
           <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>一句话推荐（可选）</div><Input value={latticeRecommendation} onChange={(e) => setLatticeRecommendation(e.target.value)} placeholder="填写推荐" /></div>
           {currentLattice && (
             <div style={{ padding: 8, background: "#fffbe6", borderRadius: 4, fontSize: 12, color: "#ad8b00" }}>
