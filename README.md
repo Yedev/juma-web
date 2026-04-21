@@ -95,9 +95,14 @@ juma-web 是一个全栈管理系统，包含两个核心模块：
 | TypeScript | 5.7.3 | 类型系统 |
 | Prisma | 6.19.2 | ORM |
 | SQLite | - | 数据库 |
+| ioredis | 5.10.1 | Redis 客户端（可选） |
 | jsonwebtoken | 9.0.2 | JWT 认证 |
 | bcryptjs | 2.4.3 | 密码哈希 |
 | cors | 2.8.5 | 跨域处理 |
+| ali-oss | 6.23.0 | 阿里云 OSS 图片托管 |
+| openai | 6.33.0 | AI 对话（OpenAI 兼容接口） |
+| node-cron | 4.2.1 | 后台定时任务 |
+| multer | 2.1.1 | 文件上传 |
 
 ### 前端 (admin-ui/)
 
@@ -111,6 +116,7 @@ juma-web 是一个全栈管理系统，包含两个核心模块：
 | axios | 1.13.5 | HTTP 客户端 |
 | Monaco Editor | 4.7.0 | 代码编辑器 |
 | crypto-js | 4.2.0 | MD5 签名 |
+| react-markdown | 10.1.0 | Markdown 渲染 |
 
 ### 执行器客户端 (mac-mini-client/)
 
@@ -174,28 +180,58 @@ npm start
 juma-web/
 ├── server/                        # 后端服务
 │   ├── src/
-│   │   ├── index.ts               # 服务入口
+│   │   ├── app.ts                 # Express 应用创建与路由挂载
+│   │   ├── index.ts               # 服务入口（启动 HTTP + WS + 定时任务）
 │   │   ├── middleware/
 │   │   │   ├── auth.ts            # 管理员 JWT 认证
 │   │   │   ├── drAuth.ts          # DeepRead JWT 认证
-│   │   │   └── sign.ts            # x-sign 签名验证（MD5）
+│   │   │   ├── sign.ts            # x-sign 签名验证（MD5）
+│   │   │   └── rateLimit.ts       # 限流（AI 10次/分，SMS 1次/分）
 │   │   ├── routes/
 │   │   │   ├── auth.ts            # 登录接口
 │   │   │   ├── app.ts             # 移动端 API
 │   │   │   ├── admin.ts           # 管理后台 API
-│   │   │   └── deepread.ts        # DeepRead 客户端 API
+│   │   │   ├── analytics.ts       # 分析事件上报
+│   │   │   ├── deepread.ts        # DeepRead 路由聚合入口
+│   │   │   └── dr/                # DeepRead 子路由
+│   │   │       ├── auth.ts        #   短信登录
+│   │   │       ├── articles.ts    #   文章列表/详情
+│   │   │       ├── highlights.ts  #   高亮批注
+│   │   │       ├── collections.ts #   用户合集
+│   │   │       ├── homepage.ts    #   空间首页 & 每日文章
+│   │   │       ├── sync.ts        #   数据导出/导入
+│   │   │       └── ai.ts          #   AI 对话
 │   │   ├── services/
 │   │   │   ├── taskRegistry.ts    # 任务定义与注册中心
 │   │   │   ├── taskEnqueue.ts     # 任务入队
 │   │   │   ├── taskNaming.ts      # 任务命名规则
 │   │   │   ├── serverTaskRuntime.ts  # 服务端任务执行
-│   │   │   └── executionEngine.ts    # 本地任务轮询引擎
+│   │   │   ├── executionEngine.ts    # 本地任务轮询引擎
+│   │   │   ├── inviteCodeCleaner.ts  # 邀请码定时清理
+│   │   │   ├── analyticsEventCleaner.ts # 分析事件定时清理
+│   │   │   ├── dbBackupToOss.ts   # 数据库备份到 OSS
+│   │   │   └── deepread/          # DeepRead 业务服务
+│   │   │       ├── drAuthService.ts
+│   │   │       ├── drArticleService.ts
+│   │   │       ├── drHighlightService.ts
+│   │   │       ├── drCollectionService.ts
+│   │   │       ├── drHomepageService.ts
+│   │   │       ├── drAiService.ts
+│   │   │       └── drSyncService.ts
 │   │   ├── ws/
 │   │   │   └── executorWsGateway.ts  # WebSocket 执行器网关
+│   │   ├── lib/
+│   │   │   ├── redis.ts           # Redis 单例（graceful fallback）
+│   │   │   ├── oss.ts             # 阿里云 OSS 客户端
+│   │   │   ├── prisma.ts          # Prisma 单例
+│   │   │   ├── configCache.ts     # 配置缓存
+│   │   │   ├── homepageCache.ts   # 首页缓存失效
+│   │   │   ├── errors.ts          # 统一错误处理
+│   │   │   └── generateId.ts      # ID 生成器
 │   │   └── prisma/
 │   │       └── seed.ts            # 数据库种子脚本
 │   ├── prisma/
-│   │   └── schema.prisma          # 数据库 Schema（SQLite）
+│   │   └── schema.prisma          # 数据库 Schema（SQLite，28 个模型）
 │   ├── package.json
 │   └── tsconfig.json
 │
@@ -211,9 +247,17 @@ juma-web/
 │   │   │   ├── ConfigManagement.tsx
 │   │   │   ├── ApiPlayground.tsx
 │   │   │   ├── DrSpaceManagement.tsx
+│   │   │   ├── DrSpaceDetail.tsx
 │   │   │   ├── DrChannelManagement.tsx
 │   │   │   ├── DrArticleManagement.tsx
-│   │   │   └── DrUserManagement.tsx
+│   │   │   ├── DrUserManagement.tsx
+│   │   │   ├── DrCollectionManagement.tsx
+│   │   │   ├── DrDailyPicksManagement.tsx
+│   │   │   ├── DrAiConfig.tsx
+│   │   │   ├── DrAiConfigTabs.tsx
+│   │   │   ├── DrAiQuotaManagement.tsx
+│   │   │   ├── AnalyticsEventManagement.tsx
+│   │   │   └── ImageHosting.tsx
 │   │   ├── api/
 │   │   │   └── client.ts          # Axios 实例（自动注入 Bearer Token）
 │   │   └── utils/
@@ -226,10 +270,12 @@ juma-web/
 │   └── package.json
 │
 ├── docs/                          # 详细文档
-│   ├── architecture.md            # 系统架构详解
-│   ├── api-reference.md           # 完整 API 参考
-│   ├── development.md             # 开发指南
-│   └── deployment.md              # 部署指南
+│   ├── api-deepread-app.md        # DeepRead & App API 参考
+│   ├── api-general.md             # 通用 API 参考
+│   ├── db-schema-upgrade-guide.md # 数据库升级指南
+│   ├── production-upgrade-guide.md # 生产环境升级指南
+│   ├── server/                    # 服务端架构文档
+│   └── archive/                   # 归档文档
 │
 ├── Dockerfile                     # 多阶段构建（前端 + 后端）
 ├── deploy.sh                      # 部署脚本
@@ -250,9 +296,15 @@ juma-web/
 | 配置管理 | `/config` | JSON 配置管理，Monaco 编辑器（语法高亮/格式化/校验） |
 | API 接口文档 | `/api-playground` | 交互式 API 文档，内置测试面板，自动签名注入 |
 | 空间管理 | `/dr/spaces` | DeepRead 空间 CRUD、邀请码生成与复制、成员查看 |
+| 空间详情 | `/dr/spaces/:id` | 空间首页模块编辑、每日精选配置 |
 | 频道管理 | `/dr/channels` | DeepRead 频道 CRUD、按空间筛选 |
 | 文章管理 | `/dr/articles` | DeepRead 文章 CRUD、Monaco HTML 编辑器 |
-| 用户管理 | `/dr/users` | DeepRead 用户列表（只读），展开查看加入的空间 |
+| 用户管理 | `/dr/users` | DeepRead 用户列表，展开查看加入的空间和同步备份 |
+| 合集管理 | `/dr/collections` | 空间合集 CRUD |
+| 每日精选 | `/dr/daily-picks` | 每日精选文章格子和文章管理 |
+| AI 配置 | `/dr/ai-config` | AI 提供商/模型/配额配置（Tab 切换） |
+| 分析事件 | `/analytics/events` | 分析事件列表查看 |
+| 图片托管 | `/media` | 图片上传到 Aliyun OSS |
 
 ### 移动端 API（`/api/v1/app/`）
 
@@ -269,15 +321,21 @@ juma-web/
 - **任务管理**：任务列表（分页）、按名称执行、创建、更新状态、删除、查看任务定义
 - **执行器客户端**：在线/离线列表、删除
 - **配置管理**：多 key JSON 配置的增删改查
-- **DeepRead 管理**：空间/频道/文章/用户的完整 CRUD
+- **DeepRead 管理**：空间/频道/文章/用户/合集/每日精选/AI 配置/配额的完整 CRUD
+- **图片上传**：上传图片到 Aliyun OSS
+- **分析事件**：查看客户端上报的分析事件
 
 ### DeepRead 客户端 API（`/api/v1/dr/`）
 
 - **认证**：验证码登录，30 天 JWT
+- **用户**：个人信息、修改昵称
 - **空间**：通过邀请码加入
-- **文章**：列表、详情、收藏、阅读进度追踪
-- **批注**：创建/编辑/删除高亮批注，支持颜色与笔记
+- **文章**：列表、详情
+- **批注**：创建/查看高亮批注，支持颜色与笔记
 - **合集**：创建合集，批量管理文章
+- **首页**：空间首页模块、每日推荐文章
+- **AI 对话**：普通回复和 SSE 流式回复，共用模型与配额
+- **数据同步**：导出/导入用户数据
 
 ---
 
@@ -302,6 +360,12 @@ juma-web/
 | `LOCAL_EXECUTOR_CONCURRENCY` | `1` | 本地并发执行任务数 |
 | `REMOTE_TASK_STALE_TIMEOUT_MS` | `300000` | 远程任务超时（5分钟） |
 | `TASK_LOG_MAX_BYTES` | `65536` | 单任务日志最大字节数（64KB） |
+| `REDIS_URL` | `redis://localhost:6379` | Redis 地址（可选，不可用时自动降级） |
+| `OSS_REGION` | - | 阿里云 OSS 区域（如 `oss-cn-hangzhou`） |
+| `OSS_ACCESS_KEY_ID` | - | 阿里云 AccessKey ID |
+| `OSS_ACCESS_KEY_SECRET` | - | 阿里云 AccessKey Secret |
+| `OSS_BUCKET` | - | OSS Bucket 名称 |
+| `OSS_ENDPOINT` | - | OSS 自定义 Endpoint（可选） |
 
 ### 前端（`admin-ui/.env.local`）
 
@@ -329,7 +393,7 @@ juma-web/
 
 ## API 文档
 
-> 详细 API 参考请见 [docs/api-reference.md](docs/api-reference.md)
+> 详细 API 参考请见 [docs/api-deepread-app.md](docs/api-deepread-app.md) 和 [docs/api-general.md](docs/api-general.md)
 
 ### 认证方式
 
@@ -447,7 +511,7 @@ curl -G http://localhost:3001/api/v1/app/task/status \
 
 ## 任务执行系统
 
-> 详细说明请见 [docs/architecture.md](docs/architecture.md)
+> 详细说明请见 [docs/server/architecture.md](docs/server/architecture.md)
 
 ### 任务类型
 
@@ -580,17 +644,23 @@ queued → running → completed
 
 ```
 Space（空间）
-  └── Channel（频道）
-        └── Article（文章）
-              ├── Bookmark（收藏）
-              ├── ReadStatus（阅读进度）
-              ├── Highlight（批注）
-              └── AI Chat（AI 对话）
+  ├── Channel（频道）
+  │     └── Article（文章）
+  │           ├── Highlight（批注）
+  │           └── AI Chat（AI 对话）
+  ├── SpaceHomepageModule（首页模块）
+  │     └── HomepageModuleResource（模块资源）
+  ├── SpaceCollection（空间合集）
+  │     └── SpaceCollectionArticle
+  └── DailyPickLattice（每日精选格子）
+        └── DailyPickArticle
 
 User（用户）
-  ├── Collections（合集）
-  │     └── CollectionArticle（合集文章）
-  └── SpaceMember（空间成员）
+  ├── Collection（用户合集）
+  │     └── CollectionArticle
+  ├── SpaceMember（空间成员关系）
+  ├── AiQuota / AiUsage（AI 配额与用量）
+  └── SyncBackup（同步备份）
 ```
 
 ### 功能特性
@@ -599,10 +669,14 @@ User（用户）
 |------|------|
 | 无密码登录 | 短信验证码，自动注册新用户 |
 | 邀请码加入 | 空间支持邀请码，可设过期时间和使用次数上限 |
-| 阅读进度 | 支持 0-100% 的精确进度追踪 |
-| 高亮批注 | 文本高亮+颜色+位置信息+笔记，完整 CRUD |
-| 合集 | 用户自定义文章合集，增删文章 |
-| AI 对话 | 支持普通回复和 SSE 流式回复，两者共用模型与配额配置 |
+| 高亮批注 | 文本高亮+颜色+位置信息+笔记 |
+| 合集 | 用户自定义合集 + 空间合集，增删文章 |
+| AI 对话 | 支持普通回复和 SSE 流式回复，共用模型与配额配置 |
+| 空间首页 | 可配置首页模块（推荐文章、合集等） |
+| 每日精选 | 按日期配置推荐文章格子 |
+| 数据同步 | 用户数据导出/导入，支持备份记录 |
+| 图片托管 | 上传图片到 Aliyun OSS |
+| 分析事件 | 客户端行为分析事件上报 |
 
 ### 认证流程
 
@@ -616,7 +690,7 @@ User（用户）
 
 ## 数据库模型
 
-使用 Prisma + SQLite，包含 **16 个数据模型**：
+使用 Prisma + SQLite，包含 **28 个数据模型**：
 
 | 模型 | 说明 |
 |------|------|
@@ -624,6 +698,7 @@ User（用户）
 | `AppConfig` | 应用配置（JSON 键值对） |
 | `Task` | 任务记录（含状态、日志、重试信息） |
 | `ExecutorClient` | 注册的执行器客户端（在线状态、心跳、统计） |
+| `AnalyticsEvent` | 分析事件记录 |
 | `DrUser` | DeepRead 用户（手机号、昵称、头像） |
 | `DrSmsCode` | 短信验证码（含过期时间、使用状态） |
 | `DrSpace` | DeepRead 空间 |
@@ -631,17 +706,28 @@ User（用户）
 | `DrInviteCode` | 邀请码（支持最大使用次数、过期时间） |
 | `DrChannel` | 频道（所属空间、排序） |
 | `DrArticle` | 文章（HTML 正文、阅读数） |
-| `DrBookmark` | 文章收藏 |
-| `DrReadStatus` | 阅读进度（百分比） |
 | `DrHighlight` | 高亮批注（文本、颜色、位置、笔记） |
+| `DrReadingStats` | 阅读统计 |
+| `DrEditorHighlight` | 编辑器高亮 |
 | `DrCollection` | 用户合集 |
 | `DrCollectionArticle` | 合集-文章关联 |
+| `DrSpaceCollection` | 空间合集 |
+| `DrSpaceCollectionArticle` | 空间合集-文章关联 |
+| `DrSpaceHomepageModule` | 空间首页模块 |
+| `DrSpaceHomepageModuleResource` | 首页模块资源 |
+| `DrDailyPickLattice` | 每日精选格子 |
+| `DrDailyPickArticle` | 每日精选文章 |
+| `DrAiProvider` | AI 提供商配置 |
+| `DrAiModel` | AI 模型配置 |
+| `DrAiQuota` | AI 使用配额 |
+| `DrAiUsage` | AI 使用记录 |
+| `DrSyncBackup` | 同步备份 |
 
 ---
 
 ## 部署指南
 
-> 详细部署说明请见 [docs/deployment.md](docs/deployment.md)
+> 详细部署说明请见 [docs/production-upgrade-guide.md](docs/production-upgrade-guide.md) 和 [docs/archive/deployment.md](docs/archive/deployment.md)
 
 ### Docker 部署（推荐）
 
@@ -674,10 +760,10 @@ docker run -d \
 
 | 文档 | 说明 |
 |------|------|
-| [docs/architecture.md](docs/architecture.md) | 系统架构详解、模块关系、数据流 |
-| [docs/api-reference.md](docs/api-reference.md) | 完整 API 参考（所有接口、参数、响应格式） |
-| [docs/development.md](docs/development.md) | 开发指南（本地调试、添加任务、测试） |
-| [docs/deployment.md](docs/deployment.md) | 生产部署（Docker、Nginx、HTTPS 配置） |
+| [docs/api-deepread-app.md](docs/api-deepread-app.md) | DeepRead & App API 参考 |
+| [docs/api-general.md](docs/api-general.md) | 通用 API 参考 |
+| [docs/server/](docs/server/) | 服务端架构和模块文档 |
+| [docs/db-schema-upgrade-guide.md](docs/db-schema-upgrade-guide.md) | 数据库升级指南 |
+| [docs/production-upgrade-guide.md](docs/production-upgrade-guide.md) | 生产环境升级指南 |
 | [PRD.md](PRD.md) | 产品需求文档 |
 | [AGENTS.md](AGENTS.md) | AI Agent 开发规范 |
-modify by android

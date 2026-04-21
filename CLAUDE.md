@@ -54,12 +54,20 @@ No test framework is configured. There are no automated tests.
 
 ### Server Route Structure
 
-Routes are mounted in `server/src/index.ts`:
+Routes are mounted in `server/src/app.ts`:
 
 - `/api/auth` → `routes/auth.ts` - Admin login/register
 - `/api/admin` → `routes/admin.ts` - Admin management (JWT-protected)
 - `/api/v1/app` → `routes/app.ts` - Mobile app APIs (x-sign protected)
-- `/api/v1/dr` → `routes/deepread.ts` - DeepRead client APIs (x-sign + optional JWT)
+- `/api/v1/analytics` → `routes/analytics.ts` - Analytics event reporting (x-sign protected)
+- `/api/v1/dr` → `routes/deepread.ts` - DeepRead client APIs (x-sign + optional JWT), aggregates sub-routes from `routes/dr/`:
+  - `dr/auth.ts` - SMS login
+  - `dr/articles.ts` - Article listing/detail
+  - `dr/highlights.ts` - Highlight CRUD
+  - `dr/collections.ts` - User collections
+  - `dr/homepage.ts` - Space homepage & daily article
+  - `dr/sync.ts` - Data export/import
+  - `dr/ai.ts` - AI chat (normal + SSE stream)
 - `/ws/executor` - WebSocket gateway for remote task executors
 
 ### Authentication (three strategies)
@@ -67,6 +75,7 @@ Routes are mounted in `server/src/index.ts`:
 1. **Admin endpoints** (`/api/admin`): JWT Bearer token via `middleware/auth.ts`
 2. **Mobile app endpoints** (`/api/v1/app`): MD5 signature (`x-sign` = MD5(APP_SECRET + x-timestamp)) via `middleware/sign.ts`
 3. **DeepRead endpoints** (`/api/v1/dr`): MD5 signature + optional JWT via `middleware/drAuth.ts`
+4. **Analytics endpoints** (`/api/v1/analytics`): x-sign protected via `middleware/sign.ts`
 
 ### Task Execution System
 
@@ -78,11 +87,16 @@ Task definitions live in `services/taskRegistry.ts`. The lifecycle is: `queued �
 
 ### Database
 
-Prisma ORM with SQLite. Schema at `server/prisma/schema.prisma`, dev database at `server/dev.db`.
+Prisma ORM with SQLite. Schema at `server/prisma/schema.prisma`, dev database at `server/dev.db`. **28 models** total.
 
 Key model groups:
-- Admin: `AdminUser`, `AppConfig`, `Task`, `ExecutorClient`
-- DeepRead: `DrUser`, `DrSpace`, `DrSpaceMember`, `DrChannel`, `DrArticle`, `DrCollection`, `DrBookmark`, `DrReadStatus`, `DrHighlight`, `DrSpaceHomepageModule`
+- Admin: `AdminUser`, `AppConfig`, `Task`, `ExecutorClient`, `AnalyticsEvent`
+- DeepRead Core: `DrUser`, `DrSmsCode`, `DrSpace`, `DrSpaceMember`, `DrInviteCode`, `DrChannel`, `DrArticle`, `DrHighlight`, `DrReadingStats`
+- DeepRead Collections: `DrCollection`, `DrCollectionArticle`, `DrSpaceCollection`, `DrSpaceCollectionArticle`
+- DeepRead Homepage: `DrSpaceHomepageModule`, `DrSpaceHomepageModuleResource`, `DrDailyPickLattice`, `DrDailyPickArticle`
+- DeepRead AI: `DrAiProvider`, `DrAiModel`, `DrAiQuota`, `DrAiUsage`
+- DeepRead Editor: `DrEditorHighlight`
+- DeepRead Sync: `DrSyncBackup`
 
 ### Redis Cache Layer
 
@@ -99,6 +113,20 @@ Redis client at `server/src/lib/redis.ts` (ioredis singleton, graceful fallback)
 | Rate limiting | `ratelimit:{prefix}:{key}` | 60s | `middleware/rateLimit.ts` |
 | Executor heartbeat | `executor:heartbeat:{clientId}` | 70s | `ws/executorWsGateway.ts` |
 
+### Background Tasks (node-cron)
+
+Started in `server/src/index.ts` on server boot:
+
+| Task | Interval | File |
+|------|----------|------|
+| Invite code cleanup | Hourly | `services/inviteCodeCleaner.ts` |
+| Analytics event cleanup | Daily | `services/analyticsEventCleaner.ts` |
+| SQLite DB backup to Aliyun OSS | Daily | `services/dbBackupToOss.ts` |
+
+### Image Hosting
+
+Uploaded images are stored on **Aliyun OSS** (configured via `OSS_*` env vars). OSS client at `server/src/lib/oss.ts`. Admin upload endpoint in `routes/admin.ts`. Falls back to error if OSS is not configured.
+
 Cache invalidation: admin routes delete relevant keys on write. All keys auto-expire via TTL.
 
 ### Frontend Structure
@@ -106,7 +134,10 @@ Cache invalidation: admin routes delete relevant keys on write. All keys auto-ex
 - Entry: `admin-ui/src/App.tsx` (React Router v7 routes)
 - Layout: `layouts/AdminLayout.tsx` (sidebar + content)
 - API client: `api/client.ts` (Axios with JWT interceptor, auto-logout on 401)
-- Pages in `pages/` follow the pattern `Dr*Management.tsx` for DeepRead modules
+- Pages in `pages/`:
+  - Routed pages (registered in `App.tsx`): `Login`, `TaskManagement`, `ConfigManagement`, `DrSpaceManagement`, `DrSpaceDetail`, `DrUserManagement`, `DrAiConfigTabs`, `AnalyticsEventManagement`, `ImageHosting` (route: `/media`)
+  - Sub-components (imported by routed pages): `DrAiConfig`, `DrAiQuotaManagement` (tabs inside `DrAiConfigTabs`)
+  - Unreferenced page files (exist but never imported): `ApiPlayground`, `DrChannelManagement`, `DrArticleManagement`, `DrCollectionManagement`, `DrDailyPicksManagement`
 
 ## Key Gotchas
 
