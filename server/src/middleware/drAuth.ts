@@ -1,8 +1,11 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import logger from "../lib/logger";
+
+const log = logger.child({ module: "drAuth" });
 
 if (!process.env.DR_JWT_SECRET) {
-  console.warn("Warning: DR_JWT_SECRET not set, using default (dev only)");
+  log.warn("DR_JWT_SECRET not set, using default (dev only)");
 }
 const DR_JWT_SECRET = process.env.DR_JWT_SECRET || "deepread_jwt_secret_2026";
 const DR_JWT_EXPIRES_IN = "30d";
@@ -27,7 +30,9 @@ export function drAuthMiddleware(req: DrAuthRequest, res: Response, next: NextFu
     req.drUserId = decoded.userId;
     req.drPhone = decoded.phone;
     next();
-  } catch {
+  } catch (err) {
+    const reqLog = (req as DrAuthRequest & { log?: typeof logger }).log ?? log;
+    reqLog.debug({ err: (err as Error).message, url: req.url }, "JWT verify failed");
     res.status(401).json({ code: 401, message: "Token已过期或无效" });
   }
 }

@@ -35,10 +35,11 @@ COPY server/src/prisma/seed.ts ./seed.ts
 
 ENV NODE_ENV=production
 ENV PORT=3001
+ENV LOG_DIR=/app/logs
 
 EXPOSE 3001
 
-VOLUME ["/app/data"]
+VOLUME ["/app/data", "/app/logs"]
 
 CMD sh -c "\
   cp -n /app/prisma/schema.prisma /app/data/schema.prisma 2>/dev/null; \

@@ -3,9 +3,11 @@ import path from "path";
 import cron from "node-cron";
 import { PrismaClient } from "@prisma/client";
 import { isOssAvailable, uploadToOss } from "../lib/oss";
+import logger from "../lib/logger";
 
 const prisma = new PrismaClient();
 const OSS_BACKUP_PREFIX = "db-backups/";
+const log = logger.child({ module: "DBBackup" });
 
 function resolveDbPath(): string | null {
   const url = process.env.DATABASE_URL;
@@ -16,13 +18,13 @@ function resolveDbPath(): string | null {
 
 async function runBackup() {
   if (!isOssAvailable()) {
-    console.log("[DBBackup] OSS 不可用，跳过数据库备份。");
+    log.info("OSS unavailable, skip backup");
     return;
   }
 
   const dbPath = resolveDbPath();
   if (!dbPath || !fs.existsSync(dbPath)) {
-    console.error("[DBBackup] 数据库文件不存在:", dbPath);
+    log.error({ dbPath }, "db file not found");
     return;
   }
 
@@ -31,27 +33,27 @@ async function runBackup() {
   const ossKey = `${OSS_BACKUP_PREFIX}${timestamp}.db`;
 
   try {
-    console.log(`[DBBackup] 开始备份数据库到 OSS: ${ossKey}`);
+    log.info({ ossKey }, "backup start");
 
     await prisma.$queryRaw`PRAGMA wal_checkpoint(TRUNCATE)`;
 
     const buffer = fs.readFileSync(dbPath);
     await uploadToOss(ossKey, buffer, { contentType: "application/octet-stream" });
 
-    const sizeMB = (buffer.length / 1024 / 1024).toFixed(2);
-    console.log(`[DBBackup] 备份完成: ${ossKey} (${sizeMB} MB)`);
-  } catch (error) {
-    console.error("[DBBackup] 备份失败:", error);
+    const sizeMB = +(buffer.length / 1024 / 1024).toFixed(2);
+    log.info({ ossKey, sizeMB }, "backup done");
+  } catch (err) {
+    log.error({ err, ossKey }, "backup failed");
   }
 }
 
 export function startDbBackupTask() {
   if (!isOssAvailable()) {
-    console.log("[DBBackup] OSS 未配置，数据库备份任务未启动。");
+    log.info("OSS not configured, backup task not scheduled");
     return;
   }
 
-  console.log("[DBBackup] 每天凌晨 4:00 备份数据库到 OSS 的定时任务已挂载。");
+  log.info("scheduled daily backup at 04:00");
   cron.schedule("0 4 * * *", () => {
     void runBackup();
   });

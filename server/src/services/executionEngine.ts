@@ -1,6 +1,9 @@
 import { PrismaClient, Task } from "@prisma/client";
 import { executeServerTaskByName, hasServerTask } from "./serverTaskRuntime";
 import getRedis from "../lib/redis";
+import logger from "../lib/logger";
+
+const engineLog = logger.child({ module: "executionEngine" });
 
 const LOCAL_EXECUTOR_ID = "server-local";
 const LOCAL_POLL_INTERVAL_MS = parseInt(process.env.LOCAL_EXECUTOR_POLL_MS || "2000", 10);
@@ -205,7 +208,7 @@ async function scheduleLocalTasks(prisma: PrismaClient): Promise<void> {
       localRunningCount += 1;
       void executeLocalTask(prisma, task)
         .catch((error: unknown) => {
-          console.error("Local task execute error:", error);
+          engineLog.error({ err: error, taskId: task.taskId, taskName: task.taskName }, "local task execute error");
         })
         .finally(() => {
           localRunningCount -= 1;

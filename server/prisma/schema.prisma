@@ -333,6 +333,7 @@ model DrDailyPickLattice {
   latticeId      String   @unique @map("lattice_id")
   spaceId        String   @map("space_id")
   collectionId   String   @map("collection_id")
+  weeklyTopic    String   @default("") @map("weekly_topic")
   nodeNames      String   @default("[]") @map("node_names")
   recommendation String   @default("")
   enabled        Boolean  @default(true)

@@ -708,6 +708,7 @@
       "collectionName": "思维方式精选",
       "description": "帮你建立更清晰的思考框架",
       "coverUrl": "https://example.com/collection-cover.jpg",
+      "weeklyTopic": "在 AI 时代如何保持深度思考",
       "recommendation": "这个合集会让你重新审视自己的思维方式",
       "articles": [
         {
@@ -745,6 +746,7 @@
 | `lattice.collectionName` | string | 合集名称 |
 | `lattice.description` | string | 合集描述 |
 | `lattice.coverUrl` | string | 合集封面图 URL |
+| `lattice.weeklyTopic` | string | 本周议题（管理员录入时必填） |
 | `lattice.recommendation` | string | 管理员填写的一句话推荐，未填时为空字符串 |
 | `lattice.articles` | array | 合集下的全部资源文章列表 |
 | `lattice.articles[].nodeName` | string | 节点短名，来源于思维格栅配置，不影响文章资源本身 |

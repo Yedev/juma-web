@@ -35,7 +35,7 @@ export default function ImageHosting() {
   useEffect(() => { fetchImages(); }, [fetchImages]);
 
   const handleDelete = async (filename: string) => {
-    await adminClient.delete(`/api/admin/upload/images/${filename}`);
+    await adminClient.delete(`/api/admin/upload/images`, { params: { filename } });
     message.success("已删除");
     fetchImages();
   };
@@ -101,7 +101,7 @@ export default function ImageHosting() {
                 </div>
                 <div style={{ padding: "8px 10px" }}>
                   <div style={{ fontSize: 11, color: "#999", marginBottom: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {img.filename}
+                    {img.filename.split("/").pop()}
                   </div>
                   <div style={{ fontSize: 11, color: "#bbb", marginBottom: 8 }}>{formatSize(img.size)}</div>
                   <Input

@@ -56,6 +56,7 @@ jobs:
 
             # 准备目录
             mkdir -p /opt/juma-web/data
+            mkdir -p /opt/juma-web/logs
             mkdir -p /opt/juma-web/ssl
             mkdir -p /opt/juma-web/nginx
 
@@ -109,6 +110,7 @@ jobs:
               -e OSS_BUCKET=${{ secrets.OSS_BUCKET }} \
               -e OSS_REGION=${{ secrets.OSS_REGION }} \
               -v /opt/juma-web/data:/app/data \
+              -v /opt/juma-web/logs:/app/logs \
               $REGISTRY/$NAMESPACE/$IMAGE:latest
 
             # ── 重启 nginx 容器 ──

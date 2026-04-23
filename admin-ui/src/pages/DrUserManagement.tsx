@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { message, Table, Spin, Button } from "antd";
+import { message, Table, Spin, Button, Modal } from "antd";
+import { ExclamationCircleFilled } from "@ant-design/icons";
 import { adminClient } from "../api/client";
 
 interface UserRecord {
@@ -54,6 +55,58 @@ export default function DrUserManagement() {
   useEffect(() => {
     fetchUsers(page);
   }, [page, fetchUsers]);
+
+  const handleDelete = (record: UserRecord) => {
+    Modal.confirm({
+      title: "确认删除该用户？",
+      icon: <ExclamationCircleFilled style={{ color: "#ff4d4f" }} />,
+      width: 480,
+      okText: "确认删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      content: (
+        <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+          <div style={{ marginBottom: 8 }}>
+            将永久删除用户 <strong>{record.nickname || "（无昵称）"}</strong>（手机号 <span style={{ fontFamily: "monospace" }}>{record.phone}</span>）及其全部数据：
+          </div>
+          <ul style={{ margin: 0, paddingLeft: 20, color: "#666" }}>
+            <li>空间成员关系（{record.spaceCount} 个）</li>
+            <li>批注（{record.highlightCount} 条）</li>
+            <li>个人收藏夹及收藏文章</li>
+            <li>AI 配额与使用记录</li>
+            <li>同步备份数据</li>
+            <li>阅读统计</li>
+          </ul>
+          <div style={{ marginTop: 10, color: "#ff4d4f", fontWeight: 500 }}>
+            此操作不可恢复，请谨慎操作！
+          </div>
+        </div>
+      ),
+      onOk: async () => {
+        try {
+          const res = await adminClient.delete(`/api/admin/dr/users/${record.id}`);
+          if (res.data.code === 200) {
+            message.success("用户已删除");
+            setExpandedSpaces((prev) => {
+              const next = { ...prev };
+              delete next[record.id];
+              return next;
+            });
+            setSyncBackups((prev) => {
+              const next = { ...prev };
+              delete next[record.id];
+              return next;
+            });
+            fetchUsers(page);
+          } else {
+            message.error(res.data.message || "删除失败");
+          }
+        } catch {
+          message.error("删除用户失败");
+        }
+      },
+    });
+  };
 
   const handleExpand = async (expanded: boolean, record: UserRecord) => {
     if (!expanded) return;
@@ -135,6 +188,17 @@ export default function DrUserManagement() {
       width: 170,
       render: (v: string) => new Date(v).toLocaleString("zh-CN"),
     },
+    {
+      title: "操作",
+      key: "actions",
+      width: 80,
+      fixed: "right" as const,
+      render: (_: unknown, record: UserRecord) => (
+        <Button type="link" size="small" danger onClick={() => handleDelete(record)}>
+          删除
+        </Button>
+      ),
+    },
   ];
 
   const spaceColumns = [
@@ -147,7 +211,7 @@ export default function DrUserManagement() {
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <span style={{ fontSize: 13, color: "#999" }}>共 {total} 位用户（只读，用户通过手机端注册）</span>
+        <span style={{ fontSize: 13, color: "#999" }}>共 {total} 位用户（用户通过手机端注册，管理后台可删除）</span>
       </div>
 
       {loading ? (

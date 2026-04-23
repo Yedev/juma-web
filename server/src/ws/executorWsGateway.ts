@@ -4,6 +4,9 @@ import { Duplex } from "stream";
 import { Prisma, PrismaClient, Task } from "@prisma/client";
 import { inferTaskTypeFromName } from "../services/taskNaming";
 import getRedis from "../lib/redis";
+import logger from "../lib/logger";
+
+const wsLog = logger.child({ module: "executorWS" });
 
 const EXECUTOR_SHARED_KEY = process.env.EXECUTOR_SHARED_KEY || "juma_executor_2026";
 const MAX_LOG_BYTES = parseInt(process.env.TASK_LOG_MAX_BYTES || "65536", 10);
@@ -403,7 +406,7 @@ export function createExecutorWsGateway(server: HttpServer, prisma: PrismaClient
         });
       }
     } catch (error) {
-      console.error("Executor WS dispatch error:", error);
+      wsLog.error({ err: error }, "dispatch error");
     } finally {
       dispatching = false;
     }
@@ -641,13 +644,14 @@ export function createExecutorWsGateway(server: HttpServer, prisma: PrismaClient
         }
         conn.sendJson("server.error", { code: 400, message: `unsupported type: ${type}` });
       })().catch((error: unknown) => {
-        console.error("Executor WS message error:", error);
+        wsLog.error({ err: error, clientId: conn.clientId }, "message handler error");
         conn.sendJson("server.error", { code: 500, message: "服务器内部错误" });
       });
     });
 
     conn.onClose(() => {
       if (!conn.clientId) return;
+      wsLog.info({ clientId: conn.clientId }, "executor disconnected");
       const active = sessions.get(conn.clientId);
       if (active && active.conn === conn) sessions.delete(conn.clientId);
       const redis = getRedis();
@@ -655,7 +659,7 @@ export function createExecutorWsGateway(server: HttpServer, prisma: PrismaClient
       void prisma.executorClient
         .update({ where: { clientId: conn.clientId }, data: { status: "offline" } })
         .catch((error: unknown) => {
-          console.error("Executor WS close update error:", error);
+          wsLog.error({ err: error, clientId: conn.clientId }, "close update failed");
         });
     });
   });

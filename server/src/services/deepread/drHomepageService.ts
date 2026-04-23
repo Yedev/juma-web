@@ -326,6 +326,7 @@ async function fetchLatticeData(spaceId: string) {
     collectionName: collection.name,
     description: collection.description,
     coverUrl: collection.coverUrl,
+    weeklyTopic: lattice.weeklyTopic ?? "",
     recommendation: lattice.recommendation,
     articles: collectionArticles
       .filter((ca) => articleMap.has(ca.articleId))

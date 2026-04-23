@@ -150,6 +150,7 @@ describe("DeepRead Homepage", () => {
         latticeId: "lt_001",
         spaceId: "sp_001",
         collectionId: "col_001",
+        weeklyTopic: "本周议题：深度思考",
         recommendation: "本周推荐",
         nodeNames: JSON.stringify(["节点一", "节点二"]),
         enabled: true,
@@ -182,6 +183,7 @@ describe("DeepRead Homepage", () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.lattice.collectionId).toBe("col_001");
+      expect(res.body.data.lattice.weeklyTopic).toBe("本周议题：深度思考");
       expect(res.body.data.lattice.articles).toHaveLength(2);
       expect(res.body.data.lattice.articles[0].nodeName).toBe("节点一");
       expect(res.body.data.lattice.articles[1].nodeName).toBe("节点二");

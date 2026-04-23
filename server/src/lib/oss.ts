@@ -1,5 +1,7 @@
 import OSS from "ali-oss";
+import logger from "./logger";
 
+const log = logger.child({ module: "oss" });
 const ACCESS_KEY_ID = process.env.OSS_ACCESS_KEY_ID;
 const ACCESS_KEY_SECRET = process.env.OSS_ACCESS_KEY_SECRET;
 const BUCKET = process.env.OSS_BUCKET;
@@ -29,11 +31,11 @@ export function getOssClient(bucket?: string): OSS | null {
     if (!client) {
       client = createClient(bucketName);
       clientMap.set(bucketName, client);
-      console.log(`[oss] client initialized, bucket=${bucketName}, region=${REGION}`);
+      log.info({ bucket: bucketName, region: REGION }, "client initialized");
     }
     return client;
   } catch (err) {
-    console.error("[oss] client initialization failed:", (err as Error).message);
+    log.error({ err: (err as Error).message }, "client initialization failed");
     initFailed = true;
     return null;
   }

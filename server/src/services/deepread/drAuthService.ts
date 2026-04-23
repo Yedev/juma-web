@@ -1,6 +1,9 @@
 import prisma from "../../lib/prisma";
 import getRedis from "../../lib/redis";
 import { signDrToken } from "../../middleware/drAuth";
+import logger from "../../lib/logger";
+
+const log = logger.child({ module: "drAuthService" });
 
 export async function sendSmsCode(phone: string) {
   // Dev mode: fixed code 888888
@@ -40,10 +43,12 @@ export async function loginWithSms(phone: string, code: string) {
   }
 
   let user = await prisma.drUser.findUnique({ where: { phone } });
+  const isNewUser = !user;
   if (!user) {
     user = await prisma.drUser.create({
       data: { phone, nickname: `用户${phone.slice(-4)}` },
     });
+    log.info({ userId: user.id, phone }, "dr.user.registered");
 
     // 为新用户插入默认 AI 配额
     const { getConfig } = await import("../../lib/configCache");
@@ -58,18 +63,25 @@ export async function loginWithSms(phone: string, code: string) {
     try {
       const rawSpaceId = await getConfig("dr_default_space_id");
       const defaultSpaceId = rawSpaceId ? JSON.parse(rawSpaceId) : null;
-      if (defaultSpaceId) {
+      if (!defaultSpaceId) {
+        log.warn({ userId: user.id }, "dr_default_space_id not configured, skip auto-join");
+      } else {
         const space = await prisma.drSpace.findUnique({ where: { spaceId: defaultSpaceId } });
-        if (space) {
+        if (!space) {
+          log.warn({ userId: user.id, defaultSpaceId }, "default space not found, skip auto-join");
+        } else {
           await prisma.drSpaceMember.create({
             data: { spaceId: defaultSpaceId, userId: user.id, role: "member" },
           });
+          log.info({ userId: user.id, spaceId: defaultSpaceId }, "dr.user.joined-default-space");
         }
       }
-    } catch {
-      // 静默失败，不影响注册流程
+    } catch (err) {
+      log.error({ err, userId: user.id }, "auto-join default space failed");
     }
   }
+
+  log.info({ userId: user.id, phone, isNewUser }, "dr.user.login");
 
   const token = signDrToken({ userId: user.id, phone: user.phone });
   return { token, user };

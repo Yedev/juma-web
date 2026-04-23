@@ -147,7 +147,7 @@ interface EditorHighlight {
 
 interface LatticeConfig {
   latticeId: string; spaceId: string; collectionId: string;
-  recommendation: string; enabled: boolean; nodeNames: string[];
+  weeklyTopic: string; recommendation: string; enabled: boolean; nodeNames: string[];
   collection: { collectionId: string; name: string; description: string; coverUrl: string } | null;
   articleCount: number;
 }
@@ -708,8 +708,10 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
   const [lattices, setLattices] = useState<LatticeConfig[]>([]);
   const [latticeLoading, setLatticeLoading] = useState(false);
   const [latticeModalOpen, setLatticeModalOpen] = useState(false);
+  const [editingLattice, setEditingLattice] = useState<LatticeConfig | null>(null);
   const [collectionOptions, setCollectionOptions] = useState<CollectionOption[]>([]);
   const [latticeCollectionId, setLatticeCollectionId] = useState<string>("");
+  const [latticeWeeklyTopic, setLatticeWeeklyTopic] = useState("");
   const [latticeRecommendation, setLatticeRecommendation] = useState("");
   const [latticeNodeNames, setLatticeNodeNames] = useState("");
   const [latticeCollectionArticles, setLatticeCollectionArticles] = useState<CollectionArticleItem[]>([]);
@@ -817,16 +819,20 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
   };
 
   // ── 思维格栅 API ──
-  const loadLatticeCollectionArticles = async (collectionId: string) => {
+  // overrideNodeNames=true 表示按合集顺序生成默认节点名（新建时或更换合集时使用）；
+  // 编辑模式下首次加载传 false，保留原有节点名
+  const loadLatticeCollectionArticles = async (collectionId: string, overrideNodeNames = true) => {
     setLatticeArticlesLoading(true);
     try {
       const res = await adminClient.get(`/api/admin/dr/collections/${collectionId}/articles`);
       if (res.data.code === 200) {
         const items = (res.data.data ?? []) as CollectionArticleItem[];
         setLatticeCollectionArticles(items);
-        setLatticeNodeNames(
-          buildDefaultNodeNames(items.map((item) => item.article?.title || item.articleId)).join("\n")
-        );
+        if (overrideNodeNames) {
+          setLatticeNodeNames(
+            buildDefaultNodeNames(items.map((item) => item.article?.title || item.articleId)).join("\n")
+          );
+        }
       }
     } catch {
       message.error("加载合集文章失败");
@@ -836,13 +842,32 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
   };
 
   const openLatticeModal = async () => {
+    setEditingLattice(null);
     setLatticeCollectionId("");
+    setLatticeWeeklyTopic("");
     setLatticeRecommendation("");
     setLatticeNodeNames("");
     setLatticeCollectionArticles([]);
     setLatticeModalOpen(true);
     try { const res = await adminClient.get(`/api/admin/dr/spaces/${spaceId}/collections`); if (res.data.code === 200) setCollectionOptions(res.data.data ?? []); }
     catch { message.error("加载合集列表失败"); }
+  };
+
+  const openEditLatticeModal = async (l: LatticeConfig) => {
+    setEditingLattice(l);
+    setLatticeCollectionId(l.collectionId);
+    setLatticeWeeklyTopic(l.weeklyTopic ?? "");
+    setLatticeRecommendation(l.recommendation ?? "");
+    setLatticeNodeNames((l.nodeNames ?? []).join("\n"));
+    setLatticeCollectionArticles([]);
+    setLatticeModalOpen(true);
+    try {
+      const [colsRes] = await Promise.all([
+        adminClient.get(`/api/admin/dr/spaces/${spaceId}/collections`),
+        loadLatticeCollectionArticles(l.collectionId, false),
+      ]);
+      if (colsRes.data.code === 200) setCollectionOptions(colsRes.data.data ?? []);
+    } catch { message.error("加载数据失败"); }
   };
 
   const handleChangeLatticeCollection = async (collectionId: string) => {
@@ -854,6 +879,7 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
 
   const handleSaveLattice = async () => {
     if (!latticeCollectionId) { message.error("请选择合集"); return; }
+    if (!latticeWeeklyTopic.trim()) { message.error("请填写本周议题"); return; }
     const nodeNames = latticeNodeNames
       .split("\n")
       .map((item) => item.trim())
@@ -868,12 +894,25 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
     }
     setLatticeSaving(true);
     try {
-      const res = await adminClient.post(`/api/admin/dr/spaces/${spaceId}/daily-pick-lattice`, {
-        collectionId: latticeCollectionId,
-        recommendation: latticeRecommendation.trim(),
-        nodeNames,
-      });
-      if (res.data.code === 200) { message.success("已设为当前思维格栅"); setLatticeModalOpen(false); fetchLattices(); } else message.error(res.data.message || "保存失败");
+      if (editingLattice) {
+        const res = await adminClient.put(`/api/admin/dr/daily-pick-lattice/${editingLattice.latticeId}`, {
+          collectionId: latticeCollectionId,
+          weeklyTopic: latticeWeeklyTopic.trim(),
+          recommendation: latticeRecommendation.trim(),
+          nodeNames,
+        });
+        if (res.data.code === 200) { message.success("已更新"); setLatticeModalOpen(false); fetchLattices(); }
+        else message.error(res.data.message || "保存失败");
+      } else {
+        const res = await adminClient.post(`/api/admin/dr/spaces/${spaceId}/daily-pick-lattice`, {
+          collectionId: latticeCollectionId,
+          weeklyTopic: latticeWeeklyTopic.trim(),
+          recommendation: latticeRecommendation.trim(),
+          nodeNames,
+        });
+        if (res.data.code === 200) { message.success("已设为当前思维格栅"); setLatticeModalOpen(false); fetchLattices(); }
+        else message.error(res.data.message || "保存失败");
+      }
     } catch { message.error("保存失败"); }
     finally { setLatticeSaving(false); }
   };
@@ -921,14 +960,16 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
   const historyLatticeColumns = [
     { title: "封面", dataIndex: "collection", key: "coverUrl", width: 60, align: "center" as const, render: (c: LatticeConfig["collection"]) => c?.coverUrl ? <Avatar shape="square" size={36} src={c.coverUrl} /> : <span style={{ color: "#ddd", fontSize: 11 }}>无</span> },
     { title: "合集名称", dataIndex: "collection", key: "name", render: (c: LatticeConfig["collection"], r: LatticeConfig) => c?.name ?? r.collectionId },
+    { title: "本周议题", dataIndex: "weeklyTopic", key: "weeklyTopic", width: 200, render: (t: string) => t || <span style={{ color: "#ccc" }}>-</span> },
     { title: "文章数", dataIndex: "articleCount", key: "articleCount", width: 80, align: "center" as const, render: (c: number) => c },
     { title: "推荐语", dataIndex: "recommendation", key: "recommendation", width: 200, render: (t: string) => t || <span style={{ color: "#ccc" }}>-</span> },
     { title: "创建时间", dataIndex: "createdAt", key: "createdAt", width: 150, render: (t: string) => <span style={{ fontSize: 12, color: "#999" }}>{dayjs(t).format("YYYY-MM-DD HH:mm")}</span> },
     {
-      title: "操作", key: "actions", width: 150,
+      title: "操作", key: "actions", width: 200,
       render: (_: unknown, r: LatticeConfig) => (
         <div style={{ display: "flex", gap: 12 }}>
           <span onClick={() => handleActivateLattice(r)} style={{ color: "#1677ff", cursor: "pointer", fontSize: 13 }}><StarOutlined /> 设为当前</span>
+          <span onClick={() => openEditLatticeModal(r)} style={{ color: "#666", cursor: "pointer", fontSize: 13 }}><EditOutlined /> 编辑</span>
           <span onClick={() => handleDeleteLattice(r)} style={{ color: "#ff4d4f", cursor: "pointer", fontSize: 13 }}><DeleteOutlined /></span>
         </div>
       ),
@@ -968,6 +1009,7 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 600, fontSize: 15 }}>{c?.name ?? currentLattice.collectionId}</div>
           {c?.description && <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>{c.description}</div>}
+          {currentLattice.weeklyTopic && <div style={{ color: "#1677ff", fontSize: 13, marginTop: 4, fontWeight: 500 }}>本周议题：{currentLattice.weeklyTopic}</div>}
           {currentLattice.recommendation && <div style={{ color: "#722ed1", fontSize: 13, marginTop: 4 }}>推荐语：{currentLattice.recommendation}</div>}
           <div style={{ color: "#999", fontSize: 12, marginTop: 4 }}>共 {currentLattice.articleCount} 篇资源</div>
           {currentLattice.nodeNames.length > 0 && (
@@ -975,6 +1017,11 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
               已配置 {currentLattice.nodeNames.length} 个节点名
             </div>
           )}
+          <div style={{ marginTop: 8 }}>
+            <span onClick={() => openEditLatticeModal(currentLattice)} style={{ color: "#666", cursor: "pointer", fontSize: 13 }}>
+              <EditOutlined /> 编辑
+            </span>
+          </div>
         </div>
       </div>
     );
@@ -1078,10 +1125,14 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
         </div>
       </Modal>
 
-      {/* 新增思维格栅 Modal */}
-      <Modal title="新增思维格栅" open={latticeModalOpen} onCancel={() => setLatticeModalOpen(false)} onOk={handleSaveLattice} okText="确定" cancelText="取消" confirmLoading={latticeSaving}>
+      {/* 新增/编辑思维格栅 Modal */}
+      <Modal title={editingLattice ? "编辑思维格栅" : "新增思维格栅"} open={latticeModalOpen} onCancel={() => setLatticeModalOpen(false)} onOk={handleSaveLattice} okText={editingLattice ? "保存" : "确定"} cancelText="取消" confirmLoading={latticeSaving}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "12px 0" }}>
           <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>关联合集 *</div><Select value={latticeCollectionId || undefined} onChange={handleChangeLatticeCollection} style={{ width: "100%" }} placeholder="请选择合集" showSearch optionFilterProp="label" options={collectionOptions.map((c) => ({ value: c.collectionId, label: c.name }))} /></div>
+          <div>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>本周议题 *</div>
+            <Input value={latticeWeeklyTopic} onChange={(e) => setLatticeWeeklyTopic(e.target.value)} placeholder="例如：在 AI 时代如何保持深度思考" maxLength={80} showCount />
+          </div>
           <div>
             <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>节点名列表 *</div>
             <Input.TextArea
@@ -1099,9 +1150,14 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
             </div>
           </div>
           <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>一句话推荐（可选）</div><Input value={latticeRecommendation} onChange={(e) => setLatticeRecommendation(e.target.value)} placeholder="填写推荐" /></div>
-          {currentLattice && (
+          {!editingLattice && currentLattice && (
             <div style={{ padding: 8, background: "#fffbe6", borderRadius: 4, fontSize: 12, color: "#ad8b00" }}>
               新增后将替换当前格栅「{currentLattice.collection?.name}」，原格栅将移入历史记录
+            </div>
+          )}
+          {editingLattice && (
+            <div style={{ padding: 8, background: "#e6f4ff", borderRadius: 4, fontSize: 12, color: "#0958d9" }}>
+              正在编辑{editingLattice.enabled ? "当前" : "历史"}格栅，保存后{editingLattice.enabled ? "立即生效" : "仅修改该条历史记录"}
             </div>
           )}
         </div>

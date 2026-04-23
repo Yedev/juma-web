@@ -14,6 +14,9 @@ import { invalidateConfig } from "../lib/configCache";
 import { invalidateHomepageCache } from "../lib/homepageCache";
 import getRedis from "../lib/redis";
 import { isOssAvailable, uploadToOss, listOssObjects, deleteFromOss, IMG_BUCKET } from "../lib/oss";
+import logger from "../lib/logger";
+
+const adminLog = logger.child({ module: "admin" });
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -918,7 +921,9 @@ router.get("/dr/channels", async (req: AuthRequest, res: Response): Promise<void
 
 router.post("/dr/channels", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { name, spaceId, sortOrder } = req.body as { name?: string; spaceId?: string; sortOrder?: number };
+    const { name, spaceId, sortOrder, coverUrl } = req.body as {
+      name?: string; spaceId?: string; sortOrder?: number; coverUrl?: string;
+    };
 
     if (!name?.trim() || !spaceId) {
       res.status(400).json({ code: 400, message: "频道名称和所属空间不能为空" });
@@ -936,6 +941,7 @@ router.post("/dr/channels", async (req: AuthRequest, res: Response): Promise<voi
         channelId: generateDrId("CH"),
         spaceId,
         name: name.trim(),
+        coverUrl: coverUrl?.trim() ?? "",
         sortOrder: sortOrder ?? 0,
       },
     });
@@ -950,7 +956,9 @@ router.post("/dr/channels", async (req: AuthRequest, res: Response): Promise<voi
 router.put("/dr/channels/:channelId", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const channelId = req.params.channelId as string;
-    const { name, sortOrder } = req.body as { name?: string; sortOrder?: number };
+    const { name, sortOrder, coverUrl } = req.body as {
+      name?: string; sortOrder?: number; coverUrl?: string;
+    };
 
     const existing = await prisma.drChannel.findUnique({ where: { channelId } });
     if (!existing) {
@@ -961,6 +969,7 @@ router.put("/dr/channels/:channelId", async (req: AuthRequest, res: Response): P
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name.trim();
     if (sortOrder !== undefined) updateData.sortOrder = sortOrder;
+    if (coverUrl !== undefined) updateData.coverUrl = coverUrl.trim();
 
     const updated = await prisma.drChannel.update({ where: { channelId }, data: updateData });
     res.json({ code: 200, message: "频道已更新", data: updated });
@@ -1264,6 +1273,88 @@ router.get("/dr/users/:userId/sync-backup", async (req: AuthRequest, res: Respon
     });
   } catch (error) {
     console.error("Admin get user sync backup error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 删除用户及其所有关联数据（不可恢复）
+router.delete("/dr/users/:userId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = parseInt(req.params.userId as string);
+    if (isNaN(userId)) {
+      res.status(400).json({ code: 400, message: "无效的用户ID" });
+      return;
+    }
+
+    const user = await prisma.drUser.findUnique({ where: { id: userId } });
+    if (!user) {
+      res.status(404).json({ code: 404, message: "用户不存在" });
+      return;
+    }
+
+    adminLog.warn(
+      { adminId: req.userId, adminName: req.username, targetUserId: userId, targetPhone: user.phone },
+      "admin.dr.user.delete.start",
+    );
+
+    // 收藏夹下的文章关联表通过 collectionId 关联，需要先查出该用户的所有 collectionId
+    const userCollections = await prisma.drCollection.findMany({
+      where: { userId },
+      select: { collectionId: true },
+    });
+    const userCollectionIds = userCollections.map((c) => c.collectionId);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const deletedCollectionArticles = userCollectionIds.length
+        ? await tx.drCollectionArticle.deleteMany({
+            where: { collectionId: { in: userCollectionIds } },
+          })
+        : { count: 0 };
+
+      const [
+        deletedMembers,
+        deletedHighlights,
+        deletedCollections,
+        deletedAiQuota,
+        deletedAiUsage,
+        deletedSyncBackup,
+        deletedReadingStats,
+      ] = await Promise.all([
+        tx.drSpaceMember.deleteMany({ where: { userId } }),
+        tx.drHighlight.deleteMany({ where: { userId } }),
+        tx.drCollection.deleteMany({ where: { userId } }),
+        tx.drAiQuota.deleteMany({ where: { userId } }),
+        tx.drAiUsage.deleteMany({ where: { userId } }),
+        tx.drSyncBackup.deleteMany({ where: { userId } }),
+        tx.drReadingStats.deleteMany({ where: { userId } }),
+      ]);
+
+      await tx.drUser.delete({ where: { id: userId } });
+
+      return {
+        members: deletedMembers.count,
+        highlights: deletedHighlights.count,
+        collections: deletedCollections.count,
+        collectionArticles: deletedCollectionArticles.count,
+        aiQuota: deletedAiQuota.count,
+        aiUsage: deletedAiUsage.count,
+        syncBackup: deletedSyncBackup.count,
+        readingStats: deletedReadingStats.count,
+      };
+    });
+
+    adminLog.warn(
+      { adminId: req.userId, adminName: req.username, targetUserId: userId, targetPhone: user.phone, deleted: result },
+      "admin.dr.user.delete.done",
+    );
+
+    res.json({
+      code: 200,
+      message: "success",
+      data: { userId, phone: user.phone, deleted: result },
+    });
+  } catch (error) {
+    adminLog.error({ err: error, targetUserId: req.params.userId }, "admin.dr.user.delete.failed");
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
@@ -2037,6 +2128,7 @@ router.get("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, re
       })();
       return {
         ...l,
+        weeklyTopic: l.weeklyTopic ?? "",
         nodeNames,
         collection: col ? { collectionId: col.collectionId, name: col.name, description: col.description, coverUrl: col.coverUrl } : null,
         articleCount: countMap.get(l.collectionId) ?? 0,
@@ -2054,10 +2146,11 @@ router.get("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, re
 router.post("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const spaceId = req.params.spaceId as string;
-    const { collectionId, recommendation, nodeNames } = req.body as {
+    const { collectionId, recommendation, nodeNames, weeklyTopic } = req.body as {
       collectionId?: string;
       recommendation?: string;
       nodeNames?: string[];
+      weeklyTopic?: string;
     };
 
     const space = await prisma.drSpace.findUnique({ where: { spaceId } });
@@ -2068,6 +2161,10 @@ router.post("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, r
 
     if (!collectionId || !collectionId.trim()) {
       res.status(400).json({ code: 400, message: "collectionId 不能为空" });
+      return;
+    }
+    if (!weeklyTopic || !weeklyTopic.trim()) {
+      res.status(400).json({ code: 400, message: "本周议题不能为空" });
       return;
     }
 
@@ -2114,6 +2211,7 @@ router.post("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, r
         latticeId: generateDrId("LT"),
         spaceId,
         collectionId,
+        weeklyTopic: weeklyTopic.trim(),
         nodeNames: JSON.stringify(resolvedNodeNames),
         recommendation: recommendation?.trim() ?? "",
         enabled: true,
@@ -2123,6 +2221,92 @@ router.post("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, r
     res.json({ code: 200, message: "已设为当前思维格栅", data: lattice });
   } catch (error) {
     console.error("Admin create daily pick lattice error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 编辑思维格栅（不改变 enabled 状态；可编辑历史格栅）
+router.put("/dr/daily-pick-lattice/:latticeId", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const latticeId = req.params.latticeId as string;
+    const { collectionId, recommendation, nodeNames, weeklyTopic } = req.body as {
+      collectionId?: string;
+      recommendation?: string;
+      nodeNames?: string[];
+      weeklyTopic?: string;
+    };
+
+    const existing = await prisma.drDailyPickLattice.findUnique({ where: { latticeId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "思维格栅配置不存在" });
+      return;
+    }
+
+    const updateData: Record<string, unknown> = {};
+
+    // 校验 weeklyTopic（若传入则必须非空）
+    if (weeklyTopic !== undefined) {
+      if (!weeklyTopic.trim()) {
+        res.status(400).json({ code: 400, message: "本周议题不能为空" });
+        return;
+      }
+      updateData.weeklyTopic = weeklyTopic.trim();
+    }
+
+    if (recommendation !== undefined) {
+      updateData.recommendation = recommendation.trim();
+    }
+
+    // collectionId 可选；若变更需校验所属空间一致
+    const targetCollectionId = collectionId?.trim() || existing.collectionId;
+    if (collectionId !== undefined && targetCollectionId !== existing.collectionId) {
+      const collection = await prisma.drSpaceCollection.findUnique({ where: { collectionId: targetCollectionId } });
+      if (!collection || collection.spaceId !== existing.spaceId) {
+        res.status(404).json({ code: 404, message: "合集不存在或不属于该空间" });
+        return;
+      }
+      updateData.collectionId = targetCollectionId;
+    }
+
+    // 节点名校验：若 nodeNames 或 collectionId 任一变化，需重新匹配
+    if (nodeNames !== undefined || updateData.collectionId !== undefined) {
+      const collectionArticles = await prisma.drSpaceCollectionArticle.findMany({
+        where: { collectionId: targetCollectionId },
+        orderBy: { sortOrder: "asc" },
+        select: { articleId: true },
+      });
+      const articles = collectionArticles.length > 0
+        ? await prisma.drArticle.findMany({
+            where: { articleId: { in: collectionArticles.map((item) => item.articleId) } },
+            select: { articleId: true, title: true },
+          })
+        : [];
+      const articleMap = new Map(articles.map((item) => [item.articleId, item]));
+      const normalizedNodeNames = normalizeNodeNames(nodeNames);
+      const resolvedNodeNames =
+        normalizedNodeNames.length > 0
+          ? normalizedNodeNames
+          : buildDefaultNodeNames(collectionArticles.map((item) => articleMap.get(item.articleId)?.title || item.articleId));
+      if (collectionArticles.length > 0 && resolvedNodeNames.length !== collectionArticles.length) {
+        res.status(400).json({ code: 400, message: "节点名数量必须与合集文章数量一致" });
+        return;
+      }
+      if (resolvedNodeNames.length !== new Set(resolvedNodeNames).size) {
+        res.status(400).json({ code: 400, message: "同一个格栅中的节点名不能重复" });
+        return;
+      }
+      updateData.nodeNames = JSON.stringify(resolvedNodeNames);
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      res.json({ code: 200, message: "未提供可更新字段", data: existing });
+      return;
+    }
+
+    const updated = await prisma.drDailyPickLattice.update({ where: { latticeId }, data: updateData });
+    res.json({ code: 200, message: "已更新", data: updated });
+  } catch (error) {
+    console.error("Admin update daily pick lattice error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
@@ -2304,10 +2488,13 @@ router.delete("/dr/editor-highlights/:highlightId", async (req: AuthRequest, res
 // ── Image Hosting (OSS) ──────────────────────────────────────
 
 const OSS_IMAGE_PREFIX = "imgs/";
+// 压缩参数：WebP 质量、最大边长（超过才缩放）
+const IMG_WEBP_QUALITY = 82;
+const IMG_MAX_DIMENSION = 2048;
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB（压缩前原图上限）
   fileFilter: (_req, file, cb) => {
     const allowed = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -2321,17 +2508,78 @@ const MIME_MAP: Record<string, string> = {
   ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
 };
 
+/**
+ * 按 yyyy-MM-dd 拼接子目录前缀，例如 imgs/2026-04-22/
+ */
+function buildDatePrefix(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${OSS_IMAGE_PREFIX}${y}-${m}-${d}/`;
+}
+
+/**
+ * 压缩图片：jpg/png/webp 统一转 WebP；svg/gif 原样保留（矢量/动图不损失）
+ * 若压缩后反而更大则回退原图。
+ */
+async function compressImage(
+  buffer: Buffer,
+  ext: string,
+): Promise<{ buffer: Buffer; ext: string; contentType: string }> {
+  if (ext === ".svg" || ext === ".gif") {
+    return { buffer, ext, contentType: MIME_MAP[ext] };
+  }
+  try {
+    const sharp = (await import("sharp")).default;
+    const meta = await sharp(buffer).metadata();
+    const needResize =
+      (meta.width ?? 0) > IMG_MAX_DIMENSION || (meta.height ?? 0) > IMG_MAX_DIMENSION;
+    let pipeline = sharp(buffer, { failOn: "none" }).rotate(); // rotate(): 按 EXIF 自动转正
+    if (needResize) {
+      pipeline = pipeline.resize({
+        width: IMG_MAX_DIMENSION,
+        height: IMG_MAX_DIMENSION,
+        fit: "inside",
+        withoutEnlargement: true,
+      });
+    }
+    const compressed = await pipeline.webp({ quality: IMG_WEBP_QUALITY }).toBuffer();
+    if (compressed.length < buffer.length) {
+      return { buffer: compressed, ext: ".webp", contentType: "image/webp" };
+    }
+    // 压缩没收益（已是高度优化的小图），保留原格式
+    return { buffer, ext, contentType: MIME_MAP[ext] };
+  } catch (err) {
+    console.warn("[upload] image compress failed, fallback to original:", (err as Error).message);
+    return { buffer, ext, contentType: MIME_MAP[ext] };
+  }
+}
+
 router.post("/upload/image", upload.single("file"), async (req: AuthRequest, res: Response): Promise<void> => {
   if (!req.file) { res.status(400).json({ code: 400, message: "未收到文件" }); return; }
   if (!isOssAvailable(IMG_BUCKET)) { res.status(500).json({ code: 500, message: "OSS 未配置" }); return; }
 
-  const ext = path.extname(req.file.originalname).toLowerCase();
-  const hash = crypto.randomBytes(8).toString("hex");
-  const filename = `${Date.now()}_${hash}${ext}`;
-  const key = `${OSS_IMAGE_PREFIX}${filename}`;
+  const originalExt = path.extname(req.file.originalname).toLowerCase();
+  const originalSize = req.file.size;
   try {
-    const url = await uploadToOss(key, req.file.buffer, { contentType: MIME_MAP[ext], bucket: IMG_BUCKET! });
-    res.json({ code: 200, message: "上传成功", data: { url, filename, size: req.file.size } });
+    const { buffer, ext, contentType } = await compressImage(req.file.buffer, originalExt);
+    const hash = crypto.randomBytes(8).toString("hex");
+    const filename = `${Date.now()}_${hash}${ext}`;
+    const key = `${buildDatePrefix()}${filename}`;
+    const url = await uploadToOss(key, buffer, { contentType, bucket: IMG_BUCKET! });
+    // 返回的 filename 包含子路径（含 yyyy/MM/），便于后续删除接口定位
+    const relPath = key.replace(OSS_IMAGE_PREFIX, "");
+    res.json({
+      code: 200,
+      message: "上传成功",
+      data: {
+        url,
+        filename: relPath,
+        size: buffer.length,
+        originalSize,
+        compressed: buffer.length < originalSize,
+      },
+    });
   } catch (err) {
     console.error("OSS upload error:", err);
     res.status(500).json({ code: 500, message: "上传失败" });
@@ -2345,7 +2593,8 @@ router.get("/upload/images", async (_req: AuthRequest, res: Response): Promise<v
     const files = objects
       .filter((o) => /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(o.key))
       .map((o) => {
-        const filename = o.key.replace(OSS_IMAGE_PREFIX, "");
+        // filename 保留子路径（如 2026/04/xxx.webp），便于删除接口直接拼回完整 key
+        const filename = o.key.startsWith(OSS_IMAGE_PREFIX) ? o.key.slice(OSS_IMAGE_PREFIX.length) : o.key;
         return { filename, url: o.url, size: o.size, createdAt: o.lastModified.getTime() };
       })
       .sort((a, b) => b.createdAt - a.createdAt);
@@ -2477,12 +2726,14 @@ router.delete("/dr/ai-models/:id", async (req: AuthRequest, res: Response): Prom
   }
 });
 
-router.delete("/upload/images/:filename", async (req: AuthRequest, res: Response): Promise<void> => {
+router.delete("/upload/images", async (req: AuthRequest, res: Response): Promise<void> => {
   if (!isOssAvailable(IMG_BUCKET)) { res.status(500).json({ code: 500, message: "OSS 未配置" }); return; }
-  const filename = req.params.filename as string;
-  if (filename.includes("/") || filename.includes("..")) {
-    res.status(400).json({ code: 400, message: "非法文件名" });
-    return;
+  // filename 通过 query string 传递，可能包含 yyyy/MM/xxx.webp 这样的子路径
+  const filename = (req.query.filename as string | undefined)?.trim();
+  if (!filename) { res.status(400).json({ code: 400, message: "filename 必填" }); return; }
+  // 安全校验：禁止路径穿越、绝对路径
+  if (filename.includes("..") || filename.startsWith("/")) {
+    res.status(400).json({ code: 400, message: "非法文件名" }); return;
   }
   try {
     await deleteFromOss(`${OSS_IMAGE_PREFIX}${filename}`, IMG_BUCKET);

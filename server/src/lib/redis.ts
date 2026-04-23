@@ -1,6 +1,8 @@
 import Redis from "ioredis";
+import logger from "./logger";
 
 const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+const log = logger.child({ module: "redis" });
 
 let redis: Redis | null = null;
 let available = false;
@@ -10,7 +12,7 @@ function createClient(): Redis {
     maxRetriesPerRequest: 1,
     retryStrategy(times) {
       if (times > 3) {
-        console.warn("[redis] connection failed after 3 retries, falling back to DB");
+        log.warn({ times }, "connection failed after retries, falling back to DB");
         return null; // stop retrying
       }
       return Math.min(times * 200, 2000);
@@ -20,13 +22,13 @@ function createClient(): Redis {
 
   client.on("error", (err) => {
     if (available) {
-      console.warn("[redis] connection error:", (err as Error).message);
+      log.warn({ err: (err as Error).message }, "connection error");
       available = false;
     }
   });
 
   client.on("connect", () => {
-    console.log("[redis] connected to", REDIS_URL);
+    log.info({ url: REDIS_URL }, "connected");
     available = true;
   });
 
@@ -34,8 +36,9 @@ function createClient(): Redis {
     available = false;
   });
 
-  // Attempt initial connection; errors are handled by the error listener above
-  void client.connect().catch(() => {});
+  void client.connect().catch((err) => {
+    log.debug({ err: (err as Error).message }, "initial connect failed");
+  });
 
   return client;
 }
@@ -48,7 +51,8 @@ export function getRedis(): Redis | null {
   if (!redis) {
     try {
       redis = createClient();
-    } catch {
+    } catch (err) {
+      log.error({ err }, "createClient threw");
       return null;
     }
   }

@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { createServer } from "http";
 import app from "./app";
+import logger from "./lib/logger";
 import { startExecutionEngine } from "./services/executionEngine";
 import { createExecutorWsGateway } from "./ws/executorWsGateway";
 import { startInviteCodeCleanupTask } from "./services/inviteCodeCleaner";
@@ -15,11 +16,18 @@ createExecutorWsGateway(server, prisma);
 startExecutionEngine(prisma);
 
 server.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}`);
-  console.log(`Executor WS listening at ws://localhost:${PORT}/ws/executor`);
+  logger.info({ port: PORT }, `server listening at http://localhost:${PORT}`);
+  logger.info({ port: PORT }, `executor WS at ws://localhost:${PORT}/ws/executor`);
   startInviteCodeCleanupTask();
   startAnalyticsEventCleanupTask();
   startDbBackupTask();
+});
+
+process.on("unhandledRejection", (reason) => {
+  logger.error({ err: reason }, "unhandledRejection");
+});
+process.on("uncaughtException", (err) => {
+  logger.fatal({ err }, "uncaughtException");
 });
 
 export default app;
