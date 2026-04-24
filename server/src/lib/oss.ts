@@ -62,17 +62,32 @@ export async function uploadToOss(key: string, data: Buffer, options?: { content
   return `${getOssBaseUrl(bucketName)}/${key}`;
 }
 
-/** List objects under a prefix */
-export async function listOssObjects(prefix: string, bucket?: string): Promise<Array<{ key: string; url: string; size: number; lastModified: Date }>> {
+/** List objects under a prefix, with pagination support */
+export async function listOssObjects(
+  prefix: string,
+  bucket?: string,
+  options?: { maxKeys?: number; marker?: string },
+): Promise<{
+  objects: Array<{ key: string; url: string; size: number; lastModified: Date }>;
+  isTruncated: boolean;
+  nextMarker?: string;
+}> {
   const client = getOssClient(bucket);
   if (!client) throw new Error("OSS not configured");
-  const result = await client.list({ prefix, "max-keys": 1000 });
-  return (result.objects || []).map((obj) => ({
-    key: obj.name,
-    url: `${getOssBaseUrl(bucket)}/${obj.name}`,
-    size: obj.size,
-    lastModified: new Date(obj.lastModified),
-  }));
+  const maxKeys = options?.maxKeys ?? 200;
+  const query: { prefix: string; "max-keys": number; marker?: string } = { prefix, "max-keys": maxKeys };
+  if (options?.marker) query.marker = options.marker;
+  const result = await client.list(query);
+  return {
+    objects: (result.objects || []).map((obj) => ({
+      key: obj.name,
+      url: `${getOssBaseUrl(bucket)}/${obj.name}`,
+      size: obj.size,
+      lastModified: new Date(obj.lastModified),
+    })),
+    isTruncated: result.isTruncated ?? false,
+    nextMarker: result.nextMarker ?? (result.isTruncated ? result.objects?.[result.objects.length - 1]?.name : undefined),
+  };
 }
 
 /** Delete an object by key */

@@ -2586,19 +2586,24 @@ router.post("/upload/image", upload.single("file"), async (req: AuthRequest, res
   }
 });
 
-router.get("/upload/images", async (_req: AuthRequest, res: Response): Promise<void> => {
-  if (!isOssAvailable(IMG_BUCKET)) { res.json({ code: 200, message: "success", data: [] }); return; }
+router.get("/upload/images", async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!isOssAvailable(IMG_BUCKET)) { res.json({ code: 200, message: "success", data: [], hasMore: false }); return; }
   try {
-    const objects = await listOssObjects(OSS_IMAGE_PREFIX, IMG_BUCKET);
-    const files = objects
+    const marker = req.query.marker as string | undefined;
+    const pageSize = Math.min(parseInt(req.query.page_size as string) || 50, 200);
+    const result = await listOssObjects(OSS_IMAGE_PREFIX, IMG_BUCKET, { maxKeys: pageSize + 1, marker });
+    const objects = result.objects;
+    const hasMore = objects.length > pageSize;
+    const sliced = hasMore ? objects.slice(0, pageSize) : objects;
+
+    const files = sliced
       .filter((o) => /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(o.key))
       .map((o) => {
-        // filename 保留子路径（如 2026/04/xxx.webp），便于删除接口直接拼回完整 key
         const filename = o.key.startsWith(OSS_IMAGE_PREFIX) ? o.key.slice(OSS_IMAGE_PREFIX.length) : o.key;
         return { filename, url: o.url, size: o.size, createdAt: o.lastModified.getTime() };
       })
       .sort((a, b) => b.createdAt - a.createdAt);
-    res.json({ code: 200, message: "success", data: files });
+    res.json({ code: 200, message: "success", data: files, hasMore, nextMarker: hasMore ? sliced[sliced.length - 1].key : undefined });
   } catch (err) {
     console.error("OSS list error:", err);
     res.status(500).json({ code: 500, message: "服务器内部错误" });

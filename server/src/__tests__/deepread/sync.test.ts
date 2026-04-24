@@ -73,5 +73,17 @@ describe("DeepRead Sync", () => {
       expect(res.status).toBe(400);
       expect(res.body.message).toMatch("data");
     });
+
+    it("data 为空字符串应成功导入（允许空字符串）", async () => {
+      prismaMock.drSyncBackup.upsert.mockResolvedValue({});
+
+      const res = await request(app)
+        .post("/api/v1/dr/sync/import")
+        .set(authHeaders(token))
+        .send({ data: "" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.message).toMatch("导入成功");
+    });
   });
 });

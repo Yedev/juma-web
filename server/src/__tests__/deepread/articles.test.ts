@@ -92,6 +92,36 @@ describe("DeepRead Articles", () => {
 
       expect(res.status).toBe(404);
     });
+
+    it("按合集筛选时合集属于其他空间应返回 404", async () => {
+      prismaMock.drSpaceMember.findUnique.mockResolvedValue({ id: 1 });
+      prismaMock.drSpaceCollection.findUnique.mockResolvedValue({
+        collectionId: "col_001",
+        spaceId: "sp_other",
+      });
+
+      const res = await request(app)
+        .get("/api/v1/dr/articles")
+        .set(authHeaders(token))
+        .query({ space_id: "sp_001", collection_id: "col_001" });
+
+      expect(res.status).toBe(404);
+    });
+
+    it("空文章列表应返回空 data.list", async () => {
+      prismaMock.drSpaceMember.findUnique.mockResolvedValue({ id: 1 });
+      prismaMock.drArticle.findMany.mockResolvedValue([]);
+      prismaMock.drArticle.count.mockResolvedValue(0);
+
+      const res = await request(app)
+        .get("/api/v1/dr/articles")
+        .set(authHeaders(token))
+        .query({ space_id: "sp_001" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.list).toEqual([]);
+      expect(res.body.data.total).toBe(0);
+    });
   });
 
   // ── GET /articles/:articleId ───────────────────────────

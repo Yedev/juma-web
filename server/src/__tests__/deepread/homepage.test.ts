@@ -72,6 +72,88 @@ describe("DeepRead Homepage", () => {
 
       expect(res.status).toBe(403);
     });
+
+    it("无模块时应返回空列表", async () => {
+      prismaMock.drSpaceMember.findUnique.mockResolvedValue({ id: 1 });
+      prismaMock.drSpaceHomepageModule.findMany.mockResolvedValue([]);
+
+      const res = await request(app)
+        .get("/api/v1/dr/spaces/sp_001/homepage")
+        .set(authHeaders(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([]);
+    });
+
+    it("title_desc 类型模块应包含 description", async () => {
+      prismaMock.drSpaceMember.findUnique.mockResolvedValue({ id: 1 });
+      prismaMock.drSpaceHomepageModule.findMany.mockResolvedValue([
+        {
+          moduleId: "mod_td",
+          spaceId: "sp_001",
+          moduleType: "title_desc",
+          title: "每日推荐",
+          subtitle: "",
+          description: "精选好文",
+          layoutType: "",
+          sourceType: "",
+          sourceId: "",
+          sortOrder: 0,
+        },
+      ]);
+      prismaMock.drSpaceHomepageModuleResource.findMany.mockResolvedValue([]);
+
+      const res = await request(app)
+        .get("/api/v1/dr/spaces/sp_001/homepage")
+        .set(authHeaders(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data[0].moduleType).toBe("title_desc");
+      expect(res.body.data[0].description).toBe("精选好文");
+    });
+
+    it("load_list 类型模块应排在最后", async () => {
+      prismaMock.drSpaceMember.findUnique.mockResolvedValue({ id: 1 });
+      prismaMock.drSpaceHomepageModule.findMany.mockResolvedValue([
+        {
+          moduleId: "mod_ll",
+          spaceId: "sp_001",
+          moduleType: "load_list",
+          title: "加载更多",
+          subtitle: "点击加载",
+          description: "",
+          layoutType: "",
+          sourceType: "channel",
+          sourceId: "ch_001",
+          sortOrder: 0,
+        },
+        {
+          moduleId: "mod_std",
+          spaceId: "sp_001",
+          moduleType: "standard",
+          title: "推荐",
+          subtitle: "",
+          description: "",
+          layoutType: "default",
+          sourceType: "",
+          sourceId: "",
+          sortOrder: 1,
+        },
+      ]);
+      prismaMock.drSpaceHomepageModuleResource.findMany.mockResolvedValue([]);
+      prismaMock.drArticle.findMany.mockResolvedValue([]);
+
+      const res = await request(app)
+        .get("/api/v1/dr/spaces/sp_001/homepage")
+        .set(authHeaders(token));
+
+      expect(res.status).toBe(200);
+      // load_list should appear after standard
+      const types = res.body.data.map((m: { moduleType: string }) => m.moduleType);
+      const llIdx = types.indexOf("load_list");
+      const stdIdx = types.indexOf("standard");
+      expect(llIdx).toBeGreaterThan(stdIdx);
+    });
   });
 
   // ── GET /daily-article ─────────────────────────────────
@@ -189,6 +271,60 @@ describe("DeepRead Homepage", () => {
       expect(res.body.data.lattice.articles[1].nodeName).toBe("节点二");
       expect(res.body.data.lattice.articles[0].sortOrder).toBe(0);
       expect(res.body.data.weekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    });
+
+    it("nodeNames 为空时应使用默认节点名", async () => {
+      prismaMock.drSpaceMember.findMany.mockResolvedValue([{ spaceId: "sp_001" }]);
+      prismaMock.appConfig.findUnique.mockResolvedValue(null);
+      prismaMock.drDailyPickLattice.findFirst.mockResolvedValue({
+        latticeId: "lt_002",
+        spaceId: "sp_001",
+        collectionId: "col_002",
+        weeklyTopic: "",
+        recommendation: "",
+        nodeNames: "[]",
+        enabled: true,
+      });
+      prismaMock.drSpaceCollection.findUnique.mockResolvedValue({
+        collectionId: "col_002",
+        spaceId: "sp_001",
+        name: "合集",
+        description: "",
+        coverUrl: "",
+      });
+      prismaMock.drSpaceCollectionArticle.findMany.mockResolvedValue([
+        { collectionId: "col_002", articleId: "art_001", sortOrder: 0, addedAt: new Date() },
+      ]);
+      prismaMock.drArticle.findMany.mockResolvedValue([TEST_ARTICLE]);
+
+      const res = await request(app)
+        .get("/api/v1/dr/thinking-lattice")
+        .set(authHeaders(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.lattice.articles[0].nodeName).toBeTruthy();
+    });
+
+    it("lattice 关联的合集不存在应返回 null", async () => {
+      prismaMock.drSpaceMember.findMany.mockResolvedValue([{ spaceId: "sp_001" }]);
+      prismaMock.appConfig.findUnique.mockResolvedValue(null);
+      prismaMock.drDailyPickLattice.findFirst.mockResolvedValue({
+        latticeId: "lt_003",
+        spaceId: "sp_001",
+        collectionId: "col_missing",
+        weeklyTopic: "",
+        recommendation: "",
+        nodeNames: "[]",
+        enabled: true,
+      });
+      prismaMock.drSpaceCollection.findUnique.mockResolvedValue(null);
+
+      const res = await request(app)
+        .get("/api/v1/dr/thinking-lattice")
+        .set(authHeaders(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toBeNull();
     });
   });
 });

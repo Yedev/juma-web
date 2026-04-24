@@ -268,5 +268,46 @@ describe("DeepRead Auth", () => {
       expect(res.status).toBe(400);
       expect(res.body.message).toMatch("邀请码不能为空");
     });
+
+    it("禁用的邀请码应返回 404", async () => {
+      prismaMock.drInviteCode.findUnique.mockResolvedValue({
+        codeId: "cid_disabled",
+        spaceId: "sp_001",
+        code: "DISABLED",
+        disabled: true,
+        maxUses: null,
+        useCount: 0,
+        expiresAt: null,
+      });
+
+      const res = await request(app)
+        .post("/api/v1/dr/space/join")
+        .set(authHeaders(token))
+        .send({ invite_code: "DISABLED" });
+
+      expect(res.status).toBe(404);
+      expect(res.body.message).toMatch("邀请码无效");
+    });
+
+    it("关联空间不存在应返回 404", async () => {
+      prismaMock.drInviteCode.findUnique.mockResolvedValue({
+        codeId: "cid_nospace",
+        spaceId: "sp_999",
+        code: "NOSPACE",
+        disabled: false,
+        maxUses: null,
+        useCount: 0,
+        expiresAt: null,
+      });
+      prismaMock.drSpace.findUnique.mockResolvedValue(null);
+
+      const res = await request(app)
+        .post("/api/v1/dr/space/join")
+        .set(authHeaders(token))
+        .send({ invite_code: "NOSPACE" });
+
+      expect(res.status).toBe(404);
+      expect(res.body.message).toMatch("空间不存在");
+    });
   });
 });

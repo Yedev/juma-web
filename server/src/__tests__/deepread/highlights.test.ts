@@ -77,6 +77,39 @@ describe("DeepRead Highlights", () => {
       expect(res.status).toBe(400);
       expect(res.body.message).toMatch("text");
     });
+
+    it("仅传必填字段时应使用默认值", async () => {
+      const mockHighlight = {
+        highlightId: "H_default",
+        articleId: "art_001",
+        userId: TEST_USER.id,
+        text: "只有文本",
+        color: "#FFEB3B",
+        positionData: "{}",
+        note: "",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      prismaMock.drHighlight.create.mockResolvedValue(mockHighlight);
+
+      const res = await request(app)
+        .post("/api/v1/dr/highlights")
+        .set(authHeaders(token))
+        .send({ article_id: "art_001", text: "只有文本" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.color).toBe("#FFEB3B");
+      expect(res.body.data.note).toBe("");
+      expect(prismaMock.drHighlight.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            color: "#FFEB3B",
+            positionData: "{}",
+            note: "",
+          }),
+        }),
+      );
+    });
   });
 
   // ── GET /highlights ────────────────────────────────────
@@ -126,6 +159,18 @@ describe("DeepRead Highlights", () => {
 
       expect(res.status).toBe(400);
       expect(res.body.message).toMatch("article_id");
+    });
+
+    it("文章无批注时应返回空列表", async () => {
+      prismaMock.drHighlight.findMany.mockResolvedValue([]);
+
+      const res = await request(app)
+        .get("/api/v1/dr/highlights")
+        .set(authHeaders(token))
+        .query({ article_id: "art_001" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([]);
     });
   });
 });

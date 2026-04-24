@@ -52,6 +52,16 @@ describe("DeepRead Collections", () => {
       expect(res.status).toBe(400);
       expect(res.body.message).toMatch("合集名称不能为空");
     });
+
+    it("名称为纯空白应返回 400", async () => {
+      const res = await request(app)
+        .post("/api/v1/dr/collections")
+        .set(authHeaders(token))
+        .send({ name: "   " });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch("合集名称不能为空");
+    });
   });
 
   // ── PUT /collections/:collectionId/articles ────────────
@@ -127,6 +137,15 @@ describe("DeepRead Collections", () => {
 
       expect(res.status).toBe(400);
     });
+
+    it("缺少 article_id 应返回 400", async () => {
+      const res = await request(app)
+        .put("/api/v1/dr/collections/C_test/articles")
+        .set(authHeaders(token))
+        .send({ action: "add" });
+
+      expect(res.status).toBe(400);
+    });
   });
 
   // ── GET /collections ───────────────────────────────────
@@ -148,6 +167,31 @@ describe("DeepRead Collections", () => {
       expect(res.body.data).toHaveLength(1);
       expect(res.body.data[0].collectionId).toBe("C_1");
       expect(res.body.data[0].articleCount).toBe(3);
+    });
+
+    it("无合集时应返回空列表", async () => {
+      prismaMock.drCollection.findMany.mockResolvedValue([]);
+
+      const res = await request(app)
+        .get("/api/v1/dr/collections")
+        .set(authHeaders(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([]);
+    });
+
+    it("合集无文章时 articleCount 应为 0", async () => {
+      prismaMock.drCollection.findMany.mockResolvedValue([
+        { collectionId: "C_empty", userId: TEST_USER.id, name: "空合集", createdAt: new Date(), updatedAt: new Date() },
+      ]);
+      prismaMock.drCollectionArticle.groupBy.mockResolvedValue([]);
+
+      const res = await request(app)
+        .get("/api/v1/dr/collections")
+        .set(authHeaders(token));
+
+      expect(res.status).toBe(200);
+      expect(res.body.data[0].articleCount).toBe(0);
     });
   });
 });
