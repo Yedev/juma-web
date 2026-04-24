@@ -118,6 +118,6 @@ export async function createEvents(
     rows.push(normalized);
   }
 
-  const result = await prisma.analyticsEvent.createMany({ data: rows, skipDuplicates: true });
+  const result = await prisma.analyticsEvent.createMany({ data: rows });
   return { count: result.count };
 }
