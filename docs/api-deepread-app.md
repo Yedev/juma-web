@@ -40,6 +40,53 @@
 
 ---
 
+### GET /api/v1/app/configs
+
+批量获取多个应用配置项。仅需签名，不需要用户 JWT。
+
+**查询参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `keys` | string | 是 | 配置键名列表，逗号分隔或多个同名参数，最多 20 个 |
+
+两种传参方式等价：
+```
+?keys=global_json,feature_flags
+?keys=global_json&keys=feature_flags
+```
+
+**响应示例：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "global_json": {
+      "appVersion": "1.0.0",
+      "featureFlags": { "aiChat": true }
+    },
+    "feature_flags": {
+      "darkMode": false
+    }
+  },
+  "missing": ["nonexistent_key"]
+}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `data` | object | key → 配置 JSON 对象的映射，仅包含实际存在的 key |
+| `missing` | string[] | 请求中不存在的 key 列表，不报错由客户端自行处理 |
+
+**错误情况：**
+```json
+{ "code": 400, "message": "keys 不能为空" }
+{ "code": 400, "message": "keys 最多 20 个" }
+```
+
+---
+
 ### POST /api/v1/dr/sms/send
 
 发送短信验证码。

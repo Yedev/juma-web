@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { signMiddleware } from "../middleware/sign";
 import { listRegisteredTasks } from "../services/taskRegistry";
 import { enqueueTaskByRegisteredName } from "../services/taskEnqueue";
+import { getConfig } from "../lib/configCache";
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -29,20 +30,51 @@ router.get("/config", async (req: Request, res: Response): Promise<void> => {
   try {
     const key = (req.query.key as string) || "global_json";
 
-    const config = await prisma.appConfig.findUnique({
-      where: { configKey: key },
-    });
-
-    if (!config) {
+    const raw = await getConfig(key);
+    if (raw === null) {
       res.status(404).json({ code: 404, message: `配置 '${key}' 不存在` });
       return;
     }
 
-    const data = JSON.parse(config.configValue);
-
-    res.json({ code: 200, message: "success", data });
+    res.json({ code: 200, message: "success", data: JSON.parse(raw) });
   } catch (error) {
     console.error("App get config error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+router.get("/configs", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const raw = req.query.keys;
+    const keys: string[] = Array.isArray(raw)
+      ? (raw as string[]).map((k) => k.trim()).filter(Boolean)
+      : typeof raw === "string"
+        ? raw.split(",").map((k) => k.trim()).filter(Boolean)
+        : [];
+
+    if (keys.length === 0) {
+      res.status(400).json({ code: 400, message: "keys 不能为空" });
+      return;
+    }
+    if (keys.length > 20) {
+      res.status(400).json({ code: 400, message: "keys 最多 20 个" });
+      return;
+    }
+
+    const entries = await Promise.all(keys.map(async (key) => [key, await getConfig(key)] as const));
+    const data: Record<string, unknown> = {};
+    const missing: string[] = [];
+    for (const [key, value] of entries) {
+      if (value === null) {
+        missing.push(key);
+      } else {
+        data[key] = JSON.parse(value);
+      }
+    }
+
+    res.json({ code: 200, message: "success", data, missing });
+  } catch (error) {
+    console.error("App get configs error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
