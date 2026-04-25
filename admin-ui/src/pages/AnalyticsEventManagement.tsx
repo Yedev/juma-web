@@ -27,6 +27,10 @@ interface AnalyticsEventRecord {
   user: AnalyticsUser | null;
 }
 
+function toBJTime(value: string): string {
+  return new Date(value).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
+}
+
 function prettyJson(raw: string): string {
   try {
     return JSON.stringify(JSON.parse(raw), null, 2);
@@ -124,7 +128,7 @@ export default function AnalyticsEventManagement() {
       dataIndex: "eventTime",
       key: "eventTime",
       width: 170,
-      render: (value: string) => new Date(value).toLocaleString("zh-CN"),
+      render: (value: string) => toBJTime(value),
     },
     {
       title: "事件名",
@@ -248,7 +252,7 @@ export default function AnalyticsEventManagement() {
                   </div>
                   <div style={{ fontSize: 12, lineHeight: 1.8, color: "#666" }}>
                     <div><strong>eventId:</strong> <span style={{ fontFamily: "monospace" }}>{record.eventId}</span></div>
-                    <div><strong>createdAt:</strong> {new Date(record.createdAt).toLocaleString("zh-CN")}</div>
+                    <div><strong>createdAt:</strong> {toBJTime(record.createdAt)}</div>
                     <div><strong>IP:</strong> {record.ip || "-"}</div>
                     <div><strong>User-Agent:</strong> {record.userAgent || "-"}</div>
                   </div>

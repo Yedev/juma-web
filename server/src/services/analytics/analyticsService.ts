@@ -79,7 +79,7 @@ function normalizeEvent(
     eventId: `AE_${randomUUID()}`,
     userId: context.userId ?? null,
     eventName,
-    eventTime: parseEventTime(event.event_time ?? event.timestamp ?? event.time ?? event.occurred_at),
+    eventTime: parseEventTime(event.timestamp),
     platform,
     page,
     sessionId,
