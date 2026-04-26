@@ -95,9 +95,11 @@ model ExecutorClient {
 
 model DrUser {
   id        Int      @id @default(autoincrement())
-  phone     String   @unique
+  phone     String?  @unique
+  deviceId  String?  @unique @map("device_id")
   nickname  String   @default("")
   avatar    String   @default("")
+  role      String   @default("user")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
   @@map("dr_users")

@@ -61,10 +61,8 @@ Routes are mounted in `server/src/app.ts`:
 - `/api/v1/app` → `routes/app.ts` - Mobile app APIs (x-sign protected)
 - `/api/v1/analytics` → `routes/analytics.ts` - Analytics event reporting (x-sign protected)
 - `/api/v1/dr` → `routes/deepread.ts` - DeepRead client APIs (x-sign + optional JWT), aggregates sub-routes from `routes/dr/`:
-  - `dr/auth.ts` - SMS login
+  - `dr/auth.ts` - SMS login + guest login (deviceId-based)
   - `dr/articles.ts` - Article listing/detail
-  - `dr/highlights.ts` - Highlight CRUD
-  - `dr/collections.ts` - User collections
   - `dr/homepage.ts` - Space homepage & daily article
   - `dr/sync.ts` - Data export/import
   - `dr/ai.ts` - AI chat (normal + SSE stream)
@@ -74,7 +72,7 @@ Routes are mounted in `server/src/app.ts`:
 
 1. **Admin endpoints** (`/api/admin`): JWT Bearer token via `middleware/auth.ts`
 2. **Mobile app endpoints** (`/api/v1/app`): MD5 signature (`x-sign` = MD5(APP_SECRET + x-timestamp)) via `middleware/sign.ts`
-3. **DeepRead endpoints** (`/api/v1/dr`): MD5 signature + optional JWT via `middleware/drAuth.ts`
+3. **DeepRead endpoints** (`/api/v1/dr`): MD5 signature + JWT via `middleware/drAuth.ts`; guest access restricted by `middleware/guestGuard.ts`
 4. **Analytics endpoints** (`/api/v1/analytics`): x-sign protected via `middleware/sign.ts`
 
 ### Task Execution System
@@ -87,12 +85,12 @@ Task definitions live in `services/taskRegistry.ts`. The lifecycle is: `queued �
 
 ### Database
 
-Prisma ORM with SQLite. Schema at `server/prisma/schema.prisma`, dev database at `server/dev.db`. **28 models** total.
+Prisma ORM with SQLite. Schema at `server/prisma/schema.prisma`, dev database at `server/dev.db`. **26 models** total. `DrUser` supports `role` field: `guest` (deviceId-based) or `user` (phone-based).
 
 Key model groups:
 - Admin: `AdminUser`, `AppConfig`, `Task`, `ExecutorClient`, `AnalyticsEvent`
 - DeepRead Core: `DrUser`, `DrSmsCode`, `DrSpace`, `DrSpaceMember`, `DrInviteCode`, `DrChannel`, `DrArticle`, `DrHighlight`, `DrReadingStats`
-- DeepRead Collections: `DrCollection`, `DrCollectionArticle`, `DrSpaceCollection`, `DrSpaceCollectionArticle`
+- DeepRead Collections: `DrSpaceCollection`, `DrSpaceCollectionArticle`
 - DeepRead Homepage: `DrSpaceHomepageModule`, `DrSpaceHomepageModuleResource`, `DrDailyPickLattice`, `DrDailyPickArticle`
 - DeepRead AI: `DrAiProvider`, `DrAiModel`, `DrAiQuota`, `DrAiUsage`
 - DeepRead Editor: `DrEditorHighlight`

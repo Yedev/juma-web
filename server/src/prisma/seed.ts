@@ -82,6 +82,7 @@ async function main() {
   }
 
   await ensureConfig("dr_ai_default_daily_limit", String(DR_AI_DEFAULT_DAILY_LIMIT));
+  await ensureConfig("dr_guest_daily_limit", "3");
   await ensureDefaultSpace();
 }
 

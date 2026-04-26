@@ -13,6 +13,7 @@ const DR_JWT_EXPIRES_IN = "30d";
 export interface DrAuthRequest extends Request {
   drUserId?: number;
   drPhone?: string;
+  drRole?: string;
 }
 
 export function drAuthMiddleware(req: DrAuthRequest, res: Response, next: NextFunction): void {
@@ -26,9 +27,10 @@ export function drAuthMiddleware(req: DrAuthRequest, res: Response, next: NextFu
   const token = authHeader.split(" ")[1];
 
   try {
-    const decoded = jwt.verify(token, DR_JWT_SECRET) as { userId: number; phone: string };
+    const decoded = jwt.verify(token, DR_JWT_SECRET) as { userId: number; phone?: string; role: string };
     req.drUserId = decoded.userId;
     req.drPhone = decoded.phone;
+    req.drRole = decoded.role;
     next();
   } catch (err) {
     const reqLog = (req as DrAuthRequest & { log?: typeof logger }).log ?? log;
@@ -37,7 +39,7 @@ export function drAuthMiddleware(req: DrAuthRequest, res: Response, next: NextFu
   }
 }
 
-export function signDrToken(payload: { userId: number; phone: string }): string {
+export function signDrToken(payload: { userId: number; phone?: string; role: string }): string {
   return jwt.sign(payload, DR_JWT_SECRET, { expiresIn: DR_JWT_EXPIRES_IN });
 }
 

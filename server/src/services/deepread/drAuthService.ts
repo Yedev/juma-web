@@ -19,7 +19,7 @@ export async function sendSmsCode(phone: string) {
   return code;
 }
 
-export async function loginWithSms(phone: string, code: string) {
+export async function loginWithSms(phone: string, code: string, deviceId?: string) {
   const redis = getRedis();
   // for test
   if (code != "888888") {
@@ -43,6 +43,27 @@ export async function loginWithSms(phone: string, code: string) {
   }
 
   let user = await prisma.drUser.findUnique({ where: { phone } });
+
+  // Guest upgrade: phone not found but deviceId provided → upgrade guest to user
+  if (!user && deviceId) {
+    const guestUser = await prisma.drUser.findUnique({ where: { deviceId } });
+    if (guestUser && guestUser.role === "guest") {
+      user = await prisma.drUser.update({
+        where: { id: guestUser.id },
+        data: { phone, role: "user", nickname: `用户${phone.slice(-4)}` },
+      });
+      // Update AI quota to normal limit
+      const { getConfig } = await import("../../lib/configCache");
+      const defaultLimit = Number(await getConfig("dr_ai_default_daily_limit")) || 10;
+      await prisma.drAiQuota.upsert({
+        where: { userId: user.id },
+        update: { dailyLimit: defaultLimit },
+        create: { userId: user.id, dailyLimit: defaultLimit },
+      });
+      log.info({ userId: user.id, phone, deviceId }, "dr.guest.upgraded");
+    }
+  }
+
   const isNewUser = !user;
   if (!user) {
     user = await prisma.drUser.create({
@@ -50,7 +71,6 @@ export async function loginWithSms(phone: string, code: string) {
     });
     log.info({ userId: user.id, phone }, "dr.user.registered");
 
-    // 为新用户插入默认 AI 配额
     const { getConfig } = await import("../../lib/configCache");
     const defaultLimit = Number(await getConfig("dr_ai_default_daily_limit")) || 10;
     if (defaultLimit >= 0) {
@@ -59,35 +79,61 @@ export async function loginWithSms(phone: string, code: string) {
       });
     }
 
-    // 自动加入默认空间
-    try {
-      const rawSpaceId = await getConfig("dr_default_space_id");
-      const defaultSpaceId = rawSpaceId ? JSON.parse(rawSpaceId) : null;
-      if (!defaultSpaceId) {
-        log.warn({ userId: user.id }, "dr_default_space_id not configured, skip auto-join");
-      } else {
-        const space = await prisma.drSpace.findUnique({ where: { spaceId: defaultSpaceId } });
-        if (!space) {
-          log.warn({ userId: user.id, defaultSpaceId }, "default space not found, skip auto-join");
-        } else {
-          await prisma.drSpaceMember.create({
-            data: { spaceId: defaultSpaceId, userId: user.id, role: "member" },
-          });
-          log.info({ userId: user.id, spaceId: defaultSpaceId }, "dr.user.joined-default-space");
-        }
-      }
-    } catch (err) {
-      log.error({ err, userId: user.id }, "auto-join default space failed");
-    }
+    await autoJoinDefaultSpace(user.id);
   }
 
   log.info({ userId: user.id, phone, isNewUser }, "dr.user.login");
 
-  const token = signDrToken({ userId: user.id, phone: user.phone });
+  const token = signDrToken({ userId: user.id, phone: user.phone ?? undefined, role: user.role });
   return { token, user };
 }
 
 type ServiceError = { error: string; status: number };
+
+export async function loginAsGuest(deviceId: string) {
+  let user = await prisma.drUser.findUnique({ where: { deviceId } });
+  const isNewUser = !user;
+
+  if (!user) {
+    user = await prisma.drUser.create({
+      data: { deviceId, role: "guest", phone: null, nickname: "游客" },
+    });
+    log.info({ userId: user.id, deviceId }, "dr.guest.registered");
+
+    const { getConfig } = await import("../../lib/configCache");
+    const guestLimit = Number(await getConfig("dr_guest_daily_limit")) || 3;
+    await prisma.drAiQuota.create({ data: { userId: user.id, dailyLimit: guestLimit } });
+
+    await autoJoinDefaultSpace(user.id);
+  }
+
+  log.info({ userId: user.id, deviceId, isNewUser }, "dr.guest.login");
+  const token = signDrToken({ userId: user.id, role: user.role });
+  return { token, user };
+}
+
+async function autoJoinDefaultSpace(userId: number) {
+  try {
+    const { getConfig } = await import("../../lib/configCache");
+    const rawSpaceId = await getConfig("dr_default_space_id");
+    const defaultSpaceId = rawSpaceId ? JSON.parse(rawSpaceId) : null;
+    if (!defaultSpaceId) {
+      log.warn({ userId }, "dr_default_space_id not configured, skip auto-join");
+      return;
+    }
+    const space = await prisma.drSpace.findUnique({ where: { spaceId: defaultSpaceId } });
+    if (!space) {
+      log.warn({ userId, defaultSpaceId }, "default space not found, skip auto-join");
+      return;
+    }
+    await prisma.drSpaceMember.create({
+      data: { spaceId: defaultSpaceId, userId, role: "member" },
+    });
+    log.info({ userId, spaceId: defaultSpaceId }, "dr.user.joined-default-space");
+  } catch (err) {
+    log.error({ err, userId }, "auto-join default space failed");
+  }
+}
 
 export async function joinSpace(userId: number, inviteCodeStr: string): Promise<ServiceError | { data: { spaceId: string; name: string; description: string }; alreadyMember: boolean }> {
   const inviteCode = await prisma.drInviteCode.findUnique({
@@ -143,6 +189,7 @@ export async function getUserProfile(userId: number) {
   return {
     id: user.id,
     phone: user.phone,
+    role: user.role,
     nickname: user.nickname,
     avatar: user.avatar,
     createdAt: user.createdAt,

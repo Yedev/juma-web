@@ -1,11 +1,10 @@
 import { Router } from "express";
 import { signMiddleware } from "../middleware/sign";
 import { drAuthMiddleware, DrAuthRequest } from "../middleware/drAuth";
+import { guestGuard } from "../middleware/guestGuard";
 
 import authRoutes from "./dr/auth";
 import articleRoutes from "./dr/articles";
-import highlightRoutes from "./dr/highlights";
-import collectionRoutes from "./dr/collections";
 import homepageRoutes from "./dr/homepage";
 import syncRoutes from "./dr/sync";
 import aiRoutes from "./dr/ai";
@@ -22,6 +21,7 @@ router.use(authRoutes);
 
 // All routes below require drAuth
 router.use(drAuthMiddleware);
+router.use(guestGuard);
 
 // 2.4 Get current user profile
 router.get("/me", async (req: DrAuthRequest, res) => {
@@ -82,8 +82,6 @@ router.post("/space/join", async (req: DrAuthRequest, res) => {
 });
 
 router.use(articleRoutes);
-router.use(highlightRoutes);
-router.use(collectionRoutes);
 router.use(homepageRoutes);
 router.use(syncRoutes);
 router.use(aiRoutes);
