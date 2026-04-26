@@ -31,14 +31,14 @@ router.post("/sms/send", smsRateLimit, async (req: DrAuthRequest, res: Response)
 // Guest login
 router.post("/guest/login", async (req: DrAuthRequest, res: Response): Promise<void> => {
   try {
-    const { device_id } = req.body as { device_id?: string };
+    const { device_id, platform } = req.body as { device_id?: string; platform?: string };
 
     if (!device_id || typeof device_id !== "string" || device_id.trim().length < 8) {
       res.status(400).json({ code: 400, message: "device_id 格式不正确" });
       return;
     }
 
-    const result = await authService.loginAsGuest(device_id.trim());
+    const result = await authService.loginAsGuest(device_id.trim(), platform);
 
     res.json({
       code: 200,
@@ -61,7 +61,7 @@ router.post("/guest/login", async (req: DrAuthRequest, res: Response): Promise<v
 // 2.2 Login with SMS code
 router.post("/login", async (req: DrAuthRequest, res: Response): Promise<void> => {
   try {
-    const { phone, code, device_id } = req.body as { phone?: string; code?: string; device_id?: string };
+    const { phone, code, device_id, platform } = req.body as { phone?: string; code?: string; device_id?: string; platform?: string };
 
     if (!phone || !/^1\d{10}$/.test(phone)) {
       res.status(400).json({ code: 400, message: "手机号格式不正确" });
@@ -72,7 +72,7 @@ router.post("/login", async (req: DrAuthRequest, res: Response): Promise<void> =
       return;
     }
 
-    const result = await authService.loginWithSms(phone, code, device_id);
+    const result = await authService.loginWithSms(phone, code, device_id, platform);
     if (!result) {
       res.status(400).json({ code: 400, message: "验证码错误或已过期" });
       return;

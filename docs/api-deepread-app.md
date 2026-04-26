@@ -113,8 +113,18 @@
 ```json
 {
   "phone": "13800138000",
-  "code": "888888"
+  "code": "888888",
+  "platform": "ios"
 }
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `phone` | string | 是 | 手机号 |
+| `code` | string | 是 | 短信验证码 |
+| `platform` | string | 否 | 客户端平台标识，如 `ios`、`android` |
+
+**响应示例：**
 ```
 
 **响应示例：**
@@ -751,6 +761,7 @@
     "weekLabel": "2026 APRIL WEEK 17",
     "weekStart": "2026-04-20",
     "lattice": {
+      "latticeId": "L1000001",
       "collectionId": "SC1000001",
       "collectionName": "思维方式精选",
       "description": "帮你建立更清晰的思考框架",
@@ -789,6 +800,7 @@
 |------|------|------|
 | `weekLabel` | string | 当前周展示文本 |
 | `weekStart` | string | 当前周周一日期（YYYY-MM-DD） |
+| `lattice.latticeId` | string | 格栅 ID |
 | `lattice.collectionId` | string | 合集 ID |
 | `lattice.collectionName` | string | 合集名称 |
 | `lattice.description` | string | 合集描述 |

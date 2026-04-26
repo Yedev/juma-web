@@ -19,7 +19,7 @@ export async function sendSmsCode(phone: string) {
   return code;
 }
 
-export async function loginWithSms(phone: string, code: string, deviceId?: string) {
+export async function loginWithSms(phone: string, code: string, deviceId?: string, platform?: string) {
   const redis = getRedis();
   // for test
   if (code != "888888") {
@@ -67,7 +67,7 @@ export async function loginWithSms(phone: string, code: string, deviceId?: strin
   const isNewUser = !user;
   if (!user) {
     user = await prisma.drUser.create({
-      data: { phone, nickname: `用户${phone.slice(-4)}` },
+      data: { phone, nickname: `用户${phone.slice(-4)}`, platform: platform || "" },
     });
     log.info({ userId: user.id, phone }, "dr.user.registered");
 
@@ -90,13 +90,13 @@ export async function loginWithSms(phone: string, code: string, deviceId?: strin
 
 type ServiceError = { error: string; status: number };
 
-export async function loginAsGuest(deviceId: string) {
+export async function loginAsGuest(deviceId: string, platform?: string) {
   let user = await prisma.drUser.findUnique({ where: { deviceId } });
   const isNewUser = !user;
 
   if (!user) {
     user = await prisma.drUser.create({
-      data: { deviceId, role: "guest", phone: null, nickname: "游客" },
+      data: { deviceId, role: "guest", phone: null, nickname: "游客", platform: platform || "" },
     });
     log.info({ userId: user.id, deviceId }, "dr.guest.registered");
 

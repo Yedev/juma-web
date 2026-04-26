@@ -8,6 +8,9 @@ interface UserRecord {
   phone: string;
   nickname: string;
   avatar: string;
+  role: string;
+  deviceId: string;
+  platform: string;
   spaceCount: number;
   highlightCount: number;
   createdAt: string;
@@ -150,6 +153,35 @@ export default function DrUserManagement() {
       dataIndex: "nickname",
       key: "nickname",
       width: 120,
+    },
+    {
+      title: "角色",
+      dataIndex: "role",
+      key: "role",
+      width: 60,
+      align: "center" as const,
+      render: (v: string) => v === "guest" ? "游客" : "用户",
+    },
+    {
+      title: "平台",
+      dataIndex: "platform",
+      key: "platform",
+      width: 70,
+      align: "center" as const,
+      render: (v: string) => {
+        if (!v) return <span style={{ color: "#ccc", fontSize: 12 }}>-</span>;
+        const label = v.toLowerCase() === "ios" ? "iOS" : v.toLowerCase() === "android" ? "Android" : v;
+        return label;
+      },
+    },
+    {
+      title: "设备码",
+      dataIndex: "deviceId",
+      key: "deviceId",
+      width: 140,
+      render: (v: string) => v
+        ? <span style={{ fontFamily: "monospace", fontSize: 12 }}>{v.length > 16 ? v.slice(0, 8) + "..." + v.slice(-6) : v}</span>
+        : <span style={{ color: "#ccc", fontSize: 12 }}>-</span>,
     },
     {
       title: "头像",

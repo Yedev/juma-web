@@ -464,6 +464,7 @@ async function fetchLatticeData(spaceId: string) {
   );
 
   return {
+    latticeId: lattice.latticeId,
     collectionId: collection.collectionId,
     collectionName: collection.name,
     description: collection.description,
