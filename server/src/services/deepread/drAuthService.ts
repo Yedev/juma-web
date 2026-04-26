@@ -84,6 +84,10 @@ export async function loginWithSms(phone: string, code: string, deviceId?: strin
 
   log.info({ userId: user.id, phone, isNewUser }, "dr.user.login");
 
+  if (platform && platform !== user.platform) {
+    user = await prisma.drUser.update({ where: { id: user.id }, data: { platform } });
+  }
+
   const token = signDrToken({ userId: user.id, phone: user.phone ?? undefined, role: user.role });
   return { token, user };
 }
@@ -105,6 +109,10 @@ export async function loginAsGuest(deviceId: string, platform?: string) {
     await prisma.drAiQuota.create({ data: { userId: user.id, dailyLimit: guestLimit } });
 
     await autoJoinDefaultSpace(user.id);
+  }
+
+  if (platform && platform !== user.platform) {
+    user = await prisma.drUser.update({ where: { id: user.id }, data: { platform } });
   }
 
   log.info({ userId: user.id, deviceId, isNewUser }, "dr.guest.login");
