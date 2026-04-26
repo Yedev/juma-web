@@ -800,6 +800,92 @@
 | `lattice.articles[].excerpt` | string | 文章摘要，未填时为空字符串 |
 | `lattice.articles[].sortOrder` | number | 节点排序值，按合集文章顺序返回 |
 
+### GET /api/v1/dr/thinking-lattice/history
+
+获取思维格栅历史列表（分页）。需要用户 JWT。
+
+**Query 参数：**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `spaceId` | string | 否 | 指定空间 ID。传入时返回该空间的历史格栅（需为该空间成员）；不传时优先使用默认空间，无默认空间则取用户首个空间 |
+| `page` | number | 否 | 页码，默认 1 |
+| `pageSize` | number | 否 | 每页数量，默认 10，最大 50 |
+
+**成功响应：**
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "list": [
+      {
+        "latticeId": "L1000001",
+        "enabled": true,
+        "weeklyTopic": "在 AI 时代如何保持深度思考",
+        "recommendation": "这个合集会让你重新审视自己的思维方式",
+        "createdAt": "2026-04-20T08:00:00.000Z",
+        "collection": {
+          "collectionId": "SC1000001",
+          "name": "思维方式精选",
+          "description": "帮你建立更清晰的思考框架",
+          "coverUrl": "https://example.com/collection-cover.jpg"
+        },
+        "articles": [
+          {
+            "articleId": "A1000010",
+            "title": "第一性原理思考法",
+            "nodeName": "第一性",
+            "excerpt": "从基本假设出发，重构解决方案",
+            "coverUrl": "https://example.com/cover2.jpg",
+            "author": "王五",
+            "sortOrder": 0
+          }
+        ]
+      }
+    ],
+    "total": 15,
+    "page": 1,
+    "pageSize": 10
+  }
+}
+```
+
+**字段说明：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `list` | array | 格栅列表，按创建时间倒序排列（当前启用的排在最前） |
+| `total` | number | 总条数 |
+| `page` | number | 当前页码 |
+| `pageSize` | number | 每页数量 |
+| `list[].latticeId` | string | 格栅 ID |
+| `list[].enabled` | boolean | 是否为当前启用的格栅（同一空间仅一个为 `true`） |
+| `list[].weeklyTopic` | string | 本周议题 |
+| `list[].recommendation` | string | 管理员推荐语，未填时为空字符串 |
+| `list[].createdAt` | string | 创建时间（ISO 8601） |
+| `list[].collection` | object \| null | 关联合集信息 |
+| `list[].articles` | array | 合集下的全部资源文章列表 |
+| `list[].articles[].nodeName` | string | 节点短名 |
+| `list[].articles[].excerpt` | string | 文章摘要，未填时为空字符串 |
+| `list[].articles[].sortOrder` | number | 节点排序值 |
+
+当用户未加入任何空间时：
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "list": [],
+    "total": 0,
+    "page": 1,
+    "pageSize": 10,
+    "reason": "您还没有加入任何空间"
+  }
+}
+```
+
 ---
 
 ## 数据备份同步

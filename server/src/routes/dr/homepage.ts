@@ -45,4 +45,17 @@ router.get("/thinking-lattice", async (req: DrAuthRequest, res: Response): Promi
   }
 });
 
+// 思维格栅历史（分页）
+router.get("/thinking-lattice/history", async (req: DrAuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.query.spaceId as string | undefined;
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const pageSize = Math.min(50, Math.max(1, parseInt(req.query.pageSize as string) || 10));
+    const data = await homepageService.getThinkingLatticeHistory(req.drUserId!, spaceId, page, pageSize);
+    res.json({ code: 200, message: "success", data });
+  } catch (error) {
+    handleError(res, "Get thinking lattice history error", error);
+  }
+});
+
 export default router;
