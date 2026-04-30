@@ -2,13 +2,27 @@ import prisma from "../../lib/prisma";
 import getRedis from "../../lib/redis";
 import { signDrToken } from "../../middleware/drAuth";
 import logger from "../../lib/logger";
+import { smsClient } from "../../lib/aliyunSms";
 
 const log = logger.child({ module: "drAuthService" });
 
-export async function sendSmsCode(phone: string) {
-  // Dev mode: fixed code 888888
-  const code = "888888";
+/**
+ * Returns devCode only in dev mode (no SMS client configured).
+ * In production, returns undefined — the code is hosted by Alibaba Cloud.
+ */
+export async function sendSmsCode(phone: string): Promise<{ devCode?: string }> {
+  if (smsClient) {
+    const result = await smsClient.send(phone);
+    if (!result.success) {
+      log.error({ phone, errorCode: result.errorCode, errorMessage: result.errorMessage }, "sms.send.failed");
+      throw new Error(result.errorMessage ?? "短信发送失败");
+    }
+    log.info({ phone, bizId: result.bizId }, "sms.send.ok");
+    return {};
+  }
 
+  // Dev mode: fixed code stored in Redis / DB
+  const code = "888888";
   const redis = getRedis();
   if (redis) {
     await redis.set(`sms:code:${phone}`, code, "EX", 300);
@@ -16,20 +30,27 @@ export async function sendSmsCode(phone: string) {
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
     await prisma.drSmsCode.create({ data: { phone, code, expiresAt } });
   }
-  return code;
+  return { devCode: code };
 }
 
 export async function loginWithSms(phone: string, code: string, deviceId?: string, platform?: string) {
   const redis = getRedis();
-  // for test
-  if (code != "888888") {
-    if (redis) {
-      // Redis path
+  // Dev bypass: fixed test code skips all verification
+  if (code !== "888888") {
+    if (smsClient) {
+      // Alibaba Cloud hosted verification
+      const result = await smsClient.verify(phone, code);
+      if (!result.passed) {
+        log.warn({ phone, errorCode: result.errorCode }, "sms.verify.failed");
+        return null;
+      }
+    } else if (redis) {
+      // Dev mode: Redis path
       const stored = await redis.get(`sms:code:${phone}`);
       if (!stored || stored !== code) return null;
       await redis.del(`sms:code:${phone}`);
     } else {
-      // DB fallback
+      // Dev mode: DB fallback
       const smsRecord = await prisma.drSmsCode.findFirst({
         where: { phone, code, used: false, expiresAt: { gte: new Date() } },
         orderBy: { createdAt: "desc" },

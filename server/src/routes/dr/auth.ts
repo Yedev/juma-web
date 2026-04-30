@@ -16,12 +16,12 @@ router.post("/sms/send", smsRateLimit, async (req: DrAuthRequest, res: Response)
       return;
     }
 
-    const code = await authService.sendSmsCode(phone);
+    const { devCode } = await authService.sendSmsCode(phone);
 
     res.json({
       code: 200,
       message: "验证码已发送",
-      data: { code }, // Dev only
+      ...(devCode !== undefined ? { data: { code: devCode } } : {}),
     });
   } catch (error) {
     handleError(res, "SMS send error", error);
