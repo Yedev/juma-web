@@ -147,22 +147,18 @@ export class AliyunSmsVerify {
   }
 }
 
-// Singleton built from env vars; null when SMS is not configured.
-const {
-  ALIYUN_SMS_ACCESS_KEY_ID,
-  ALIYUN_SMS_ACCESS_KEY_SECRET,
-  ALIYUN_SMS_SIGN_NAME,
-  ALIYUN_SMS_TEMPLATE_CODE,
-  ALIYUN_SMS_SCHEME_NAME,
-} = process.env;
+const SMS_SIGN_NAME = "速通互联验证码";
+const SMS_TEMPLATE_CODE = "100001";
+
+// Reuse OSS credentials; null when keys are absent (dev mode).
+const { OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET } = process.env;
 
 export const smsClient: AliyunSmsVerify | null =
-  ALIYUN_SMS_ACCESS_KEY_ID && ALIYUN_SMS_ACCESS_KEY_SECRET && ALIYUN_SMS_SIGN_NAME && ALIYUN_SMS_TEMPLATE_CODE
+  OSS_ACCESS_KEY_ID && OSS_ACCESS_KEY_SECRET
     ? new AliyunSmsVerify({
-        accessKeyId: ALIYUN_SMS_ACCESS_KEY_ID,
-        accessKeySecret: ALIYUN_SMS_ACCESS_KEY_SECRET,
-        signName: ALIYUN_SMS_SIGN_NAME,
-        templateCode: ALIYUN_SMS_TEMPLATE_CODE,
-        ...(ALIYUN_SMS_SCHEME_NAME ? { schemeName: ALIYUN_SMS_SCHEME_NAME } : {}),
+        accessKeyId: OSS_ACCESS_KEY_ID,
+        accessKeySecret: OSS_ACCESS_KEY_SECRET,
+        signName: SMS_SIGN_NAME,
+        templateCode: SMS_TEMPLATE_CODE,
       })
     : null;
