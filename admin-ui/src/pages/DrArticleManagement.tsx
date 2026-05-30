@@ -121,6 +121,7 @@ export default function DrArticleManagement() {
   const [formLayoutType, setFormLayoutType] = useState("default");
   const [formContent, setFormContent] = useState("");
   const [formContentType, setFormContentType] = useState("html");
+  const [showContentTypeSwitch, setShowContentTypeSwitch] = useState(false);
   const [formHighlights, setFormHighlights] = useState("");
   const [formChannels, setFormChannels] = useState<ChannelOption[]>([]);
 
@@ -212,6 +213,7 @@ export default function DrArticleManagement() {
     setFormLayoutType("default");
     setFormContent("");
     setFormContentType("html");
+    setShowContentTypeSwitch(false);
     setFormHighlights("");
     if (filterSpaceId) {
       fetchChannelsForSpace(filterSpaceId).then(setFormChannels);
@@ -223,6 +225,7 @@ export default function DrArticleManagement() {
 
   const openEdit = async (record: ArticleRecord) => {
     setDrawerOpen(true);
+    setShowContentTypeSwitch(false);
     setFormTitle(record.title);
     setFormSummary(record.summary);
     setFormAuthor(record.author);
@@ -595,7 +598,7 @@ export default function DrArticleManagement() {
           </div>
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <div style={{ fontSize: 13, color: "#666" }}>正文内容</div>
+              <div style={{ fontSize: 13, color: "#666", userSelect: "none" }} onDoubleClick={() => setShowContentTypeSwitch((v) => !v)}>正文内容</div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <Button
                   size="small"
@@ -613,15 +616,17 @@ export default function DrArticleManagement() {
                 >
                   AI 格式美化
                 </Button>
-                <Select
-                  value={formContentType}
-                  onChange={setFormContentType}
-                  size="small"
-                  options={[
-                    { value: "html", label: "HTML" },
-                    { value: "markdown", label: "Markdown" },
-                  ]}
-                />
+                {showContentTypeSwitch && (
+                  <Select
+                    value={formContentType}
+                    onChange={setFormContentType}
+                    size="small"
+                    options={[
+                      { value: "html", label: "HTML" },
+                      { value: "markdown", label: "Markdown" },
+                    ]}
+                  />
+                )}
               </div>
             </div>
             <div style={{ border: "1px solid #e8e8e8", borderRadius: 4, overflow: "hidden" }}>

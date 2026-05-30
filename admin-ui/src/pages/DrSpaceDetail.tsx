@@ -482,6 +482,7 @@ function ArticlesTab({ spaceId }: { spaceId: string }) {
   const [formLayoutType, setFormLayoutType] = useState("default");
   const [formContent, setFormContent] = useState("");
   const [formContentType, setFormContentType] = useState("html");
+  const [showContentTypeSwitch, setShowContentTypeSwitch] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewContent, setPreviewContent] = useState("");
   const [previewType, setPreviewType] = useState("html");
@@ -516,11 +517,12 @@ function ArticlesTab({ spaceId }: { spaceId: string }) {
   const openCreate = () => {
     setEditing(null); setFormTitle(""); setFormSummary(""); setFormAuthor(""); setFormCoverUrl("");
     setFormChannelId(filterChannelId); setFormLayoutType("default"); setFormContent(""); setFormContentType("html");
+    setShowContentTypeSwitch(false);
     setDrawerOpen(true);
   };
 
   const openEdit = async (r: ArticleRecord) => {
-    setDrawerOpen(true); setFormTitle(r.title); setFormSummary(r.summary); setFormAuthor(r.author);
+    setDrawerOpen(true); setShowContentTypeSwitch(false); setFormTitle(r.title); setFormSummary(r.summary); setFormAuthor(r.author);
     setFormCoverUrl(r.coverUrl); setFormChannelId(r.channelId); setFormLayoutType(r.layoutType);
     try {
       const res = await adminClient.get(`/api/admin/dr/articles/${r.articleId}`);
@@ -625,11 +627,11 @@ function ArticlesTab({ spaceId }: { spaceId: string }) {
           <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>封面 URL</div><Input value={formCoverUrl} onChange={(e) => setFormCoverUrl(e.target.value)} placeholder="https://..." /></div>
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <div style={{ fontSize: 13, color: "#666" }}>正文内容</div>
+              <div style={{ fontSize: 13, color: "#666", userSelect: "none" }} onDoubleClick={() => setShowContentTypeSwitch((v) => !v)}>正文内容</div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <Button size="small" icon={<MobileOutlined />} onClick={() => setMobilePreviewOpen(true)} style={{ borderRadius: 4, color: "#111", borderColor: "#d9d9d9", background: "#fff" }}>手机预览</Button>
                 <Button size="small" icon={<ThunderboltOutlined />} onClick={openAiBeautify} style={{ borderRadius: 4, color: "#111", borderColor: "#d9d9d9", background: "#fff" }}>AI 格式美化</Button>
-                <Select value={formContentType} onChange={setFormContentType} size="small" options={[{ value: "html", label: "HTML" }, { value: "markdown", label: "Markdown" }]} />
+                {showContentTypeSwitch && <Select value={formContentType} onChange={setFormContentType} size="small" options={[{ value: "html", label: "HTML" }, { value: "markdown", label: "Markdown" }]} />}
               </div>
             </div>
             <div style={{ border: "1px solid #e8e8e8", borderRadius: 4, overflow: "hidden" }}>
