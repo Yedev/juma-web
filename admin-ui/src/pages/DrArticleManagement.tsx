@@ -5,66 +5,7 @@ import Editor from "@monaco-editor/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { adminClient } from "../api/client";
-
-// ── 通用手机预览弹窗 ────────────────────────────────────────
-function MobilePreviewModal({
-  open,
-  onClose,
-  title,
-  content,
-  contentType = "html",
-}: {
-  open: boolean;
-  onClose: () => void;
-  title?: string;
-  content: string;
-  contentType?: string;
-}) {
-  return (
-    <Modal
-      title={
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <MobileOutlined />
-          <span>{title || "手机预览"}</span>
-        </div>
-      }
-      open={open}
-      onCancel={onClose}
-      footer={null}
-      width={400}
-      styles={{ body: { display: "flex", justifyContent: "center", padding: "16px 0 24px" } }}
-    >
-      <div
-        style={{
-          width: 320,
-          height: 640,
-          border: "2px solid #e0e0e0",
-          borderRadius: 16,
-          overflow: "hidden",
-          background: "#fff",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
-        }}
-      >
-        <div
-          style={{
-            height: "100%",
-            overflowY: "auto",
-            padding: "16px 14px",
-            fontSize: 14,
-            lineHeight: 1.8,
-            color: "#333",
-          }}
-        >
-          {contentType === "markdown" ? (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-          ) : (
-            <div dangerouslySetInnerHTML={{ __html: content }} />
-          )}
-        </div>
-      </div>
-    </Modal>
-  );
-}
+import MobilePreviewModal from "../components/MobilePreviewModal";
 
 interface SpaceOption {
   spaceId: string;
