@@ -16,12 +16,13 @@ interface Device {
   notch: Notch;
 }
 
+// 宽高均为逻辑像素（point），与真机比例一致：iPhone 15 ≈ 393×852（19.5:9）
 const DEVICES: Device[] = [
-  { key: "ip15", name: "iPhone 15", width: 390, height: 640, radius: 52, notch: "island" },
-  { key: "ipmax", name: "iPhone 15 Pro Max", width: 430, height: 660, radius: 56, notch: "island" },
-  { key: "se", name: "iPhone SE", width: 320, height: 568, radius: 40, notch: "none" },
-  { key: "pixel", name: "Pixel 8", width: 412, height: 640, radius: 40, notch: "punch" },
-  { key: "galaxy", name: "Galaxy S24", width: 360, height: 620, radius: 36, notch: "punch" },
+  { key: "ip15", name: "iPhone 15", width: 393, height: 852, radius: 55, notch: "island" },
+  { key: "ipmax", name: "iPhone 15 Pro Max", width: 430, height: 932, radius: 60, notch: "island" },
+  { key: "se", name: "iPhone SE", width: 375, height: 667, radius: 44, notch: "none" },
+  { key: "pixel", name: "Pixel 8", width: 412, height: 915, radius: 42, notch: "punch" },
+  { key: "galaxy", name: "Galaxy S24", width: 360, height: 780, radius: 38, notch: "punch" },
 ];
 
 // 字号 / 行距档位（与接入规范的 readerSetFontScale / readerSetLineHeight 对应）
@@ -105,8 +106,31 @@ export function MobilePreviewStage({
   const [fontScale, setFontScale] = useState(1);
   const [lineHeight, setLineHeight] = useState(1.75);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
 
   const device = DEVICES.find((d) => d.key === deviceKey) ?? DEVICES[0];
+
+  // 手机外壳真实占位尺寸（含 12px 边框）
+  const shellW = device.width + 24;
+  const shellH = device.height + 24;
+  const STAGE_PAD = 16; // 舞台内边距，留出呼吸空间
+
+  // 缩放手机以「整机一屏显示、不滚动」：按可用宽高取较小缩放比，最大 1（不放大）
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const compute = () => {
+      const availH = el.clientHeight - STAGE_PAD * 2;
+      const availW = el.clientWidth - STAGE_PAD * 2;
+      if (availH <= 0 || availW <= 0) return;
+      setScale(Math.min(1, availH / shellH, availW / shellW));
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [shellW, shellH]);
 
   // 去抖后的内容：实时编辑时避免每次按键都重建 iframe（重载会丢失滚动位置并闪烁）
   const [debounced, setDebounced] = useState(content);
@@ -146,9 +170,9 @@ export function MobilePreviewStage({
   const darkStage = theme === "dark";
 
   return (
-    <>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
       {/* 工具栏：机型 / 主题 / 字号 / 行距 */}
-      <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 14, flexShrink: 0 }}>
         <Space size={[12, 10]} wrap style={{ justifyContent: "center" }}>
           <Select
             size="small"
@@ -181,27 +205,35 @@ export function MobilePreviewStage({
         </Space>
       </div>
 
-      {/* 模拟舞台背景随主题变化，便于观察暗色边缘效果 */}
+      {/* 模拟舞台背景随主题变化；整机按可用高度缩放，保证一屏显示不滚动 */}
       <div
+        ref={stageRef}
         style={{
+          flex: 1,
+          minHeight: 0,
           display: "flex",
           justifyContent: "center",
-          padding: "20px 0",
+          alignItems: "center",
+          padding: STAGE_PAD,
           background: darkStage ? "#0d0d10" : "#f2f0eb",
           borderRadius: 12,
           transition: "background 0.25s",
+          overflow: "hidden",
         }}
       >
-        {/* 手机外壳 */}
+        {/* 手机外壳（原尺寸渲染，再整体缩放，保证 iframe 视口宽度仍为真机像素） */}
         <div
           style={{
             position: "relative",
-            width: device.width + 24,
-            height: device.height + 24,
+            width: shellW,
+            height: shellH,
             background: "#0a0a0a",
             borderRadius: device.radius + 10,
             padding: 12,
             boxShadow: "0 8px 30px rgba(0,0,0,0.28)",
+            transform: `scale(${scale})`,
+            transformOrigin: "center center",
+            flexShrink: 0,
           }}
         >
           {/* 刘海 / 挖孔 */}
@@ -253,7 +285,7 @@ export function MobilePreviewStage({
           />
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -282,7 +314,7 @@ export default function MobilePreviewModal({
       onCancel={onClose}
       footer={null}
       width={600}
-      styles={{ body: { padding: "12px 0 20px" } }}
+      styles={{ body: { padding: "12px 0 20px", height: "80vh" } }}
     >
       <MobilePreviewStage content={content} contentType={contentType} />
     </Modal>

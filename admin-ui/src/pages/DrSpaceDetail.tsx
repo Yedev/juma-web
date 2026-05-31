@@ -592,7 +592,7 @@ function ArticlesTab({ spaceId }: { spaceId: string }) {
       <Drawer title={editing ? "编辑文章" : "新建文章"} open={drawerOpen} onClose={() => setDrawerOpen(false)} width="100%" styles={{ body: { padding: 0 } }} extra={<Button type="primary" onClick={handleSave} loading={saving} style={{ borderRadius: 4 }}>保存</Button>}>
         <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
           {/* 左：实时手机预览 */}
-          <div style={{ width: 540, flexShrink: 0, borderRight: "1px solid #f0f0f0", background: "#fafafa", overflowY: "auto", padding: "16px 12px" }}>
+          <div style={{ width: 540, flexShrink: 0, borderRight: "1px solid #f0f0f0", background: "#fafafa", overflow: "hidden", padding: "16px 12px", display: "flex", flexDirection: "column" }}>
             <MobilePreviewStage content={formContent} contentType={formContentType} debounceMs={400} />
           </div>
           {/* 右：录入表单 */}
