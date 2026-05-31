@@ -35,7 +35,6 @@ import {
   MinusCircleOutlined,
   EyeOutlined,
   ThunderboltOutlined,
-  MobileOutlined,
   UnorderedListOutlined,
   BranchesOutlined,
   FolderOutlined,
@@ -47,7 +46,7 @@ import Editor from "@monaco-editor/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { adminClient } from "../api/client";
-import MobilePreviewModal from "../components/MobilePreviewModal";
+import { MobilePreviewStage } from "../components/MobilePreviewModal";
 import dayjs from "dayjs";
 
 const { Text } = Typography;
@@ -473,7 +472,6 @@ function ArticlesTab({ spaceId }: { spaceId: string }) {
   const [aiInputContent, setAiInputContent] = useState("");
   const [aiOutputHtml, setAiOutputHtml] = useState("");
   const [aiBeautifying, setAiBeautifying] = useState(false);
-  const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false);
 
   const fetchChannels = useCallback(async () => {
     try { const res = await adminClient.get("/api/admin/dr/channels", { params: { space_id: spaceId } }); if (res.data.code === 200) setChannels(res.data.data.map((c: ChannelOption) => ({ channelId: c.channelId, name: c.name }))); }
@@ -591,33 +589,41 @@ function ArticlesTab({ spaceId }: { spaceId: string }) {
         <Table dataSource={articles} columns={columns} rowKey="articleId" size="small" pagination={{ current: page, total, pageSize: 20, onChange: setPage, showTotal: (t) => `共 ${t} 篇`, size: "small" }} />
       )}
 
-      <Drawer title={editing ? "编辑文章" : "新建文章"} open={drawerOpen} onClose={() => setDrawerOpen(false)} width={720} extra={<Button type="primary" onClick={handleSave} loading={saving} style={{ borderRadius: 4 }}>保存</Button>}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>标题 *</div><Input value={formTitle} onChange={(e) => setFormTitle(e.target.value)} placeholder="文章标题" /></div>
-          <div>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>频道 *</div>
-            <Select value={formChannelId} onChange={setFormChannelId} placeholder="选择频道" style={{ width: "100%" }} options={channels.map((c) => ({ value: c.channelId, label: c.name }))} />
+      <Drawer title={editing ? "编辑文章" : "新建文章"} open={drawerOpen} onClose={() => setDrawerOpen(false)} width="100%" styles={{ body: { padding: 0 } }} extra={<Button type="primary" onClick={handleSave} loading={saving} style={{ borderRadius: 4 }}>保存</Button>}>
+        <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
+          {/* 左：实时手机预览 */}
+          <div style={{ width: 540, flexShrink: 0, borderRight: "1px solid #f0f0f0", background: "#fafafa", overflowY: "auto", padding: "16px 12px" }}>
+            <MobilePreviewStage content={formContent} contentType={formContentType} debounceMs={400} />
           </div>
-          <div style={{ display: "flex", gap: 12 }}>
-            <div style={{ flex: 1 }}><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>作者</div><Input value={formAuthor} onChange={(e) => setFormAuthor(e.target.value)} placeholder="作者名称" /></div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>布局类型</div>
-              <Select value={formLayoutType} onChange={setFormLayoutType} style={{ width: "100%" }} options={[{ value: "default", label: "默认" }, { value: "card", label: "卡片" }, { value: "wide", label: "宽幅" }]} />
-            </div>
-          </div>
-          <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>摘要</div><Input.TextArea value={formSummary} onChange={(e) => setFormSummary(e.target.value)} placeholder="文章摘要" rows={2} /></div>
-          <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>封面 URL</div><Input value={formCoverUrl} onChange={(e) => setFormCoverUrl(e.target.value)} placeholder="https://..." /></div>
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-              <div style={{ fontSize: 13, color: "#666", userSelect: "none" }} onDoubleClick={() => setShowContentTypeSwitch((v) => !v)}>正文内容</div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <Button size="small" icon={<MobileOutlined />} onClick={() => setMobilePreviewOpen(true)} style={{ borderRadius: 4, color: "#111", borderColor: "#d9d9d9", background: "#fff" }}>手机预览</Button>
-                <Button size="small" icon={<ThunderboltOutlined />} onClick={openAiBeautify} style={{ borderRadius: 4, color: "#111", borderColor: "#d9d9d9", background: "#fff" }}>AI 格式美化</Button>
-                {showContentTypeSwitch && <Select value={formContentType} onChange={setFormContentType} size="small" options={[{ value: "html", label: "HTML" }, { value: "markdown", label: "Markdown" }]} />}
+          {/* 右：录入表单 */}
+          <div style={{ flex: 1, minWidth: 0, overflowY: "auto", padding: 24 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 880 }}>
+              <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>标题 *</div><Input value={formTitle} onChange={(e) => setFormTitle(e.target.value)} placeholder="文章标题" /></div>
+              <div>
+                <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>频道 *</div>
+                <Select value={formChannelId} onChange={setFormChannelId} placeholder="选择频道" style={{ width: "100%" }} options={channels.map((c) => ({ value: c.channelId, label: c.name }))} />
               </div>
-            </div>
-            <div style={{ border: "1px solid #e8e8e8", borderRadius: 4, overflow: "hidden" }}>
-              <Editor height="400px" language={formContentType === "markdown" ? "markdown" : "html"} value={formContent} onChange={(v) => setFormContent(v || "")} options={{ minimap: { enabled: false }, fontSize: 13, fontFamily: "'SF Mono', 'Fira Code', 'Menlo', monospace", tabSize: 2, scrollBeyondLastLine: false, lineNumbers: "on", renderLineHighlight: "none", overviewRulerBorder: false, scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 }, padding: { top: 8, bottom: 8 }, wordWrap: "on" }} />
+              <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ flex: 1 }}><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>作者</div><Input value={formAuthor} onChange={(e) => setFormAuthor(e.target.value)} placeholder="作者名称" /></div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>布局类型</div>
+                  <Select value={formLayoutType} onChange={setFormLayoutType} style={{ width: "100%" }} options={[{ value: "default", label: "默认" }, { value: "card", label: "卡片" }, { value: "wide", label: "宽幅" }]} />
+                </div>
+              </div>
+              <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>摘要</div><Input.TextArea value={formSummary} onChange={(e) => setFormSummary(e.target.value)} placeholder="文章摘要" rows={2} /></div>
+              <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>封面 URL</div><Input value={formCoverUrl} onChange={(e) => setFormCoverUrl(e.target.value)} placeholder="https://..." /></div>
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                  <div style={{ fontSize: 13, color: "#666", userSelect: "none" }} onDoubleClick={() => setShowContentTypeSwitch((v) => !v)}>正文内容</div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <Button size="small" icon={<ThunderboltOutlined />} onClick={openAiBeautify} style={{ borderRadius: 4, color: "#111", borderColor: "#d9d9d9", background: "#fff" }}>AI 格式美化</Button>
+                    {showContentTypeSwitch && <Select value={formContentType} onChange={setFormContentType} size="small" options={[{ value: "html", label: "HTML" }, { value: "markdown", label: "Markdown" }]} />}
+                  </div>
+                </div>
+                <div style={{ border: "1px solid #e8e8e8", borderRadius: 4, overflow: "hidden" }}>
+                  <Editor height="520px" language={formContentType === "markdown" ? "markdown" : "html"} value={formContent} onChange={(v) => setFormContent(v || "")} options={{ minimap: { enabled: false }, fontSize: 13, fontFamily: "'SF Mono', 'Fira Code', 'Menlo', monospace", tabSize: 2, scrollBeyondLastLine: false, lineNumbers: "on", renderLineHighlight: "none", overviewRulerBorder: false, scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 }, padding: { top: 8, bottom: 8 }, wordWrap: "on" }} />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -650,8 +656,6 @@ function ArticlesTab({ spaceId }: { spaceId: string }) {
           </div>
         </div>
       </Modal>
-
-      <MobilePreviewModal open={mobilePreviewOpen} onClose={() => setMobilePreviewOpen(false)} title={formTitle || "手机预览"} content={formContent} contentType={formContentType} />
     </div>
   );
 }

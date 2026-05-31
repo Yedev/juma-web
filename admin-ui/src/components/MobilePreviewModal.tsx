@@ -89,18 +89,16 @@ function buildSrcDoc(content: string, contentType: string): string {
   return `<!DOCTYPE html><html><head>${FALLBACK_HEAD}</head><body>${body}${FALLBACK_SCRIPT}</body></html>`;
 }
 
-export default function MobilePreviewModal({
-  open,
-  onClose,
-  title,
+// ── 预览舞台：工具栏 + 手机外壳 + iframe（不含 Modal 壳，可独立嵌入页面） ──
+export function MobilePreviewStage({
   content,
   contentType = "html",
+  debounceMs = 0,
 }: {
-  open: boolean;
-  onClose: () => void;
-  title?: string;
   content: string;
   contentType?: string;
+  /** 输入去抖（毫秒）；编辑器实时预览时建议设为 300~500，避免逐字符重建 iframe */
+  debounceMs?: number;
 }) {
   const [deviceKey, setDeviceKey] = useState("ip15");
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -110,8 +108,15 @@ export default function MobilePreviewModal({
 
   const device = DEVICES.find((d) => d.key === deviceKey) ?? DEVICES[0];
 
-  // 仅 content / contentType 变化时重建文档；主题/字号通过 JS 调用即时生效，不重载 iframe
-  const srcDoc = useMemo(() => buildSrcDoc(content, contentType), [content, contentType]);
+  // 去抖后的内容：实时编辑时避免每次按键都重建 iframe（重载会丢失滚动位置并闪烁）
+  const [debounced, setDebounced] = useState(content);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(content), debounceMs);
+    return () => clearTimeout(t);
+  }, [content, debounceMs]);
+
+  // 仅内容 / contentType 变化时重建文档；主题/字号通过 JS 调用即时生效，不重载 iframe
+  const srcDoc = useMemo(() => buildSrcDoc(debounced, contentType), [debounced, contentType]);
 
   // 模拟 App 行为：调用文档暴露的全局函数同步主题、字号、行距
   const applySettings = useCallback(() => {
@@ -133,27 +138,15 @@ export default function MobilePreviewModal({
     }
   }, [theme, fontScale, lineHeight]);
 
-  // 设置变化或弹窗打开时重新下发（iframe 已加载的情况下）
+  // 设置变化时重新下发（iframe 已加载的情况下）
   useEffect(() => {
-    if (open) applySettings();
-  }, [open, applySettings]);
+    applySettings();
+  }, [applySettings]);
 
   const darkStage = theme === "dark";
 
   return (
-    <Modal
-      title={
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <MobileOutlined />
-          <span>{title || "手机预览"}</span>
-        </div>
-      }
-      open={open}
-      onCancel={onClose}
-      footer={null}
-      width={Math.max(520, device.width + 120)}
-      styles={{ body: { padding: "12px 0 20px" } }}
-    >
+    <>
       {/* 工具栏：机型 / 主题 / 字号 / 行距 */}
       <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
         <Space size={[12, 10]} wrap style={{ justifyContent: "center" }}>
@@ -260,6 +253,38 @@ export default function MobilePreviewModal({
           />
         </div>
       </div>
+    </>
+  );
+}
+
+export default function MobilePreviewModal({
+  open,
+  onClose,
+  title,
+  content,
+  contentType = "html",
+}: {
+  open: boolean;
+  onClose: () => void;
+  title?: string;
+  content: string;
+  contentType?: string;
+}) {
+  return (
+    <Modal
+      title={
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <MobileOutlined />
+          <span>{title || "手机预览"}</span>
+        </div>
+      }
+      open={open}
+      onCancel={onClose}
+      footer={null}
+      width={600}
+      styles={{ body: { padding: "12px 0 20px" } }}
+    >
+      <MobilePreviewStage content={content} contentType={contentType} />
     </Modal>
   );
 }
