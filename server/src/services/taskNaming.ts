@@ -13,10 +13,6 @@ export function inferTaskTypeFromName(taskName: string): TaskType | null {
   return "client_task";
 }
 
-export function isValidTaskName(taskName: string): boolean {
-  return inferTaskTypeFromName(taskName) != null;
-}
-
 export function taskNameRuleText(): string {
   return "task_name 命名必须是 server.name 或 client.name";
 }

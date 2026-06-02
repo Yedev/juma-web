@@ -298,56 +298,6 @@ export async function getThinkingLattice(userId: number, requestedSpaceId?: stri
   };
 }
 
-async function fetchLatticeDataById(latticeId: string) {
-  const lattice = await prisma.drDailyPickLattice.findUnique({ where: { latticeId } });
-  if (!lattice) return null;
-
-  const collection = await prisma.drSpaceCollection.findUnique({ where: { collectionId: lattice.collectionId } });
-  if (!collection) return null;
-
-  const collectionArticles = await prisma.drSpaceCollectionArticle.findMany({
-    where: { collectionId: lattice.collectionId },
-    orderBy: { sortOrder: "asc" },
-  });
-
-  const articleIds = collectionArticles.map((ca) => ca.articleId);
-  const articles =
-    articleIds.length > 0 ? await prisma.drArticle.findMany({ where: { articleId: { in: articleIds } } }) : [];
-  const articleMap = new Map(articles.map((a) => [a.articleId, a]));
-  const nodeNames = parseNodeNames(lattice.nodeNames);
-  const fallbackNodeNames = buildDefaultNodeNames(
-    collectionArticles
-      .filter((ca) => articleMap.has(ca.articleId))
-      .map((ca) => articleMap.get(ca.articleId)?.title || ca.articleId)
-  );
-
-  return {
-    latticeId: lattice.latticeId,
-    enabled: lattice.enabled,
-    createdAt: lattice.createdAt,
-    collectionId: collection.collectionId,
-    collectionName: collection.name,
-    description: collection.description,
-    coverUrl: collection.coverUrl,
-    weeklyTopic: lattice.weeklyTopic ?? "",
-    recommendation: lattice.recommendation,
-    articles: collectionArticles
-      .filter((ca) => articleMap.has(ca.articleId))
-      .map((ca, index) => {
-        const a = articleMap.get(ca.articleId)!;
-        return {
-          articleId: a.articleId,
-          title: a.title,
-          nodeName: nodeNames[index] || fallbackNodeNames[index] || buildDefaultNodeName(a.title),
-          excerpt: a.summary,
-          coverUrl: a.coverUrl,
-          author: a.author,
-          sortOrder: ca.sortOrder,
-        };
-      }),
-  };
-}
-
 export async function getThinkingLatticeHistory(
   userId: number,
   requestedSpaceId: string | undefined,
