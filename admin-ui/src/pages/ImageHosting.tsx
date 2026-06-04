@@ -70,16 +70,27 @@ export default function ImageHosting() {
     action: `${BASE_URL}/api/admin/upload/image`,
     headers: { Authorization: `Bearer ${localStorage.getItem("juma_token") || ""}` },
     accept: "image/*",
+    multiple: true,
     showUploadList: false,
     beforeUpload: () => { setUploading(true); return true; },
     onChange(info) {
+      const stillUploading = info.fileList.some((f) => f.status === "uploading");
+      setUploading(stillUploading);
+
       if (info.file.status === "done") {
-        setUploading(false);
-        message.success("上传成功");
-        fetchImages();
+        message.success(`${info.file.name} 上传成功`);
       } else if (info.file.status === "error") {
-        setUploading(false);
-        message.error(info.file.response?.message || "上传失败");
+        // 优先取后端返回的失败原因，其次取请求层错误（如网络/超时）
+        const reason =
+          info.file.response?.message ||
+          (info.file.error as Error | undefined)?.message ||
+          "未知原因";
+        message.error(`${info.file.name} 上传失败：${reason}`);
+      }
+
+      // 全部文件处理完毕后再刷新列表，避免多张图逐张刷新
+      if (!stillUploading) {
+        fetchImages();
       }
     },
   };
