@@ -1,4 +1,4 @@
-import { Router, Response } from "express";
+import { Router, Response, NextFunction } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authMiddleware, AuthRequest } from "../middleware/auth";
 import multer from "multer";
@@ -2503,6 +2503,25 @@ const upload = multer({
   },
 });
 
+/**
+ * 包装 multer.single，把上传阶段（体积超限、格式不符等）的错误转成明确的 JSON 提示，
+ * 否则会落到全局错误处理中间件，前端只能拿到含糊的失败信息。
+ */
+function uploadSingleImage(req: AuthRequest, res: Response, next: NextFunction): void {
+  upload.single("file")(req, res, (err: unknown) => {
+    if (!err) { next(); return; }
+    let message = "上传失败";
+    if (err instanceof multer.MulterError) {
+      message = err.code === "LIMIT_FILE_SIZE"
+        ? "图片体积超过 20MB 上限"
+        : err.message;
+    } else if (err instanceof Error) {
+      message = err.message;
+    }
+    res.status(400).json({ code: 400, message });
+  });
+}
+
 const MIME_MAP: Record<string, string> = {
   ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
   ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
@@ -2555,9 +2574,9 @@ async function compressImage(
   }
 }
 
-router.post("/upload/image", upload.single("file"), async (req: AuthRequest, res: Response): Promise<void> => {
+router.post("/upload/image", uploadSingleImage, async (req: AuthRequest, res: Response): Promise<void> => {
   if (!req.file) { res.status(400).json({ code: 400, message: "未收到文件" }); return; }
-  if (!isOssAvailable(IMG_BUCKET)) { res.status(500).json({ code: 500, message: "OSS 未配置" }); return; }
+  if (!isOssAvailable(IMG_BUCKET)) { res.status(500).json({ code: 500, message: "OSS 未配置，无法上传" }); return; }
 
   const originalExt = path.extname(req.file.originalname).toLowerCase();
   const originalSize = req.file.size;
@@ -2582,7 +2601,8 @@ router.post("/upload/image", upload.single("file"), async (req: AuthRequest, res
     });
   } catch (err) {
     console.error("OSS upload error:", err);
-    res.status(500).json({ code: 500, message: "上传失败" });
+    const detail = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ code: 500, message: `上传失败：${detail}` });
   }
 });
 
