@@ -151,16 +151,6 @@ function getTodayIsoDate(): string {
   return new Date().toISOString().split("T")[0];
 }
 
-function parseNodeNames(value: string): string[] {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is string => typeof item === "string").map((item) => item.trim());
-  } catch {
-    return [];
-  }
-}
-
 function buildDefaultNodeName(title: string): string {
   const source = title.split(/[：:|｜\-]/)[0]?.trim() || title.trim();
   const compact = source.replace(/[，。！？；、,.!?;()\[\]（）【】"'"]/g, "").replace(/\s+/g, "");
@@ -175,6 +165,36 @@ function buildDefaultNodeNames(titles: string[]): string[] {
     used.set(base, count + 1);
     return count === 0 ? base : `${base}${count + 1}`;
   });
+}
+
+/**
+ * 将存储的 nodeNames 解析为「文章 ID → 节点名」的映射。
+ * 兼容两种存储格式：
+ *  - 新格式：对象 { [articleId]: nodeName }，节点名与文章绑定，合集文章重新排序后仍能正确对应；
+ *  - 旧格式：字符串数组 [nodeName, ...]，按当前合集顺序的下标回填到对应文章。
+ */
+function resolveNodeNameMap(value: string, orderedArticleIds: string[]): Map<string, string> {
+  const map = new Map<string, string>();
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (Array.isArray(parsed)) {
+      parsed.forEach((item, index) => {
+        const articleId = orderedArticleIds[index];
+        if (articleId && typeof item === "string" && item.trim()) {
+          map.set(articleId, item.trim());
+        }
+      });
+    } else if (parsed && typeof parsed === "object") {
+      for (const [articleId, name] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof name === "string" && name.trim()) {
+          map.set(articleId, name.trim());
+        }
+      }
+    }
+  } catch {
+    /* ignore malformed json */
+  }
+  return map;
 }
 
 function getCurrentWeekStart(): Date {
@@ -348,11 +368,11 @@ export async function getThinkingLatticeHistory(
             })
           : [];
       const articleMap = new Map(articles.map((a) => [a.articleId, a]));
-      const nodeNames = parseNodeNames(l.nodeNames);
+      const presentArticles = collectionArticles.filter((ca) => articleMap.has(ca.articleId));
+      const orderedArticleIds = presentArticles.map((ca) => ca.articleId);
+      const nodeNameMap = resolveNodeNameMap(l.nodeNames, orderedArticleIds);
       const fallbackNodeNames = buildDefaultNodeNames(
-        collectionArticles
-          .filter((ca) => articleMap.has(ca.articleId))
-          .map((ca) => articleMap.get(ca.articleId)?.title || ca.articleId)
+        orderedArticleIds.map((id) => articleMap.get(id)?.title || id)
       );
 
       return {
@@ -369,20 +389,18 @@ export async function getThinkingLatticeHistory(
               coverUrl: collection.coverUrl,
             }
           : null,
-        articles: collectionArticles
-          .filter((ca) => articleMap.has(ca.articleId))
-          .map((ca, index) => {
-            const a = articleMap.get(ca.articleId)!;
-            return {
-              articleId: a.articleId,
-              title: a.title,
-              nodeName: nodeNames[index] || fallbackNodeNames[index] || buildDefaultNodeName(a.title),
-              excerpt: a.summary,
-              coverUrl: a.coverUrl,
-              author: a.author,
-              sortOrder: ca.sortOrder,
-            };
-          }),
+        articles: presentArticles.map((ca, index) => {
+          const a = articleMap.get(ca.articleId)!;
+          return {
+            articleId: a.articleId,
+            title: a.title,
+            nodeName: nodeNameMap.get(a.articleId) || fallbackNodeNames[index] || buildDefaultNodeName(a.title),
+            excerpt: a.summary,
+            coverUrl: a.coverUrl,
+            author: a.author,
+            sortOrder: ca.sortOrder,
+          };
+        }),
       };
     })
   );
@@ -406,11 +424,11 @@ async function fetchLatticeData(spaceId: string) {
   const articles =
     articleIds.length > 0 ? await prisma.drArticle.findMany({ where: { articleId: { in: articleIds } } }) : [];
   const articleMap = new Map(articles.map((a) => [a.articleId, a]));
-  const nodeNames = parseNodeNames(lattice.nodeNames);
+  const presentArticles = collectionArticles.filter((ca) => articleMap.has(ca.articleId));
+  const orderedArticleIds = presentArticles.map((ca) => ca.articleId);
+  const nodeNameMap = resolveNodeNameMap(lattice.nodeNames, orderedArticleIds);
   const fallbackNodeNames = buildDefaultNodeNames(
-    collectionArticles
-      .filter((ca) => articleMap.has(ca.articleId))
-      .map((ca) => articleMap.get(ca.articleId)?.title || ca.articleId)
+    orderedArticleIds.map((id) => articleMap.get(id)?.title || id)
   );
 
   return {
@@ -421,19 +439,17 @@ async function fetchLatticeData(spaceId: string) {
     coverUrl: collection.coverUrl,
     weeklyTopic: lattice.weeklyTopic ?? "",
     recommendation: lattice.recommendation,
-    articles: collectionArticles
-      .filter((ca) => articleMap.has(ca.articleId))
-      .map((ca, index) => {
-        const a = articleMap.get(ca.articleId)!;
-        return {
-          articleId: a.articleId,
-          title: a.title,
-          nodeName: nodeNames[index] || fallbackNodeNames[index] || buildDefaultNodeName(a.title),
-          excerpt: a.summary,
-          coverUrl: a.coverUrl,
-          author: a.author,
-          sortOrder: ca.sortOrder,
-        };
-      }),
+    articles: presentArticles.map((ca, index) => {
+      const a = articleMap.get(ca.articleId)!;
+      return {
+        articleId: a.articleId,
+        title: a.title,
+        nodeName: nodeNameMap.get(a.articleId) || fallbackNodeNames[index] || buildDefaultNodeName(a.title),
+        excerpt: a.summary,
+        coverUrl: a.coverUrl,
+        author: a.author,
+        sortOrder: ca.sortOrder,
+      };
+    }),
   };
 }

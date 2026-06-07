@@ -89,6 +89,94 @@ function buildDefaultNodeNames(titles: string[]): string[] {
   });
 }
 
+/**
+ * 解析已存储的 nodeNames 为「文章 ID → 节点名」映射。
+ * 兼容对象格式（与文章绑定）与旧的字符串数组格式（按下标对应当前合集顺序）。
+ */
+function parseStoredNodeNameMap(value: string, orderedArticleIds: string[]): Map<string, string> {
+  const map = new Map<string, string>();
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (Array.isArray(parsed)) {
+      parsed.forEach((item, index) => {
+        const articleId = orderedArticleIds[index];
+        if (articleId && typeof item === "string" && item.trim()) {
+          map.set(articleId, item.trim());
+        }
+      });
+    } else if (parsed && typeof parsed === "object") {
+      for (const [articleId, name] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof name === "string" && name.trim()) {
+          map.set(articleId, name.trim());
+        }
+      }
+    }
+  } catch {
+    /* ignore malformed json */
+  }
+  return map;
+}
+
+/**
+ * 根据输入（数组或对象）+ 已有节点名 + 合集文章，构建「文章 ID → 节点名」的存储对象。
+ * 优先级：本次输入 > 已有节点名 > 根据文章标题自动生成的默认名。
+ * 节点名与文章绑定，因此合集文章重新排序后节点名仍能正确跟随文章。
+ */
+function buildNodeNameObject(
+  inputNodeNames: unknown,
+  orderedArticles: Array<{ articleId: string; title: string }>,
+  existingStored?: string
+):
+  | { ok: true; value: Record<string, string> }
+  | { ok: false; message: string } {
+  const orderedIds = orderedArticles.map((a) => a.articleId);
+  const map = new Map<string, string>();
+
+  // 1. 以已有节点名为基础（保留用户此前的自定义）
+  if (existingStored) {
+    for (const [articleId, name] of parseStoredNodeNameMap(existingStored, orderedIds)) {
+      map.set(articleId, name);
+    }
+  }
+
+  // 2. 应用本次输入（覆盖）
+  if (Array.isArray(inputNodeNames)) {
+    const arr = normalizeNodeNames(inputNodeNames);
+    if (arr.length > 0) {
+      if (orderedIds.length > 0 && arr.length !== orderedIds.length) {
+        return { ok: false, message: "节点名数量必须与合集文章数量一致" };
+      }
+      arr.forEach((name, index) => {
+        if (orderedIds[index]) map.set(orderedIds[index], name);
+      });
+    }
+  } else if (inputNodeNames && typeof inputNodeNames === "object") {
+    for (const [articleId, name] of Object.entries(inputNodeNames as Record<string, unknown>)) {
+      if (typeof name === "string" && name.trim()) {
+        map.set(articleId, name.trim());
+      }
+    }
+  }
+
+  // 3. 为仍缺失节点名的文章回填默认名
+  const defaults = buildDefaultNodeNames(orderedArticles.map((a) => a.title || a.articleId));
+  orderedArticles.forEach((a, index) => {
+    if (!map.get(a.articleId)) map.set(a.articleId, defaults[index]);
+  });
+
+  // 4. 仅保留属于当前合集的文章，并校验节点名唯一
+  const value: Record<string, string> = {};
+  for (const id of orderedIds) {
+    const name = map.get(id);
+    if (name) value[id] = name;
+  }
+  const names = Object.values(value);
+  if (names.length !== new Set(names).size) {
+    return { ok: false, message: "同一个格栅中的节点名不能重复" };
+  }
+  return { ok: true, value };
+}
+
 function normalizeTaskList(value: unknown): Array<{ name: string; version?: string; description?: string }> {
   if (!Array.isArray(value)) return [];
   const dedupe = new Map<string, { name: string; version?: string; description?: string }>();
@@ -2153,7 +2241,13 @@ router.get("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, re
       const nodeNames = (() => {
         try {
           const parsed = JSON.parse(l.nodeNames) as unknown;
-          return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+          if (Array.isArray(parsed)) {
+            return parsed.filter((item): item is string => typeof item === "string");
+          }
+          if (parsed && typeof parsed === "object") {
+            return parsed as Record<string, string>;
+          }
+          return [];
         } catch {
           return [];
         }
@@ -2218,17 +2312,13 @@ router.post("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, r
         })
       : [];
     const articleMap = new Map(articles.map((item) => [item.articleId, item]));
-    const normalizedNodeNames = normalizeNodeNames(nodeNames);
-    const resolvedNodeNames =
-      normalizedNodeNames.length > 0
-        ? normalizedNodeNames
-        : buildDefaultNodeNames(collectionArticles.map((item) => articleMap.get(item.articleId)?.title || item.articleId));
-    if (collectionArticles.length > 0 && resolvedNodeNames.length !== collectionArticles.length) {
-      res.status(400).json({ code: 400, message: "节点名数量必须与合集文章数量一致" });
-      return;
-    }
-    if (resolvedNodeNames.length !== new Set(resolvedNodeNames).size) {
-      res.status(400).json({ code: 400, message: "同一个格栅中的节点名不能重复" });
+    const orderedArticles = collectionArticles.map((item) => ({
+      articleId: item.articleId,
+      title: articleMap.get(item.articleId)?.title || item.articleId,
+    }));
+    const built = buildNodeNameObject(nodeNames, orderedArticles);
+    if (!built.ok) {
+      res.status(400).json({ code: 400, message: built.message });
       return;
     }
 
@@ -2244,7 +2334,7 @@ router.post("/dr/spaces/:spaceId/daily-pick-lattice", async (req: AuthRequest, r
         spaceId,
         collectionId,
         weeklyTopic: weeklyTopic.trim(),
-        nodeNames: JSON.stringify(resolvedNodeNames),
+        nodeNames: JSON.stringify(built.value),
         recommendation: recommendation?.trim() ?? "",
         enabled: true,
       },
@@ -2314,20 +2404,18 @@ router.put("/dr/daily-pick-lattice/:latticeId", async (req: AuthRequest, res: Re
           })
         : [];
       const articleMap = new Map(articles.map((item) => [item.articleId, item]));
-      const normalizedNodeNames = normalizeNodeNames(nodeNames);
-      const resolvedNodeNames =
-        normalizedNodeNames.length > 0
-          ? normalizedNodeNames
-          : buildDefaultNodeNames(collectionArticles.map((item) => articleMap.get(item.articleId)?.title || item.articleId));
-      if (collectionArticles.length > 0 && resolvedNodeNames.length !== collectionArticles.length) {
-        res.status(400).json({ code: 400, message: "节点名数量必须与合集文章数量一致" });
+      const orderedArticles = collectionArticles.map((item) => ({
+        articleId: item.articleId,
+        title: articleMap.get(item.articleId)?.title || item.articleId,
+      }));
+      // 合集未变更时，保留已有的与文章绑定的节点名
+      const existingStored = updateData.collectionId === undefined ? existing.nodeNames : undefined;
+      const built = buildNodeNameObject(nodeNames, orderedArticles, existingStored);
+      if (!built.ok) {
+        res.status(400).json({ code: 400, message: built.message });
         return;
       }
-      if (resolvedNodeNames.length !== new Set(resolvedNodeNames).size) {
-        res.status(400).json({ code: 400, message: "同一个格栅中的节点名不能重复" });
-        return;
-      }
-      updateData.nodeNames = JSON.stringify(resolvedNodeNames);
+      updateData.nodeNames = JSON.stringify(built.value);
     }
 
     if (Object.keys(updateData).length === 0) {
@@ -2383,6 +2471,136 @@ router.delete("/dr/daily-pick-lattice/:latticeId", async (req: AuthRequest, res:
     res.json({ code: 200, message: "已删除" });
   } catch (error) {
     console.error("Admin delete daily pick lattice error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 构建某条思维格栅的节点列表（按合集当前文章顺序，节点名与文章绑定）
+async function buildLatticeNodeList(
+  lattice: { latticeId: string; collectionId: string; nodeNames: string }
+): Promise<Array<{ articleId: string; nodeName: string; title: string; coverUrl: string; author: string; sortOrder: number }>> {
+  const collectionArticles = await prisma.drSpaceCollectionArticle.findMany({
+    where: { collectionId: lattice.collectionId },
+    orderBy: { sortOrder: "asc" },
+  });
+  const articleIds = collectionArticles.map((ca) => ca.articleId);
+  const articles = articleIds.length > 0
+    ? await prisma.drArticle.findMany({
+        where: { articleId: { in: articleIds } },
+        select: { articleId: true, title: true, coverUrl: true, author: true },
+      })
+    : [];
+  const articleMap = new Map(articles.map((a) => [a.articleId, a]));
+  const presentArticles = collectionArticles.filter((ca) => articleMap.has(ca.articleId));
+  const orderedArticleIds = presentArticles.map((ca) => ca.articleId);
+  const nodeNameMap = parseStoredNodeNameMap(lattice.nodeNames, orderedArticleIds);
+  const defaults = buildDefaultNodeNames(orderedArticleIds.map((id) => articleMap.get(id)?.title || id));
+
+  return presentArticles.map((ca, index) => {
+    const a = articleMap.get(ca.articleId)!;
+    return {
+      articleId: a.articleId,
+      nodeName: nodeNameMap.get(a.articleId) || defaults[index] || buildDefaultNodeName(a.title),
+      title: a.title,
+      coverUrl: a.coverUrl,
+      author: a.author,
+      sortOrder: ca.sortOrder,
+    };
+  });
+}
+
+// 获取某个空间当前生效思维格栅的节点列表（节点名 + 对应文章，按合集顺序）
+router.get("/dr/spaces/:spaceId/daily-pick-lattice/nodes", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const spaceId = req.params.spaceId as string;
+    const lattice = await prisma.drDailyPickLattice.findFirst({ where: { spaceId, enabled: true } });
+    if (!lattice) {
+      res.json({ code: 200, message: "success", data: null });
+      return;
+    }
+    const nodes = await buildLatticeNodeList(lattice);
+    res.json({
+      code: 200,
+      message: "success",
+      data: { latticeId: lattice.latticeId, collectionId: lattice.collectionId, nodes },
+    });
+  } catch (error) {
+    console.error("Admin get daily pick lattice nodes error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 更新思维格栅的节点名（按文章绑定，支持只传部分文章）
+router.put("/dr/daily-pick-lattice/:latticeId/node-names", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const latticeId = req.params.latticeId as string;
+    const { nodeNames } = req.body as { nodeNames?: Record<string, string> | string[] };
+
+    const existing = await prisma.drDailyPickLattice.findUnique({ where: { latticeId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "思维格栅配置不存在" });
+      return;
+    }
+
+    const collectionArticles = await prisma.drSpaceCollectionArticle.findMany({
+      where: { collectionId: existing.collectionId },
+      orderBy: { sortOrder: "asc" },
+      select: { articleId: true },
+    });
+    const articles = collectionArticles.length > 0
+      ? await prisma.drArticle.findMany({
+          where: { articleId: { in: collectionArticles.map((item) => item.articleId) } },
+          select: { articleId: true, title: true },
+        })
+      : [];
+    const articleMap = new Map(articles.map((item) => [item.articleId, item]));
+    const orderedArticles = collectionArticles.map((item) => ({
+      articleId: item.articleId,
+      title: articleMap.get(item.articleId)?.title || item.articleId,
+    }));
+
+    const built = buildNodeNameObject(nodeNames, orderedArticles, existing.nodeNames);
+    if (!built.ok) {
+      res.status(400).json({ code: 400, message: built.message });
+      return;
+    }
+
+    const updated = await prisma.drDailyPickLattice.update({
+      where: { latticeId },
+      data: { nodeNames: JSON.stringify(built.value) },
+    });
+    const nodes = await buildLatticeNodeList(updated);
+    res.json({ code: 200, message: "节点名已更新", data: { latticeId, nodes } });
+  } catch (error) {
+    console.error("Admin update daily pick lattice node names error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
+// 启用/禁用思维格栅（启用时自动禁用同空间其他格栅）
+router.put("/dr/daily-pick-lattice/:latticeId/toggle", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const latticeId = req.params.latticeId as string;
+    const existing = await prisma.drDailyPickLattice.findUnique({ where: { latticeId } });
+    if (!existing) {
+      res.status(404).json({ code: 404, message: "思维格栅配置不存在" });
+      return;
+    }
+
+    const nextEnabled = !existing.enabled;
+    if (nextEnabled) {
+      await prisma.drDailyPickLattice.updateMany({
+        where: { spaceId: existing.spaceId, enabled: true },
+        data: { enabled: false },
+      });
+    }
+    const updated = await prisma.drDailyPickLattice.update({
+      where: { latticeId },
+      data: { enabled: nextEnabled },
+    });
+    res.json({ code: 200, message: nextEnabled ? "已启用" : "已禁用", data: updated });
+  } catch (error) {
+    console.error("Admin toggle daily pick lattice error:", error);
     res.status(500).json({ code: 500, message: "服务器内部错误" });
   }
 });
