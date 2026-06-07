@@ -148,7 +148,9 @@ interface EditorHighlight {
 
 interface LatticeConfig {
   latticeId: string; spaceId: string; collectionId: string;
-  weeklyTopic: string; recommendation: string; enabled: boolean; nodeNames: string[];
+  weeklyTopic: string; recommendation: string; enabled: boolean;
+  // 兼容两种存储格式：旧的位置数组 / 新的 { 文章ID: 节点名 } 对象
+  nodeNames: string[] | Record<string, string>;
   collection: { collectionId: string; name: string; description: string; coverUrl: string } | null;
   articleCount: number;
 }
@@ -193,6 +195,30 @@ function buildDefaultNodeNames(titles: string[]): string[] {
     used.set(base, count + 1);
     return count === 0 ? base : `${base}${count + 1}`;
   });
+}
+
+// 由已存储的节点名 + 合集文章构建「文章ID → 节点名」映射，缺失的文章用默认节点名回填。
+// 兼容旧的位置数组（按当前合集顺序回填）与新的对象格式（与文章绑定）。
+function seedNodeMap(
+  stored: string[] | Record<string, string> | undefined,
+  items: CollectionArticleItem[]
+): Record<string, string> {
+  const map: Record<string, string> = {};
+  if (Array.isArray(stored)) {
+    stored.forEach((name, i) => {
+      const id = items[i]?.articleId;
+      if (id && typeof name === "string" && name.trim()) map[id] = name.trim();
+    });
+  } else if (stored && typeof stored === "object") {
+    for (const [id, name] of Object.entries(stored)) {
+      if (typeof name === "string" && name.trim()) map[id] = name.trim();
+    }
+  }
+  const defaults = buildDefaultNodeNames(items.map((it) => it.article?.title || it.articleId));
+  items.forEach((it, i) => {
+    if (!map[it.articleId]) map[it.articleId] = defaults[i];
+  });
+  return map;
 }
 
 // ════════════════════════════════════════
@@ -737,7 +763,8 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
   const [latticeCollectionId, setLatticeCollectionId] = useState<string>("");
   const [latticeWeeklyTopic, setLatticeWeeklyTopic] = useState("");
   const [latticeRecommendation, setLatticeRecommendation] = useState("");
-  const [latticeNodeNames, setLatticeNodeNames] = useState("");
+  // 文章ID → 节点名，与文章绑定
+  const [latticeNodeMap, setLatticeNodeMap] = useState<Record<string, string>>({});
   const [latticeCollectionArticles, setLatticeCollectionArticles] = useState<CollectionArticleItem[]>([]);
   const [latticeArticlesLoading, setLatticeArticlesLoading] = useState(false);
   const [latticeSaving, setLatticeSaving] = useState(false);
@@ -843,23 +870,20 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
   };
 
   // ── 思维格栅 API ──
-  // overrideNodeNames=true 表示按合集顺序生成默认节点名（新建时或更换合集时使用）；
-  // 编辑模式下首次加载传 false，保留原有节点名
-  const loadLatticeCollectionArticles = async (collectionId: string, overrideNodeNames = true) => {
+  // 加载合集文章（按 sortOrder 顺序），返回文章列表供调用方生成 / 回填节点名
+  const loadLatticeCollectionArticles = async (collectionId: string): Promise<CollectionArticleItem[]> => {
     setLatticeArticlesLoading(true);
     try {
       const res = await adminClient.get(`/api/admin/dr/collections/${collectionId}/articles`);
       if (res.data.code === 200) {
         const items = (res.data.data ?? []) as CollectionArticleItem[];
         setLatticeCollectionArticles(items);
-        if (overrideNodeNames) {
-          setLatticeNodeNames(
-            buildDefaultNodeNames(items.map((item) => item.article?.title || item.articleId)).join("\n")
-          );
-        }
+        return items;
       }
+      return [];
     } catch {
       message.error("加载合集文章失败");
+      return [];
     } finally {
       setLatticeArticlesLoading(false);
     }
@@ -870,7 +894,7 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
     setLatticeCollectionId("");
     setLatticeWeeklyTopic("");
     setLatticeRecommendation("");
-    setLatticeNodeNames("");
+    setLatticeNodeMap({});
     setLatticeCollectionArticles([]);
     setLatticeModalOpen(true);
     try { const res = await adminClient.get(`/api/admin/dr/spaces/${spaceId}/collections`); if (res.data.code === 200) setCollectionOptions(res.data.data ?? []); }
@@ -882,37 +906,41 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
     setLatticeCollectionId(l.collectionId);
     setLatticeWeeklyTopic(l.weeklyTopic ?? "");
     setLatticeRecommendation(l.recommendation ?? "");
-    setLatticeNodeNames((l.nodeNames ?? []).join("\n"));
+    setLatticeNodeMap({});
     setLatticeCollectionArticles([]);
     setLatticeModalOpen(true);
     try {
-      const [colsRes] = await Promise.all([
+      const [colsRes, items] = await Promise.all([
         adminClient.get(`/api/admin/dr/spaces/${spaceId}/collections`),
-        loadLatticeCollectionArticles(l.collectionId, false),
+        loadLatticeCollectionArticles(l.collectionId),
       ]);
       if (colsRes.data.code === 200) setCollectionOptions(colsRes.data.data ?? []);
+      // 用已有节点名回填（与文章绑定），缺失的文章给默认名
+      setLatticeNodeMap(seedNodeMap(l.nodeNames, items));
     } catch { message.error("加载数据失败"); }
   };
 
   const handleChangeLatticeCollection = async (collectionId: string) => {
     setLatticeCollectionId(collectionId);
-    setLatticeNodeNames("");
+    setLatticeNodeMap({});
     setLatticeCollectionArticles([]);
-    await loadLatticeCollectionArticles(collectionId);
+    const items = await loadLatticeCollectionArticles(collectionId);
+    // 切换合集后按文章顺序生成默认节点名
+    setLatticeNodeMap(seedNodeMap(undefined, items));
   };
 
   const handleSaveLattice = async () => {
     if (!latticeCollectionId) { message.error("请选择合集"); return; }
     if (!latticeWeeklyTopic.trim()) { message.error("请填写本周议题"); return; }
-    const nodeNames = latticeNodeNames
-      .split("\n")
-      .map((item) => item.trim())
-      .filter(Boolean);
-    if (latticeCollectionArticles.length > 0 && nodeNames.length !== latticeCollectionArticles.length) {
-      message.error(`节点名数量需与合集文章数一致（当前 ${latticeCollectionArticles.length} 篇）`);
-      return;
+    // 节点名与文章绑定后按对象提交：{ 文章ID: 节点名 }
+    const nodeNames: Record<string, string> = {};
+    for (const item of latticeCollectionArticles) {
+      const name = (latticeNodeMap[item.articleId] ?? "").trim();
+      if (!name) { message.error("每篇文章的节点名都不能为空"); return; }
+      nodeNames[item.articleId] = name;
     }
-    if (nodeNames.length !== new Set(nodeNames).size) {
+    const values = Object.values(nodeNames);
+    if (values.length !== new Set(values).size) {
       message.error("同一个格栅中的节点名不能重复");
       return;
     }
@@ -1027,6 +1055,9 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
     if (latticeLoading) return <div style={{ display: "flex", justifyContent: "center", padding: 32 }}><Spin /></div>;
     if (!currentLattice) return <div style={{ color: "#999", textAlign: "center", padding: 24 }}>暂无当前思维格栅，点击右上角「新增格栅」</div>;
     const c = currentLattice.collection;
+    const nodeNameCount = Array.isArray(currentLattice.nodeNames)
+      ? currentLattice.nodeNames.length
+      : Object.keys(currentLattice.nodeNames ?? {}).length;
     return (
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
         {c?.coverUrl && <Avatar shape="square" size={64} src={c.coverUrl} />}
@@ -1036,9 +1067,9 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
           {currentLattice.weeklyTopic && <div style={{ color: "#1677ff", fontSize: 13, marginTop: 4, fontWeight: 500 }}>本周议题：{currentLattice.weeklyTopic}</div>}
           {currentLattice.recommendation && <div style={{ color: "#722ed1", fontSize: 13, marginTop: 4 }}>推荐语：{currentLattice.recommendation}</div>}
           <div style={{ color: "#999", fontSize: 12, marginTop: 4 }}>共 {currentLattice.articleCount} 篇资源</div>
-          {currentLattice.nodeNames.length > 0 && (
+          {nodeNameCount > 0 && (
             <div style={{ color: "#999", fontSize: 12, marginTop: 4 }}>
-              已配置 {currentLattice.nodeNames.length} 个节点名
+              已配置 {nodeNameCount} 个节点名
             </div>
           )}
           <div style={{ marginTop: 8 }}>
@@ -1159,18 +1190,51 @@ function DailyPicksTab({ spaceId }: { spaceId: string }) {
           </div>
           <div>
             <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>节点名列表 *</div>
-            <Input.TextArea
-              value={latticeNodeNames}
-              onChange={(e) => setLatticeNodeNames(e.target.value)}
-              placeholder="选中合集后会按文章顺序自动生成默认节点名；每行一个"
-              rows={6}
-            />
+            {latticeArticlesLoading ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 16 }}><Spin size="small" /></div>
+            ) : latticeCollectionArticles.length === 0 ? (
+              <div style={{ fontSize: 12, color: "#999", padding: "8px 0" }}>请先选择合集</div>
+            ) : (
+              <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid #f0f0f0", borderRadius: 6, padding: 8 }}>
+                {latticeCollectionArticles.map((item, idx) => (
+                  <div
+                    key={item.articleId}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 4px",
+                      borderBottom: idx < latticeCollectionArticles.length - 1 ? "1px solid #fafafa" : "none",
+                    }}
+                  >
+                    <span style={{ width: 18, textAlign: "center", color: "#bbb", fontSize: 12, flexShrink: 0 }}>{idx + 1}</span>
+                    <Avatar
+                      shape="square"
+                      size={32}
+                      src={item.article?.coverUrl || undefined}
+                      style={item.article?.coverUrl ? { flexShrink: 0 } : { background: "#f5f5f5", flexShrink: 0 }}
+                    />
+                    <Input
+                      size="small"
+                      style={{ width: 130, flexShrink: 0 }}
+                      value={latticeNodeMap[item.articleId] ?? ""}
+                      onChange={(e) => setLatticeNodeMap((prev) => ({ ...prev, [item.articleId]: e.target.value }))}
+                      placeholder="节点名"
+                    />
+                    <div
+                      style={{ flex: 1, minWidth: 0, fontSize: 13, color: "#333", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                      title={item.article?.title ?? item.articleId}
+                    >
+                      {item.article?.title ?? item.articleId}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             <div style={{ marginTop: 6, fontSize: 12, color: "#999" }}>
-              {latticeArticlesLoading
-                ? "正在读取合集文章..."
-                : latticeCollectionArticles.length > 0
-                  ? `当前合集共 ${latticeCollectionArticles.length} 篇文章，节点名会按当前顺序依次绑定`
-                  : "请先选择合集"}
+              {latticeCollectionArticles.length > 0
+                ? `共 ${latticeCollectionArticles.length} 篇文章，左侧为节点名、右侧为对应文章。顺序跟随合集文章顺序，节点名与文章绑定（在合集里调整文章顺序后，这里会同步跟随对应文章）。`
+                : "选择合集后可逐条编辑每篇文章的节点名"}
             </div>
           </div>
           <div><div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>一句话推荐（可选）</div><Input value={latticeRecommendation} onChange={(e) => setLatticeRecommendation(e.target.value)} placeholder="填写推荐" /></div>
