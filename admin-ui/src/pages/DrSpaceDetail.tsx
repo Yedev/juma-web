@@ -41,6 +41,7 @@ import {
   ReadOutlined,
   StarOutlined,
   HighlightOutlined,
+  HolderOutlined,
 } from "@ant-design/icons";
 import Editor from "@monaco-editor/react";
 import ReactMarkdown from "react-markdown";
@@ -305,6 +306,7 @@ function CollectionsTab({ spaceId }: { spaceId: string }) {
   const [selectedArticleId, setSelectedArticleId] = useState<string>("");
   const [loadingArticleOptions, setLoadingArticleOptions] = useState(false);
   const [addingArticle, setAddingArticle] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
 
   const fetchCollections = useCallback(async () => {
     setLoading(true);
@@ -379,6 +381,21 @@ function CollectionsTab({ spaceId }: { spaceId: string }) {
     catch { message.error("移除失败"); }
   };
 
+  const handleDropArticle = async (targetIndex: number) => {
+    if (dragIndex === null || dragIndex === targetIndex || !articlesCollection) { setDragIndex(null); return; }
+    const reordered = [...collectionArticles];
+    const [moved] = reordered.splice(dragIndex, 1);
+    reordered.splice(targetIndex, 0, moved);
+    const prev = collectionArticles;
+    setCollectionArticles(reordered);
+    setDragIndex(null);
+    try {
+      const res = await adminClient.put(`/api/admin/dr/collections/${articlesCollection.collectionId}/articles/reorder`, { articleIds: reordered.map((a) => a.articleId) });
+      if (res.data.code === 200) message.success("排序已更新");
+      else { setCollectionArticles(prev); message.error("排序更新失败"); }
+    } catch { setCollectionArticles(prev); message.error("排序更新失败"); }
+  };
+
   const columns = [
     { title: "封面", dataIndex: "coverUrl", key: "coverUrl", width: 60, align: "center" as const, render: (v: string) => v ? <img src={v} alt="cover" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 4 }} /> : <span style={{ color: "#ddd", fontSize: 11 }}>无</span> },
     { title: "集合名称", dataIndex: "name", key: "name", width: 160 },
@@ -399,6 +416,7 @@ function CollectionsTab({ spaceId }: { spaceId: string }) {
   ];
 
   const articleColumns = [
+    { title: "", key: "drag", width: 36, align: "center" as const, render: () => <HolderOutlined style={{ color: "#bbb", cursor: "grab" }} /> },
     { title: "封面", key: "coverUrl", width: 56, align: "center" as const, render: (_: unknown, item: CollectionArticleItem) => item.article?.coverUrl ? <img src={item.article.coverUrl} alt="cover" style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 4 }} /> : <span style={{ color: "#ddd", fontSize: 11 }}>无</span> },
     { title: "文章标题", key: "title", render: (_: unknown, item: CollectionArticleItem) => item.article?.title || item.articleId },
     { title: "作者", key: "author", width: 100, render: (_: unknown, item: CollectionArticleItem) => item.article?.author || <span style={{ color: "#ccc" }}>-</span> },
@@ -427,7 +445,25 @@ function CollectionsTab({ spaceId }: { spaceId: string }) {
       </Modal>
 
       <Drawer title={<Space><UnorderedListOutlined /><span>{articlesCollection?.name} 文章列表</span></Space>} open={articlesOpen} onClose={() => setArticlesOpen(false)} width={680} extra={<Button type="primary" icon={<PlusOutlined />} size="small" onClick={openAddArticle}>添加文章</Button>}>
-        {articlesLoading ? <div style={{ display: "flex", justifyContent: "center", padding: 48 }}><Spin /></div> : collectionArticles.length === 0 ? <div style={{ textAlign: "center", color: "#999", padding: 48 }}><UnorderedListOutlined style={{ fontSize: 32, marginBottom: 12, display: "block" }} />暂无文章</div> : <Table dataSource={collectionArticles} columns={articleColumns} rowKey="articleId" pagination={false} size="small" />}
+        {articlesLoading ? <div style={{ display: "flex", justifyContent: "center", padding: 48 }}><Spin /></div> : collectionArticles.length === 0 ? <div style={{ textAlign: "center", color: "#999", padding: 48 }}><UnorderedListOutlined style={{ fontSize: 32, marginBottom: 12, display: "block" }} />暂无文章</div> : (
+          <>
+            <div style={{ fontSize: 12, color: "#999", marginBottom: 8 }}>拖动行可调整顺序，思维格栅将按此顺序展示文章。</div>
+            <Table
+              dataSource={collectionArticles}
+              columns={articleColumns}
+              rowKey="articleId"
+              pagination={false}
+              size="small"
+              onRow={(_, index) => ({
+                draggable: true,
+                onDragStart: () => setDragIndex(index ?? null),
+                onDragOver: (e) => e.preventDefault(),
+                onDrop: () => handleDropArticle(index ?? 0),
+                style: { cursor: "move" },
+              })}
+            />
+          </>
+        )}
       </Drawer>
 
       <Modal title={`向「${articlesCollection?.name}」添加文章`} open={addArticleOpen} onCancel={() => setAddArticleOpen(false)} onOk={handleAddArticle} okText="添加" cancelText="取消" confirmLoading={addingArticle}>

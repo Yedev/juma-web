@@ -1898,6 +1898,38 @@ router.post("/dr/collections/:collectionId/articles", async (req: AuthRequest, r
   }
 });
 
+router.put("/dr/collections/:collectionId/articles/reorder", async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const collectionId = req.params.collectionId as string;
+    const { articleIds } = req.body as { articleIds?: string[] };
+
+    if (!Array.isArray(articleIds)) {
+      res.status(400).json({ code: 400, message: "articleIds 必须是数组" });
+      return;
+    }
+
+    const collection = await prisma.drSpaceCollection.findUnique({ where: { collectionId } });
+    if (!collection) {
+      res.status(404).json({ code: 404, message: "集合不存在" });
+      return;
+    }
+
+    await prisma.$transaction(
+      articleIds.map((articleId, index) =>
+        prisma.drSpaceCollectionArticle.updateMany({
+          where: { collectionId, articleId },
+          data: { sortOrder: index },
+        })
+      )
+    );
+
+    res.json({ code: 200, message: "排序已更新" });
+  } catch (error) {
+    console.error("Admin reorder collection articles error:", error);
+    res.status(500).json({ code: 500, message: "服务器内部错误" });
+  }
+});
+
 router.delete("/dr/collections/:collectionId/articles/:articleId", async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { collectionId, articleId } = req.params as { collectionId: string; articleId: string };
