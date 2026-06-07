@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { message, Table, Modal, Select, Spin, Button, Tag, Drawer, Space, Popconfirm, Input, Card, Switch, Avatar } from "antd";
+import { message, Table, Modal, Select, Spin, Button, Tag, Drawer, Space, Popconfirm, Input, Card, Switch, Avatar, Typography } from "antd";
 import { PlusOutlined, EditOutlined, DeleteOutlined, StarOutlined, HighlightOutlined, AppstoreOutlined } from "@ant-design/icons";
 import { adminClient } from "../api/client";
 
@@ -60,9 +60,19 @@ interface LatticeConfig {
   spaceId: string;
   collectionId: string;
   recommendation: string;
+  weeklyTopic: string;
   enabled: boolean;
   collection: { collectionId: string; name: string; description: string; coverUrl: string } | null;
   articleCount: number;
+}
+
+interface LatticeNode {
+  articleId: string;
+  nodeName: string;
+  title: string;
+  coverUrl: string;
+  author: string;
+  sortOrder: number;
 }
 
 export default function DrDailyPicksManagement() {
@@ -107,10 +117,12 @@ export default function DrDailyPicksManagement() {
   // 思维格栅
   const [lattice, setLattice] = useState<LatticeConfig | null>(null);
   const [latticeLoading, setLatticeLoading] = useState(false);
+  const [latticeNodes, setLatticeNodes] = useState<LatticeNode[]>([]);
   const [latticeModalOpen, setLatticeModalOpen] = useState(false);
   const [collectionOptions, setCollectionOptions] = useState<CollectionOption[]>([]);
   const [latticeCollectionId, setLatticeCollectionId] = useState<string>("");
   const [latticeRecommendation, setLatticeRecommendation] = useState("");
+  const [latticeWeeklyTopic, setLatticeWeeklyTopic] = useState("");
   const [latticeSaving, setLatticeSaving] = useState(false);
 
   const fetchSpaces = useCallback(async () => {
@@ -142,18 +154,38 @@ export default function DrDailyPicksManagement() {
     }
   }, []);
 
+  const fetchLatticeNodes = useCallback(async (spaceId?: string) => {
+    if (!spaceId) { setLatticeNodes([]); return; }
+    try {
+      const res = await adminClient.get(`/api/admin/dr/spaces/${spaceId}/daily-pick-lattice/nodes`);
+      if (res.data.code === 200) setLatticeNodes(res.data.data?.nodes ?? []);
+    } catch {
+      setLatticeNodes([]);
+    }
+  }, []);
+
   const fetchLattice = useCallback(async (spaceId?: string) => {
-    if (!spaceId) { setLattice(null); return; }
+    if (!spaceId) { setLattice(null); setLatticeNodes([]); return; }
     setLatticeLoading(true);
     try {
       const res = await adminClient.get(`/api/admin/dr/spaces/${spaceId}/daily-pick-lattice`);
-      if (res.data.code === 200) setLattice(res.data.data);
+      if (res.data.code === 200) {
+        const list = res.data.data;
+        const arr: LatticeConfig[] = Array.isArray(list) ? list : list ? [list] : [];
+        const current = arr.find((l) => l.enabled) ?? arr[0] ?? null;
+        setLattice(current);
+        if (current?.enabled) {
+          await fetchLatticeNodes(spaceId);
+        } else {
+          setLatticeNodes([]);
+        }
+      }
     } catch {
       message.error("加载思维格栅配置失败");
     } finally {
       setLatticeLoading(false);
     }
-  }, []);
+  }, [fetchLatticeNodes]);
 
   useEffect(() => {
     fetchSpaces();
@@ -271,6 +303,7 @@ export default function DrDailyPicksManagement() {
     if (!selectedSpaceId) return;
     setLatticeCollectionId(lattice?.collectionId ?? "");
     setLatticeRecommendation(lattice?.recommendation ?? "");
+    setLatticeWeeklyTopic(lattice?.weeklyTopic ?? "");
     setLatticeModalOpen(true);
     try {
       const res = await adminClient.get(`/api/admin/dr/spaces/${selectedSpaceId}/collections`);
@@ -285,12 +318,20 @@ export default function DrDailyPicksManagement() {
       message.error("请选择合集");
       return;
     }
+    if (!latticeWeeklyTopic.trim()) {
+      message.error("请填写本周议题");
+      return;
+    }
     setLatticeSaving(true);
     try {
-      const res = await adminClient.put(`/api/admin/dr/spaces/${selectedSpaceId}/daily-pick-lattice`, {
+      const payload = {
         collectionId: latticeCollectionId,
         recommendation: latticeRecommendation.trim(),
-      });
+        weeklyTopic: latticeWeeklyTopic.trim(),
+      };
+      const res = lattice
+        ? await adminClient.put(`/api/admin/dr/daily-pick-lattice/${lattice.latticeId}`, payload)
+        : await adminClient.post(`/api/admin/dr/spaces/${selectedSpaceId}/daily-pick-lattice`, payload);
       if (res.data.code === 200) {
         message.success("思维格栅已保存");
         setLatticeModalOpen(false);
@@ -306,9 +347,9 @@ export default function DrDailyPicksManagement() {
   };
 
   const handleToggleLattice = async () => {
-    if (!selectedSpaceId) return;
+    if (!lattice) return;
     try {
-      const res = await adminClient.put(`/api/admin/dr/spaces/${selectedSpaceId}/daily-pick-lattice/toggle`);
+      const res = await adminClient.put(`/api/admin/dr/daily-pick-lattice/${lattice.latticeId}/toggle`);
       if (res.data.code === 200) {
         message.success(res.data.message);
         fetchLattice(selectedSpaceId);
@@ -318,7 +359,31 @@ export default function DrDailyPicksManagement() {
     }
   };
 
+  const handleSaveNodeName = async (articleId: string, name: string) => {
+    if (!lattice) return;
+    const trimmed = name.trim();
+    if (!trimmed) {
+      message.error("节点名不能为空");
+      return;
+    }
+    try {
+      const res = await adminClient.put(`/api/admin/dr/daily-pick-lattice/${lattice.latticeId}/node-names`, {
+        nodeNames: { [articleId]: trimmed },
+      });
+      if (res.data.code === 200) {
+        message.success("节点名已更新");
+        setLatticeNodes(res.data.data?.nodes ?? []);
+      } else {
+        message.error(res.data.message || "更新失败");
+      }
+    } catch {
+      message.error("更新失败");
+    }
+  };
+
   const handleDeleteLattice = () => {
+    if (!lattice) return;
+    const latticeId = lattice.latticeId;
     Modal.confirm({
       title: "确认删除",
       content: "确定要删除思维格栅配置吗？",
@@ -327,10 +392,11 @@ export default function DrDailyPicksManagement() {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          const res = await adminClient.delete(`/api/admin/dr/spaces/${selectedSpaceId}/daily-pick-lattice`);
+          const res = await adminClient.delete(`/api/admin/dr/daily-pick-lattice/${latticeId}`);
           if (res.data.code === 200) {
             message.success("已删除");
             setLattice(null);
+            setLatticeNodes([]);
           }
         } catch {
           message.error("删除失败");
@@ -673,19 +739,87 @@ export default function DrDailyPicksManagement() {
                 暂未配置思维格栅，点击右上角「配置」关联一个合集
               </div>
             ) : (
-              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                {lattice.collection?.coverUrl && (
-                  <Avatar shape="square" size={56} src={lattice.collection.coverUrl} />
-                )}
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 500, fontSize: 14 }}>{lattice.collection?.name ?? lattice.collectionId}</div>
-                  {lattice.collection?.description && (
-                    <div style={{ color: "#666", fontSize: 12, marginTop: 2 }}>{lattice.collection.description}</div>
+              <div>
+                <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                  {lattice.collection?.coverUrl && (
+                    <Avatar shape="square" size={56} src={lattice.collection.coverUrl} />
                   )}
-                  {lattice.recommendation && (
-                    <div style={{ color: "#722ed1", fontSize: 12, marginTop: 4 }}>推荐语：{lattice.recommendation}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 500, fontSize: 14 }}>{lattice.collection?.name ?? lattice.collectionId}</div>
+                    {lattice.weeklyTopic && (
+                      <div style={{ color: "#666", fontSize: 12, marginTop: 2 }}>本周议题：{lattice.weeklyTopic}</div>
+                    )}
+                    {lattice.collection?.description && (
+                      <div style={{ color: "#999", fontSize: 12, marginTop: 2 }}>{lattice.collection.description}</div>
+                    )}
+                    {lattice.recommendation && (
+                      <div style={{ color: "#722ed1", fontSize: 12, marginTop: 4 }}>推荐语：{lattice.recommendation}</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 节点名列表：按合集文章顺序展示，节点名与文章绑定，可直接编辑 */}
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ fontSize: 12, color: "#999", marginBottom: 6 }}>
+                    节点名列表（共 {latticeNodes.length} 个，顺序跟随合集文章顺序，点击节点名右侧图标可直接修改）
+                  </div>
+                  {!lattice.enabled ? (
+                    <div style={{ color: "#999", fontSize: 12, padding: "8px 0" }}>
+                      当前格栅未启用，启用后可编辑节点名
+                    </div>
+                  ) : latticeNodes.length === 0 ? (
+                    <div style={{ color: "#999", fontSize: 12, padding: "8px 0" }}>该合集暂无文章</div>
+                  ) : (
+                    latticeNodes.map((node, idx) => (
+                      <div
+                        key={node.articleId}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "8px 10px",
+                          border: "1px solid #f0f0f0",
+                          borderRadius: 6,
+                          marginBottom: 6,
+                        }}
+                      >
+                        <span style={{ color: "#bbb", fontSize: 12, width: 18, textAlign: "center" }}>{idx + 1}</span>
+                        <Avatar
+                          shape="square"
+                          size={32}
+                          src={node.coverUrl || undefined}
+                          style={node.coverUrl ? undefined : { background: "#f5f5f5" }}
+                        />
+                        <div style={{ width: 130, flexShrink: 0 }}>
+                          <Typography.Text
+                            strong
+                            style={{ color: "#722ed1", fontSize: 13 }}
+                            editable={{
+                              tooltip: "点击编辑节点名",
+                              onChange: (val) => handleSaveNodeName(node.articleId, val),
+                            }}
+                          >
+                            {node.nodeName}
+                          </Typography.Text>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: 13,
+                              color: "#333",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                            title={node.title}
+                          >
+                            {node.title}
+                          </div>
+                          {node.author && <div style={{ fontSize: 11, color: "#999" }}>{node.author}</div>}
+                        </div>
+                      </div>
+                    ))
                   )}
-                  <div style={{ color: "#999", fontSize: 12, marginTop: 4 }}>共 {lattice.articleCount} 篇资源</div>
                 </div>
               </div>
             )}
@@ -871,6 +1005,14 @@ export default function DrDailyPicksManagement() {
               showSearch
               optionFilterProp="label"
               options={collectionOptions.map((c) => ({ value: c.collectionId, label: c.name }))}
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 4 }}>本周议题 *</div>
+            <Input
+              value={latticeWeeklyTopic}
+              onChange={(e) => setLatticeWeeklyTopic(e.target.value)}
+              placeholder="填写本周思维格栅的议题"
             />
           </div>
           <div>
