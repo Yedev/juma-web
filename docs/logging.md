@@ -253,8 +253,6 @@ VOLUME ["/app/data", "/app/logs"]
 # 准备目录
 mkdir -p /opt/juma-web/data
 mkdir -p /opt/juma-web/logs    # 日志目录
-mkdir -p /opt/juma-web/ssl
-mkdir -p /opt/juma-web/nginx
 
 # 启动容器
 docker run -d \

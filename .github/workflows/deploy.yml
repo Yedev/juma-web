@@ -51,51 +51,13 @@ jobs:
             # 拉取新镜像
             docker pull $REGISTRY/$NAMESPACE/$IMAGE:latest
 
-            # 创建 Docker 网络（已存在则跳过）
+            # 创建 Docker 网络（已存在则跳过；保留！juma-web 容器靠它与 juma-nginx 互通，
+            # nginx 反代已拆分到独立仓库 juma-nginx 管理）
             docker network create $NETWORK 2>/dev/null || true
 
             # 准备目录
             mkdir -p /opt/juma-web/data
             mkdir -p /opt/juma-web/logs
-            mkdir -p /opt/juma-web/ssl
-            mkdir -p /opt/juma-web/nginx
-
-            # 写入 SSL 证书
-            cat > /opt/juma-web/ssl/chdev.fun.pem << 'CERT'
-            ${{ secrets.TLS_CERT }}
-            CERT
-            cat > /opt/juma-web/ssl/chdev.fun.key << 'KEY'
-            ${{ secrets.TLS_KEY }}
-            KEY
-            chmod 600 /opt/juma-web/ssl/chdev.fun.key
-
-            # 写入 nginx 配置
-            cat > /opt/juma-web/nginx/default.conf << 'NGINX'
-            server {
-                listen 80;
-                server_name chdev.fun www.chdev.fun;
-                return 301 https://$host$request_uri;
-            }
-
-            server {
-                listen 443 ssl;
-                server_name chdev.fun www.chdev.fun;
-
-                ssl_certificate     /etc/nginx/ssl/chdev.fun.pem;
-                ssl_certificate_key /etc/nginx/ssl/chdev.fun.key;
-                ssl_protocols       TLSv1.2 TLSv1.3;
-
-                location / {
-                    proxy_pass http://juma-web:3001;
-                    proxy_set_header Host              $host;
-                    proxy_set_header X-Real-IP         $remote_addr;
-                    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-                    proxy_set_header X-Forwarded-Proto $scheme;
-                    proxy_set_header Upgrade           $http_upgrade;
-                    proxy_set_header Connection        "upgrade";
-                }
-            }
-            NGINX
 
             # ── 重启 juma-web 容器 ──
             docker stop juma-web 2>/dev/null || true
@@ -112,20 +74,6 @@ jobs:
               -v /opt/juma-web/data:/app/data \
               -v /opt/juma-web/logs:/app/logs \
               $REGISTRY/$NAMESPACE/$IMAGE:latest
-
-            # ── 重启 nginx 容器 ──
-            docker stop juma-nginx 2>/dev/null || true
-            docker rm juma-nginx 2>/dev/null || true
-
-            docker run -d \
-              --name juma-nginx \
-              --restart always \
-              --network $NETWORK \
-              -p 80:80 \
-              -p 443:443 \
-              -v /opt/juma-web/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro \
-              -v /opt/juma-web/ssl:/etc/nginx/ssl:ro \
-              nginx:alpine
 
             # 清理旧镜像
             docker image prune -f
