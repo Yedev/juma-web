@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 env:
   REGISTRY: crpi-pcnycfgdwvbfz2xa.cn-chengdu.personal.cr.aliyuncs.com
